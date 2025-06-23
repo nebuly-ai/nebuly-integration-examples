@@ -36,6 +36,10 @@ BASE_E_SKUS = [
     "c7df2760-2c81-4ef7-b578-a93e6bd394e2",  # Microsoft 365 E5
 ]
 
+# Date range filtering (ISO 8601 format: "2024-01-01T00:00:00Z")
+START_DATE = os.getenv("START_DATE") or ""
+END_DATE   = os.getenv("END_DATE") or ""
+
 NEBULY_API_KEY   = os.getenv("NEBULY_API_KEY") or ""
 NEBULY_ENDPOINT  = os.getenv("NEBULY_ENDPOINT") or "https://backend.nebuly.com/event-ingestion/api/v2/events/trace_interaction"  # use backend.eu.nebuly.com if needed
 
@@ -97,7 +101,7 @@ async def fetch_all_users(select: str = "id,displayName,mail,assignedLicenses") 
     return filtered_users
 
 
-async def fetch_interactions_for_user(user_id: str) -> List[Dict[str, Any]]:
+async def fetch_interactions_for_user(user_id: str, start_date: str = "", end_date: str = "") -> List[Dict[str, Any]]:
     """
     Downloads *all* Copilot interactions for a user via direct HTTP client.
     """
@@ -116,7 +120,20 @@ async def fetch_interactions_for_user(user_id: str) -> List[Dict[str, Any]]:
             "Authorization": f"Bearer {token.token}",
             "Accept": "application/json"
         }
-        params = {"$top": BATCH_TOP}
+        params: Dict[str, Any] = {
+            "$top": BATCH_TOP
+        }
+        
+        # Add date filtering if provided
+        if start_date or end_date:
+            filter_parts = []
+            if start_date:
+                filter_parts.append(f"createdDateTime ge {start_date}")
+            if end_date:
+                filter_parts.append(f"createdDateTime le {end_date}")
+            if filter_parts:
+                params["$filter"] = " and ".join(filter_parts)
+        
         base_url = f"https://graph.microsoft.com/beta/copilot/users/{user_id}/interactionHistory/getAllEnterpriseInteractions"
 
         response = await http_client.get(base_url, params=params, headers=headers)
@@ -230,7 +247,11 @@ async def send_to_nebuly(prompt: Dict[str, Any], response: Dict[str, Any], user_
 # --------------------------------------------------
 async def main() -> None:
     users = await fetch_all_users()
-    print(f"➡  Found {len(users)} users in the tenant\n")
+    print(f"➡  Found {len(users)} users in the tenant")
+    
+    if START_DATE or END_DATE:
+        date_range = f"from {START_DATE or 'beginning'} to {END_DATE or 'now'}"
+        print(f"📅 Filtering interactions {date_range}")
 
     sem = asyncio.Semaphore(MAX_PAR)
 
@@ -242,7 +263,7 @@ async def main() -> None:
 
 
             try:
-                data = await fetch_interactions_for_user(uid)
+                data = await fetch_interactions_for_user(uid, START_DATE, END_DATE)
             except httpx.HTTPStatusError as e:
                 # Skip users that trigger 403 (no Copilot licence / or tenant not enabled)
                 if e.response.status_code == 403:
