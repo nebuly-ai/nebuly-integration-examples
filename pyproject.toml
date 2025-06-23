@@ -1,0 +1,39 @@
+[project]
+name = "microsoft-copilot"
+version = "0.1.0"
+description = "Nebuly integration examples for various platforms"
+authors = [
+    {name = "Nebuly Team"}
+]
+readme = "README.md"
+requires-python = ">=3.9,<4.0"
+dependencies = [
+    "azure-identity>=1.23.0",
+    "aiofiles>=24.1.0",
+    "msgraph-beta-sdk>=1.36.0",
+    "python-dotenv>=1.1.0,<2.0.0",
+    "httpx (>=0.28.1,<0.29.0)",
+]
+packages = [
+    { include = "microsoft_copilot" }
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.mypy.overrides]]
+module = "msgraph_beta.*"
+ignore_missing_imports = true
+
+[tool.poetry.group.dev.dependencies]
+types-aiofiles = "^24.1.0.20250606"
+
+[tool.poetry.dependencies]
+python = ">=3.9,<4.0"
+azure-identity = ">=1.23.0"
+aiofiles = ">=24.1.0"
+python-dotenv = "^1.1.0"
+msgraph-beta-sdk = "^1.36.0"
+
