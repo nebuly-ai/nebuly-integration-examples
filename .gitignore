@@ -4,3 +4,4 @@ CLAUDE.md
 AGENTS.md
 .pytest_cache/
 .venv/
+__pycache__/
