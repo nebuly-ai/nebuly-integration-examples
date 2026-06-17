@@ -63,12 +63,7 @@ def pair_cursor_ts(pair: MessagePair) -> datetime:
     return pair.assistant_message.created_at
 
 
-def pair_to_payload(
-    pair: MessagePair,
-    *,
-    anonymize: bool,
-    include_minimal_trace: bool,
-) -> dict[str, Any] | None:
+def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | None:
     user_input = extract_text_content(pair.user_message)
     if not user_input:
         return None
@@ -96,25 +91,18 @@ def pair_to_payload(
         "tags": tags,
     }
 
-    traces: list[dict[str, Any]] = []
-    if include_minimal_trace:
-        traces.append(
-            {
-                "type": "llm",
-                "model": str(model),
-                "messages": [{"role": "user", "content": user_input}],
-                "output": assistant_output,
-            }
-        )
-
     return {
         "interaction": interaction,
-        "traces": traces,
+        "traces": [],
         "user_feedback": [],
         "anonymize": anonymize,
     }
 
 
 def pairs_from_chat_response(response: ChatMessagesResponse) -> list[MessagePair]:
-    chat = ChatSummary.model_validate(response.model_dump(exclude={"chat_messages", "has_more", "first_id", "last_id"}))
+    chat = ChatSummary.model_validate(
+        response.model_dump(
+            exclude={"chat_messages", "has_more", "first_id", "last_id"}
+        )
+    )
     return build_message_pairs(response.chat_messages, chat)

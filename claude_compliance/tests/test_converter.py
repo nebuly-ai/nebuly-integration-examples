@@ -78,19 +78,9 @@ def test_payload_shape() -> None:
     pair = build_message_pairs(
         [_msg("u1", "user", "hello"), _msg("a1", "assistant", "hi")], chat
     )[0]
-    payload = pair_to_payload(pair, anonymize=False, include_minimal_trace=False)
+    payload = pair_to_payload(pair, anonymize=False)
     assert payload is not None
     assert payload["interaction"]["end_user"] == "user_01"
     assert payload["traces"] == []
     assert payload["user_feedback"] == []
 
-
-def test_minimal_trace_flag() -> None:
-    chat = _chat()
-    pair = build_message_pairs(
-        [_msg("u1", "user", "hello"), _msg("a1", "assistant", "hi")], chat
-    )[0]
-    payload = pair_to_payload(pair, anonymize=False, include_minimal_trace=True)
-    assert payload is not None
-    assert len(payload["traces"]) == 1
-    assert payload["traces"][0]["type"] == "llm"

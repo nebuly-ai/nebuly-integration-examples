@@ -30,7 +30,6 @@ poetry run python -m compliance_sync --from-date 2025-01-01
 | `NEBULY_ENDPOINT` | Override Nebuly v3 endpoint |
 | `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | Rate limit (default 600) |
 | `ANONYMIZE` | `true`/`false` (default `false`) |
-| `INCLUDE_MINIMAL_TRACE` | Add minimal LLM trace if v3 rejects empty `traces` |
 | `--from-date` | ISO backfill start |
 | `--to-date` | ISO end filter |
 | `--cache-dir` | Checkpoint directory (default `./.cache`) |

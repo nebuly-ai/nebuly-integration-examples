@@ -52,7 +52,9 @@ def run_sync(config: Config) -> SyncSummary:
 
     summary = SyncSummary()
 
-    with httpx.Client(base_url=config.compliance_base_url, timeout=60.0) as compliance_http:
+    with httpx.Client(
+        base_url=config.compliance_base_url, timeout=60.0
+    ) as compliance_http:
         compliance = ComplianceClient(
             compliance_http,
             config.compliance_api_key,
@@ -151,11 +153,7 @@ def _sync_user(
                     counts.skipped += 1
                     continue
 
-                payload = pair_to_payload(
-                    pair,
-                    anonymize=config.anonymize,
-                    include_minimal_trace=config.include_minimal_trace,
-                )
+                payload = pair_to_payload(pair, anonymize=config.anonymize)
                 if payload is None:
                     counts.skipped += 1
                     continue
@@ -190,7 +188,9 @@ def _sync_user(
             user_id,
             datetime_to_timestamp_str(checkpoint_watermark),
         )
-    elif counts.fetched > 0 or counts.sent > 0 or counts.skipped > 0 or counts.failed > 0:
+    elif (
+        counts.fetched > 0 or counts.sent > 0 or counts.skipped > 0 or counts.failed > 0
+    ):
         logger.info(
             "User %s: fetched=%d sent=%d skipped=%d failed=%d",
             user_id,

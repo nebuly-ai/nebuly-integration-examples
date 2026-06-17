@@ -42,7 +42,6 @@ class Config:
     organization_uuid: str
     compliance_max_requests_per_minute: int
     anonymize: bool
-    include_minimal_trace: bool
     from_date: datetime | None
     to_date: datetime | None
     cache_dir: Path
@@ -100,9 +99,6 @@ class Config:
                 os.environ.get("COMPLIANCE_MAX_REQUESTS_PER_MINUTE", "600")
             ),
             anonymize=_parse_bool(os.environ.get("ANONYMIZE", "false")),
-            include_minimal_trace=_parse_bool(
-                os.environ.get("INCLUDE_MINIMAL_TRACE", "false")
-            ),
             from_date=from_date,
             to_date=to_date,
             cache_dir=args.cache_dir,

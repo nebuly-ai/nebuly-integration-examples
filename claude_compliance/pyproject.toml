@@ -6,7 +6,7 @@ authors = ["Nebuly"]
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.12,<4"
 httpx = "^0.28.0"
 pydantic = "^2.0"
 python-dotenv = "^1.0.0"
