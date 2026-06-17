@@ -85,7 +85,9 @@ def run_sync(config: Config) -> SyncSummary:
                 summary.totals.sent += user_counts.sent
                 summary.totals.skipped += user_counts.skipped
                 summary.totals.failed += user_counts.failed
-                checkpoint.save()
+
+                if not config.dry_run:
+                    checkpoint.save()
 
     logger.info(
         "Sync complete: users=%d fetched=%d sent=%d skipped=%d failed=%d",
