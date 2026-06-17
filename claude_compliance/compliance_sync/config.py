@@ -47,6 +47,7 @@ class Config:
     to_date: datetime | None
     cache_dir: Path
     dry_run: bool
+    verbose: bool
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -56,6 +57,11 @@ class Config:
         parser.add_argument("--to-date", type=str, default=None, help="ISO end date filter")
         parser.add_argument("--cache-dir", type=Path, default=Path("./.cache"))
         parser.add_argument("--dry-run", action="store_true", help="Build payloads without POSTing")
+        parser.add_argument(
+            "--verbose",
+            action="store_true",
+            help="Enable debug logging (includes HTTP request traces)",
+        )
         args = parser.parse_args(argv)
 
         nebuly_api_key = os.environ.get("NEBULY_API_KEY")
@@ -101,4 +107,5 @@ class Config:
             to_date=to_date,
             cache_dir=args.cache_dir,
             dry_run=args.dry_run,
+            verbose=args.verbose,
         )

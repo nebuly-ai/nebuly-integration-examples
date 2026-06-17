@@ -34,11 +34,18 @@ class SyncSummary:
     totals: Counts = field(default_factory=Counts)
 
 
-def run_sync(config: Config) -> SyncSummary:
+def _configure_logging(*, verbose: bool) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx logs each HTTP request at INFO; keep those at DEBUG unless verbose.
+    logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
+
+
+def run_sync(config: Config) -> SyncSummary:
+    _configure_logging(verbose=config.verbose)
 
     checkpoint_path = config.cache_dir / "checkpoint.json"
     checkpoint = Checkpoint(checkpoint_path, config.organization_uuid)
@@ -176,12 +183,20 @@ def _sync_user(
         if after_id is None:
             break
 
-    logger.info(
-        "User %s: fetched=%d sent=%d skipped=%d failed=%d",
-        user_id,
-        counts.fetched,
-        counts.sent,
-        counts.skipped,
-        counts.failed,
-    )
+    checkpoint_watermark = checkpoint.updated_at_gte(user_id, None)
+    if counts.fetched == 0 and checkpoint_watermark is not None:
+        logger.debug(
+            "User %s: no new messages since checkpoint (%s)",
+            user_id,
+            datetime_to_timestamp_str(checkpoint_watermark),
+        )
+    elif counts.fetched > 0 or counts.sent > 0 or counts.skipped > 0 or counts.failed > 0:
+        logger.info(
+            "User %s: fetched=%d sent=%d skipped=%d failed=%d",
+            user_id,
+            counts.fetched,
+            counts.sent,
+            counts.skipped,
+            counts.failed,
+        )
     return counts

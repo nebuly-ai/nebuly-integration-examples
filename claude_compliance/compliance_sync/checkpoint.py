@@ -106,4 +106,3 @@ class Checkpoint:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise
-        logger.info("Checkpoint saved to %s", self._path)
