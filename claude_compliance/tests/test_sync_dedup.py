@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from compliance_sync.checkpoint import Checkpoint
-from compliance_sync.config import Config
+from compliance_sync.cache import SyncCache
+from compliance_sync.config import Config, timestamp_str_to_datetime
 from compliance_sync.models import (
     ChatMessage,
     ChatMessagesResponse,
@@ -80,6 +80,7 @@ class FakeComplianceClient:
     ) -> None:
         self._chats = chats
         self._messages_by_chat = messages_by_chat
+        self.message_fetch_count = 0
 
     def list_chats(
         self,
@@ -90,7 +91,14 @@ class FakeComplianceClient:
         after_id: str | None = None,
         limit: int = 100,
     ) -> PaginatedChatsResponse:
-        return PaginatedChatsResponse(data=list(self._chats), has_more=False)
+        chats = list(self._chats)
+        if updated_at_gte is not None:
+            gte = timestamp_str_to_datetime(updated_at_gte)
+            chats = [c for c in chats if c.updated_at >= gte]
+        if updated_at_lte is not None:
+            lte = timestamp_str_to_datetime(updated_at_lte)
+            chats = [c for c in chats if c.updated_at <= lte]
+        return PaginatedChatsResponse(data=chats, has_more=False)
 
     def list_chat_messages(
         self,
@@ -102,8 +110,16 @@ class FakeComplianceClient:
         order: str = "asc",
         limit: int = 1000,
     ) -> ChatMessagesResponse:
+        self.message_fetch_count += 1
         chat = next(c for c in self._chats if c.id == chat_id)
-        return _chat_messages_response(chat, self._messages_by_chat[chat_id])
+        messages = list(self._messages_by_chat[chat_id])
+        if created_at_gte is not None:
+            gte = timestamp_str_to_datetime(created_at_gte)
+            messages = [m for m in messages if m.created_at >= gte]
+        if created_at_lte is not None:
+            lte = timestamp_str_to_datetime(created_at_lte)
+            messages = [m for m in messages if m.created_at <= lte]
+        return _chat_messages_response(chat, messages)
 
 
 class FakeNebulyClient:
@@ -112,6 +128,24 @@ class FakeNebulyClient:
 
     def send_interaction(self, payload: dict[str, Any]) -> None:
         self.sent.append(payload)
+
+
+def _config(tmp_path: Path, *, from_date: datetime | None = None) -> Config:
+    return Config(
+        nebuly_api_key="key",
+        nebuly_endpoint="https://example.com/events",
+        compliance_api_key="key",
+        compliance_base_url="https://example.com",
+        organization_uuid="org_demo",
+        compliance_max_requests_per_minute=600,
+        anonymize=False,
+        from_date=from_date,
+        to_date=_ts(16),
+        cache_dir=tmp_path,
+        dry_run=False,
+        verbose=False,
+        safety_lag_minutes=5,
+    )
 
 
 def test_overlapping_chats_do_not_false_positive_skip(tmp_path: Path) -> None:
@@ -135,33 +169,167 @@ def test_overlapping_chats_do_not_false_positive_skip(tmp_path: Path) -> None:
 
     compliance = FakeComplianceClient([chat_a, chat_b], messages_by_chat)
     nebuly = FakeNebulyClient()
-    checkpoint = Checkpoint(tmp_path / "checkpoint.json", "org_demo")
-
-    config = Config(
-        nebuly_api_key="key",
-        nebuly_endpoint="https://example.com/events",
-        compliance_api_key="key",
-        compliance_base_url="https://example.com",
-        organization_uuid="org_demo",
-        compliance_max_requests_per_minute=600,
-        anonymize=False,
-        from_date=None,
-        to_date=None,
-        cache_dir=tmp_path,
-        dry_run=False,
-        verbose=False,
-    )
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path)
 
     counts = _sync_user(
         user_id="user_1",
         config=config,
         compliance=compliance,  # type: ignore[arg-type]
         nebuly=nebuly,  # type: ignore[arg-type]
-        checkpoint=checkpoint,
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
     )
 
     assert counts.fetched == 4
     assert counts.skipped == 0
+    assert counts.chats_processed == 2
+    assert counts.chats_skipped == 0
     assert counts.sent == 4
     assert counts.failed == 0
     assert len(nebuly.sent) == 4
+
+
+def test_second_run_with_no_changes_sends_and_fetches_nothing(
+    tmp_path: Path,
+) -> None:
+    chat = _chat_summary("chat_1", updated_at=_ts(10))
+    messages_by_chat = {
+        "chat_1": [
+            _message("u1", "user", _ts(9), "hello"),
+            _message("a1", "assistant", _ts(10), "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+
+    compliance.message_fetch_count = 0
+    nebuly.sent.clear()
+
+    counts = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts.sent == 0
+    assert counts.fetched == 0
+    assert counts.chats_processed == 0
+    assert counts.chats_skipped == 1
+    assert counts.skipped == 0
+    assert compliance.message_fetch_count == 0
+    assert len(nebuly.sent) == 0
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "completed"
+
+
+def test_updated_chat_sends_only_new_pair(tmp_path: Path) -> None:
+    chat_v1 = _chat_summary("chat_1", updated_at=_ts(10))
+    messages_v1 = {
+        "chat_1": [
+            _message("u1", "user", _ts(9), "hello"),
+            _message("a1", "assistant", _ts(10), "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat_v1], messages_v1)
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+    assert len(nebuly.sent) == 1
+
+    chat_v2 = _chat_summary("chat_1", updated_at=_ts(12))
+    compliance._chats = [chat_v2]
+    compliance._messages_by_chat = {
+        "chat_1": messages_v1["chat_1"]
+        + [
+            _message("u2", "user", _ts(11), "more"),
+            _message("a2", "assistant", _ts(12), "again"),
+        ],
+    }
+    compliance.message_fetch_count = 0
+    nebuly.sent.clear()
+
+    counts = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts.sent == 1
+    assert counts.fetched == 1
+    assert compliance.message_fetch_count == 1
+    assert len(nebuly.sent) == 1
+
+
+def test_backfill_fetches_only_earlier_window(tmp_path: Path) -> None:
+    chat = _chat_summary("chat_1", updated_at=_ts(10))
+    messages_by_chat = {
+        "chat_1": [
+            _message("u0", "user", _ts(7), "early"),
+            _message("a0", "assistant", _ts(7, 30), "early reply"),
+            _message("u1", "user", _ts(9), "hello"),
+            _message("a1", "assistant", _ts(10), "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+    assert len(nebuly.sent) == 1
+
+    nebuly.sent.clear()
+    compliance.message_fetch_count = 0
+    config_backfill = _config(tmp_path, from_date=_ts(6))
+
+    counts = _sync_user(
+        user_id="user_1",
+        config=config_backfill,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts.sent == 1
+    assert counts.fetched == 1
+    assert compliance.message_fetch_count == 1

@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import httpx
 from httpx import HTTPStatusError
 
-from .checkpoint import Checkpoint
+from .cache import SyncCache
 from .compliance_client import ComplianceClient
 from .config import Config, datetime_to_timestamp_str
-from .converter import (
-    build_message_pairs,
-    dedup_key,
-    pair_cursor_ts,
-    pair_to_payload,
-)
+from .converter import build_message_pairs, pair_to_payload
+from .models import ChatSummary
 from .nebuly_client import NebulyClient
 
 logger = logging.getLogger(__name__)
@@ -26,6 +23,8 @@ class Counts:
     sent: int = 0
     skipped: int = 0
     failed: int = 0
+    chats_processed: int = 0
+    chats_skipped: int = 0
 
 
 @dataclass
@@ -40,58 +39,80 @@ def _configure_logging(*, verbose: bool) -> None:
         level=level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    # httpx logs each HTTP request at INFO; keep those at DEBUG unless verbose.
     logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
+
+
+def _merge_coverage(
+    state_from: datetime | None,
+    state_until: datetime | None,
+    requested_from: datetime | None,
+    run_until: datetime,
+) -> tuple[datetime | None, datetime]:
+    from_candidates = [x for x in [state_from, requested_from] if x is not None]
+    new_from = min(from_candidates) if from_candidates else None
+    until_candidates = [x for x in [state_until, run_until] if x is not None]
+    new_until = max(until_candidates) if until_candidates else run_until
+    return new_from, new_until
 
 
 def run_sync(config: Config) -> SyncSummary:
     _configure_logging(verbose=config.verbose)
 
-    checkpoint_path = config.cache_dir / "checkpoint.json"
-    checkpoint = Checkpoint(checkpoint_path, config.organization_uuid)
+    cache = SyncCache(
+        config.cache_dir / "sync_state.db",
+        config.organization_uuid,
+        dry_run=config.dry_run,
+    )
+    run_until = config.run_until()
 
     summary = SyncSummary()
 
-    with httpx.Client(
-        base_url=config.compliance_base_url, timeout=60.0
-    ) as compliance_http:
-        compliance = ComplianceClient(
-            compliance_http,
-            config.compliance_api_key,
-            max_requests_per_minute=config.compliance_max_requests_per_minute,
-        )
-
-        with httpx.Client(timeout=60.0) as nebuly_http:
-            nebuly = NebulyClient(
-                nebuly_http,
-                config.nebuly_api_key,
-                config.nebuly_endpoint,
-                dry_run=config.dry_run,
+    try:
+        with httpx.Client(
+            base_url=config.compliance_base_url, timeout=60.0
+        ) as compliance_http:
+            compliance = ComplianceClient(
+                compliance_http,
+                config.compliance_api_key,
+                max_requests_per_minute=config.compliance_max_requests_per_minute,
             )
 
-            users = compliance.list_all_users(config.organization_uuid)
-            logger.info("Fetched %d users from Compliance API", len(users))
-
-            for user in sorted(users, key=lambda u: u.id):
-                user_counts = _sync_user(
-                    user_id=user.id,
-                    config=config,
-                    compliance=compliance,
-                    nebuly=nebuly,
-                    checkpoint=checkpoint,
+            with httpx.Client(timeout=60.0) as nebuly_http:
+                nebuly = NebulyClient(
+                    nebuly_http,
+                    config.nebuly_api_key,
+                    config.nebuly_endpoint,
+                    dry_run=config.dry_run,
                 )
-                summary.users_processed += 1
-                summary.totals.fetched += user_counts.fetched
-                summary.totals.sent += user_counts.sent
-                summary.totals.skipped += user_counts.skipped
-                summary.totals.failed += user_counts.failed
 
-                if not config.dry_run:
-                    checkpoint.save()
+                users = compliance.list_all_users(config.organization_uuid)
+                logger.info("Fetched %d users from Compliance API", len(users))
+
+                for user in sorted(users, key=lambda u: u.id):
+                    user_counts = _sync_user(
+                        user_id=user.id,
+                        config=config,
+                        compliance=compliance,
+                        nebuly=nebuly,
+                        cache=cache,
+                        run_until=run_until,
+                    )
+                    summary.users_processed += 1
+                    summary.totals.fetched += user_counts.fetched
+                    summary.totals.sent += user_counts.sent
+                    summary.totals.skipped += user_counts.skipped
+                    summary.totals.failed += user_counts.failed
+                    summary.totals.chats_processed += user_counts.chats_processed
+                    summary.totals.chats_skipped += user_counts.chats_skipped
+    finally:
+        cache.close()
 
     logger.info(
-        "Sync complete: users=%d fetched=%d sent=%d skipped=%d failed=%d",
+        "Sync complete: users=%d | chats processed=%d skipped=%d | "
+        "interactions fetched=%d sent=%d skipped=%d failed=%d",
         summary.users_processed,
+        summary.totals.chats_processed,
+        summary.totals.chats_skipped,
         summary.totals.fetched,
         summary.totals.sent,
         summary.totals.skipped,
@@ -100,62 +121,122 @@ def run_sync(config: Config) -> SyncSummary:
     return summary
 
 
-def _sync_user(
+def _collect_chats_for_user(
     *,
     user_id: str,
-    config: Config,
     compliance: ComplianceClient,
-    nebuly: NebulyClient,
-    checkpoint: Checkpoint,
-) -> Counts:
-    counts = Counts()
-    updated_at_gte_dt = checkpoint.updated_at_gte(user_id, config.from_date)
+    cache: SyncCache,
+    requested_from: datetime | None,
+    run_until: datetime,
+) -> list[ChatSummary]:
     updated_at_gte = (
-        datetime_to_timestamp_str(updated_at_gte_dt) if updated_at_gte_dt else None
+        datetime_to_timestamp_str(requested_from) if requested_from else None
     )
-    updated_at_lte = (
-        datetime_to_timestamp_str(config.to_date) if config.to_date else None
-    )
-    created_at_gte = updated_at_gte
-    created_at_lte = updated_at_lte
-    sent_before_run = checkpoint.view(user_id)
+    updated_at_lte = datetime_to_timestamp_str(run_until)
 
+    chats_by_id: dict[str, ChatSummary] = {}
     after_id: str | None = None
-    user_failed = False
 
-    while not user_failed:
+    while True:
         chats_page = compliance.list_chats(
             [user_id],
             updated_at_gte=updated_at_gte,
             updated_at_lte=updated_at_lte,
             after_id=after_id,
         )
-        chats = sorted(chats_page.data, key=lambda c: (c.updated_at, c.id))
+        for chat in chats_page.data:
+            chats_by_id[chat.id] = chat
+        if not chats_page.has_more:
+            break
+        after_id = chats_page.last_id
+        if after_id is None:
+            break
 
-        for chat in chats:
-            if user_failed:
-                break
+    unfinished = cache.iter_unfinished_chats(user_id)
+    missing = [chat_id for chat_id in unfinished if chat_id not in chats_by_id]
+    if missing:
+        extra_page = compliance.list_chats([user_id])
+        for chat in extra_page.data:
+            if chat.id in missing:
+                chats_by_id[chat.id] = chat
+
+    return sorted(chats_by_id.values(), key=lambda c: (c.updated_at, c.id))
+
+
+def _sync_user(
+    *,
+    user_id: str,
+    config: Config,
+    compliance: ComplianceClient,
+    nebuly: NebulyClient,
+    cache: SyncCache,
+    run_until: datetime,
+) -> Counts:
+    counts = Counts()
+    requested_from = config.from_date
+    user_failed = False
+    highest_completed: datetime | None = None
+    user_coverage_from: datetime | None = None
+    user_coverage_until: datetime | None = None
+
+    chats = _collect_chats_for_user(
+        user_id=user_id,
+        compliance=compliance,
+        cache=cache,
+        requested_from=requested_from,
+        run_until=run_until,
+    )
+
+    for chat in chats:
+        if user_failed:
+            break
+
+        plan = cache.plan_chat_work(chat, requested_from, run_until)
+        if plan.skip:
+            cache.mark_chat_skipped_extend(chat, run_until)
+            if not config.dry_run:
+                cache.commit()
+            counts.chats_skipped += 1
+            state = cache.get_chat_state(chat.id)
+            if state and state.last_exported_chat_updated_at:
+                if (
+                    highest_completed is None
+                    or state.last_exported_chat_updated_at > highest_completed
+                ):
+                    highest_completed = state.last_exported_chat_updated_at
+            continue
+
+        counts.chats_processed += 1
+        prior_state = cache.get_chat_state(chat.id)
+        exported_until: datetime | None = (
+            prior_state.coverage_until
+            if prior_state and prior_state.status == "completed"
+            else None
+        )
+        cache.mark_chat_in_progress(chat, requested_from, run_until)
+        chat_failed = False
+
+        for interval in plan.intervals:
             try:
                 chat_response = compliance.list_chat_messages(
                     chat.id,
-                    created_at_gte=created_at_gte,
-                    created_at_lte=created_at_lte,
+                    created_at_gte=(
+                        datetime_to_timestamp_str(interval.created_at_gte)
+                        if interval.created_at_gte is not None
+                        else None
+                    ),
+                    created_at_lte=datetime_to_timestamp_str(interval.created_at_lte),
                 )
             except HTTPStatusError as e:
                 if e.response.status_code == 404:
                     logger.warning("Chat %s not found, skipping", chat.id)
-                    continue
+                    chat_failed = True
+                    break
                 raise
 
             pairs = build_message_pairs(chat_response.chat_messages, chat)
             for pair in pairs:
                 counts.fetched += 1
-                key = dedup_key(pair)
-                ts = pair_cursor_ts(pair)
-                if sent_before_run.is_sent(ts, key):
-                    counts.skipped += 1
-                    continue
-
                 payload = pair_to_payload(pair, anonymize=config.anonymize)
                 if payload is None:
                     counts.skipped += 1
@@ -166,37 +247,96 @@ def _sync_user(
                 except HTTPStatusError:
                     counts.failed += 1
                     user_failed = True
+                    chat_failed = True
+                    cache.mark_chat_failed(chat.id, "HTTP error sending interaction")
+                    if not config.dry_run:
+                        cache.commit()
                     logger.error(
-                        "Failed to send interaction for user=%s chat=%s key=%s; "
+                        "Failed to send interaction for user=%s chat=%s; "
                         "stopping user to allow resume",
                         user_id,
                         chat.id,
-                        key,
                     )
                     break
 
-                checkpoint.record_sent(user_id, ts, key)
                 counts.sent += 1
+                msg_ts = pair.assistant_message.created_at
+                exported_until = (
+                    msg_ts
+                    if exported_until is None
+                    else max(exported_until, msg_ts)
+                )
 
-        if not chats_page.has_more:
-            break
-        after_id = chats_page.last_id
-        if after_id is None:
+            if chat_failed:
+                break
+
+        if user_failed:
             break
 
-    checkpoint_watermark = checkpoint.updated_at_gte(user_id, None)
-    if counts.fetched == 0 and checkpoint_watermark is not None:
-        logger.debug(
-            "User %s: no new messages since checkpoint (%s)",
-            user_id,
-            datetime_to_timestamp_str(checkpoint_watermark),
+        if chat_failed:
+            continue
+
+        prior = cache.get_chat_state(chat.id)
+        if exported_until is not None:
+            coverage_until = exported_until
+        elif prior and prior.coverage_until is not None:
+            coverage_until = prior.coverage_until
+        else:
+            coverage_until = run_until
+        new_from, new_until = _merge_coverage(
+            prior.coverage_from if prior else None,
+            None,
+            requested_from,
+            coverage_until,
         )
-    elif (
-        counts.fetched > 0 or counts.sent > 0 or counts.skipped > 0 or counts.failed > 0
+        cache.mark_chat_completed(
+            chat,
+            new_coverage_from=new_from,
+            new_coverage_until=new_until,
+        )
+        if not config.dry_run:
+            cache.commit()
+
+        if highest_completed is None or chat.updated_at > highest_completed:
+            highest_completed = chat.updated_at
+        user_coverage_from = (
+            new_from
+            if user_coverage_from is None
+            else min(user_coverage_from, new_from)
+            if new_from is not None
+            else user_coverage_from
+        )
+        user_coverage_until = (
+            new_until
+            if user_coverage_until is None
+            else max(user_coverage_until, new_until)
+        )
+
+    if not user_failed:
+        cache.upsert_user_state(
+            user_id,
+            highest_completed_chat_updated_at=highest_completed,
+            coverage_from=user_coverage_from,
+            coverage_until=user_coverage_until,
+            last_successful_run_at=datetime.now(timezone.utc),
+        )
+        if not config.dry_run:
+            cache.commit()
+
+    if (
+        counts.fetched > 0
+        or counts.sent > 0
+        or counts.skipped > 0
+        or counts.failed > 0
+        or counts.chats_processed > 0
+        or counts.chats_skipped > 0
     ):
         logger.info(
-            "User %s: fetched=%d sent=%d skipped=%d failed=%d",
+            "User %s: chats processed=%d skipped=%d | "
+            "interactions fetched=%d sent=%d skipped=%d failed=%d",
             user_id,
+            counts.chats_processed,
+            counts.chats_skipped,
             counts.fetched,
             counts.sent,
             counts.skipped,
