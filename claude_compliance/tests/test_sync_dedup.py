@@ -166,6 +166,19 @@ class FakeNebulyClient:
         self.sent.append(payload)
 
 
+class CrashNebulyClient:
+    """Raises a non-HTTPStatusError after K successful sends (simulates SIGKILL)."""
+
+    def __init__(self, *, crash_after: int) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self._crash_after = crash_after
+
+    def send_interaction(self, payload: dict[str, Any]) -> None:
+        if len(self.sent) >= self._crash_after:
+            raise RuntimeError("simulated process crash")
+        self.sent.append(payload)
+
+
 def _config(tmp_path: Path, *, from_date: datetime | None = None) -> Config:
     return Config(
         nebuly_api_key="key",
@@ -506,5 +519,66 @@ def test_send_failure_persists_coverage_and_retries_tail_only(
     assert counts_retry.fetched == 1
     assert compliance.message_fetch_count == 1
     state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "completed"
+
+
+def test_crash_mid_chat_does_not_replay_sent_interactions(
+    tmp_path: Path,
+) -> None:
+    chat = _chat_summary("chat_1", updated_at=_ts(13))
+    messages_by_chat = {
+        "chat_1": [
+            _message("u1", "user", _ts(9), "one"),
+            _message("a1", "assistant", _ts(10), "reply one"),
+            _message("u2", "user", _ts(11), "two"),
+            _message("a2", "assistant", _ts(12), "reply two"),
+            _message("u3", "user", _ts(12, 30), "three"),
+            _message("a3", "assistant", _ts(13), "reply three"),
+        ],
+    }
+    db_path = tmp_path / "sync_state.db"
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    nebuly_crash = CrashNebulyClient(crash_after=2)
+    cache1 = SyncCache(db_path, "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    import pytest
+
+    with pytest.raises(RuntimeError):
+        _sync_user(
+            user_id="user_1",
+            config=config,
+            compliance=compliance,  # type: ignore[arg-type]
+            nebuly=nebuly_crash,  # type: ignore[arg-type]
+            cache=cache1,
+            run_until=config.to_date,  # type: ignore[arg-type]
+        )
+
+    assert len(nebuly_crash.sent) == 2
+    cache1.close()
+
+    nebuly_resume = FakeNebulyClient()
+    cache2 = SyncCache(db_path, "org_demo", dry_run=False)
+    counts = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly_resume,  # type: ignore[arg-type]
+        cache=cache2,
+        run_until=_ts(17),
+    )
+
+    assert counts.sent == 1
+    assert counts.fetched == 1
+
+    all_sent = nebuly_crash.sent + nebuly_resume.sent
+    assert len(all_sent) == 3
+    conversation_ids = [p["interaction"]["conversation_id"] for p in all_sent]
+    assert conversation_ids == ["chat_1", "chat_1", "chat_1"]
+    inputs = [p["interaction"]["input"] for p in all_sent]
+    assert inputs == ["one", "two", "three"]
+
+    state = cache2.get_chat_state("chat_1")
     assert state is not None
     assert state.status == "completed"

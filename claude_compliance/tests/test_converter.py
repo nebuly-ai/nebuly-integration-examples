@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 
 from compliance_sync.converter import (
     build_message_pairs,
-    dedup_key,
     extract_text_content,
     pair_to_payload,
 )
@@ -63,14 +62,6 @@ def test_tool_blocks_excluded() -> None:
     )
     pairs = build_message_pairs([_msg("u1", "user", "run"), assistant], chat)
     assert extract_text_content(pairs[0].assistant_message) == "done"
-
-
-def test_dedup_key() -> None:
-    chat = _chat(chat_id="c1")
-    pair = build_message_pairs(
-        [_msg("u1", "user", "hello"), _msg("a1", "assistant", "hi")], chat
-    )[0]
-    assert dedup_key(pair) == "c1:a1"
 
 
 def test_payload_shape() -> None:

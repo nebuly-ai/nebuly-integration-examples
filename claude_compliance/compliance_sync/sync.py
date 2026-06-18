@@ -283,12 +283,18 @@ def _sync_user(
                     break
 
                 counts.sent += 1
+                # Resume cursor is the assistant timestamp; tail refetch uses
+                # inclusive created_at.gte and drops already-sent pairs when
+                # their user message is earlier.
                 msg_ts = pair.assistant_message.created_at
                 exported_until = (
                     msg_ts
                     if exported_until is None
                     else max(exported_until, msg_ts)
                 )
+                cache.checkpoint_chat_coverage(chat.id, exported_until)
+                if not config.dry_run:
+                    cache.commit()
 
             if chat_failed:
                 break

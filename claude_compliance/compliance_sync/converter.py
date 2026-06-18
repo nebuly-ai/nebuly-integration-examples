@@ -55,14 +55,6 @@ def build_message_pairs(
     return pairs
 
 
-def dedup_key(pair: MessagePair) -> str:
-    return f"{pair.chat.id}:{pair.assistant_message.id}"
-
-
-def pair_cursor_ts(pair: MessagePair) -> datetime:
-    return pair.assistant_message.created_at
-
-
 def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | None:
     user_input = extract_text_content(pair.user_message)
     if not user_input:

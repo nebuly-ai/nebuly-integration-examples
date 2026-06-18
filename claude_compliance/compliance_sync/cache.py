@@ -161,6 +161,8 @@ class SyncCache:
         if backfill and state.coverage_from is not None:
             intervals.append(FetchInterval(requested_from, state.coverage_from))
         if changed:
+            # Tail refetch uses inclusive created_at.gte; already-sent pairs are
+            # excluded because their user message has an earlier timestamp.
             tail_from = (
                 state.coverage_until if state.coverage_until is not None else requested_from
             )
@@ -196,6 +198,23 @@ class SyncCache:
                 datetime_to_timestamp_str(chat.created_at),
                 datetime_to_timestamp_str(chat.updated_at),
                 now,
+            ),
+        )
+
+    def checkpoint_chat_coverage(self, chat_id: str, coverage_until: datetime) -> None:
+        now = _now_ts()
+        self._conn.execute(
+            """
+            UPDATE sync_chat_state SET
+              coverage_until = ?,
+              updated_at = ?
+            WHERE organization_uuid = ? AND chat_id = ?
+            """,
+            (
+                datetime_to_timestamp_str(coverage_until),
+                now,
+                self._organization_uuid,
+                chat_id,
             ),
         )
 

@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "claude-compliance-sync"
 version = "0.1.0"
-description = "POC: sync Claude Compliance API interactions to Nebuly event ingestion"
+description = "Sync Claude Compliance API interactions to Nebuly event ingestion"
 authors = ["Nebuly"]
 package-mode = false
 
