@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
+from compliance_sync import user_defined
 from compliance_sync.converter import (
+    MessagePair,
     build_message_pairs,
     extract_text_content,
     pair_to_payload,
@@ -74,4 +77,44 @@ def test_payload_shape() -> None:
     assert payload["interaction"]["end_user"] == "user_01"
     assert payload["traces"] == []
     assert payload["user_feedback"] == []
+
+
+def test_build_tags_defaults() -> None:
+    chat = _chat()
+    pair = MessagePair(
+        user_message=_msg("u1", "user", "hello"),
+        assistant_message=_msg("a1", "assistant", "hi"),
+        chat=chat,
+    )
+    tags = user_defined.build_tags(pair)
+    assert tags["claude chat-id"] == "chat_01"
+    assert tags["model"] == "claude-opus-4-8"
+
+    payload = pair_to_payload(pair, anonymize=False)
+    assert payload is not None
+    assert payload["interaction"]["tags"] == tags
+
+
+def test_user_defined_hooks_in_payload() -> None:
+    chat = _chat()
+    pair = MessagePair(
+        user_message=_msg("u1", "user", "hello"),
+        assistant_message=_msg("a1", "assistant", "hi"),
+        chat=chat,
+    )
+    custom_tags = {"custom": "tag"}
+    custom_traces = [{"source": "kb", "input": "q", "outputs": ["a"]}]
+    custom_feedback = [{"slug": "thumbs_up", "text": "nice"}]
+
+    with (
+        patch.object(user_defined, "build_tags", return_value=custom_tags),
+        patch.object(user_defined, "build_traces", return_value=custom_traces),
+        patch.object(user_defined, "build_user_feedback", return_value=custom_feedback),
+    ):
+        payload = pair_to_payload(pair, anonymize=False)
+
+    assert payload is not None
+    assert payload["interaction"]["tags"] == custom_tags
+    assert payload["traces"] == custom_traces
+    assert payload["user_feedback"] == custom_feedback
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from . import user_defined
 from .config import datetime_to_timestamp_str
 from .models import ChatMessage, ChatMessagesResponse, ChatSummary
 
@@ -62,15 +63,6 @@ def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | N
 
     assistant_output = extract_text_content(pair.assistant_message)
     chat = pair.chat
-    model = chat.model or "unknown"
-
-    tags = {
-        "claude chat-id": chat.id,
-        "claude project-id": chat.project_id,
-        "model": str(model),
-        "chat name": chat.name,
-        "href": chat.href,
-    }
 
     interaction = {
         "conversation_id": chat.id,
@@ -80,13 +72,13 @@ def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | N
         "time_end": datetime_to_timestamp_str(pair.assistant_message.created_at),
         "end_user": chat.user.id,
         "hide_content": False,
-        "tags": tags,
+        "tags": user_defined.build_tags(pair),
     }
 
     return {
         "interaction": interaction,
-        "traces": [],
-        "user_feedback": [],
+        "traces": user_defined.build_traces(pair),
+        "user_feedback": user_defined.build_user_feedback(pair),
         "anonymize": anonymize,
     }
 
