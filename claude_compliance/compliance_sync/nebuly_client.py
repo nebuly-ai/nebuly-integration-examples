@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -40,7 +39,6 @@ class NebulyClient:
     )
     def send_interaction(self, payload: dict[str, Any]) -> None:
         if self._dry_run:
-            logger.info("DRY RUN payload: %s", json.dumps(payload, indent=2))
             return
 
         resp = self._client.post(

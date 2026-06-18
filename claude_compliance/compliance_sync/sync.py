@@ -118,6 +118,7 @@ def _sync_user(
     )
     created_at_gte = updated_at_gte
     created_at_lte = updated_at_lte
+    sent_before_run = checkpoint.view(user_id)
 
     after_id: str | None = None
     user_failed = False
@@ -151,7 +152,7 @@ def _sync_user(
                 counts.fetched += 1
                 key = dedup_key(pair)
                 ts = pair_cursor_ts(pair)
-                if checkpoint.is_sent(user_id, ts, key):
+                if sent_before_run.is_sent(ts, key):
                     counts.skipped += 1
                     continue
 

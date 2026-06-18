@@ -19,6 +19,21 @@ class UserCheckpoint:
     boundary_ids: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class CheckpointView:
+    last_updated_at: datetime | None
+    boundary_ids: frozenset[str]
+
+    def is_sent(self, ts: datetime, key: str) -> bool:
+        if self.last_updated_at is None:
+            return False
+        if ts < self.last_updated_at:
+            return True
+        if ts == self.last_updated_at:
+            return key in self.boundary_ids
+        return False
+
+
 class Checkpoint:
     def __init__(self, path: Path, organization_uuid: str) -> None:
         self._path = path
@@ -65,15 +80,14 @@ class Checkpoint:
             return from_date
         return max(from_date, watermark)
 
-    def is_sent(self, user_id: str, ts: datetime, key: str) -> bool:
+    def view(self, user_id: str) -> CheckpointView:
         cursor = self._users.get(user_id)
-        if cursor is None or cursor.last_updated_at is None:
-            return False
-        if ts < cursor.last_updated_at:
-            return True
-        if ts == cursor.last_updated_at:
-            return key in cursor.boundary_ids
-        return False
+        if cursor is None:
+            return CheckpointView(None, frozenset())
+        return CheckpointView(cursor.last_updated_at, frozenset(cursor.boundary_ids))
+
+    def is_sent(self, user_id: str, ts: datetime, key: str) -> bool:
+        return self.view(user_id).is_sent(ts, key)
 
     def record_sent(self, user_id: str, ts: datetime, key: str) -> None:
         cursor = self._users.setdefault(user_id, UserCheckpoint())
