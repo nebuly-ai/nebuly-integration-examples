@@ -128,6 +128,7 @@ def _collect_chats_for_user(
     cache: SyncCache,
     requested_from: datetime | None,
     run_until: datetime,
+    dry_run: bool,
 ) -> list[ChatSummary]:
     updated_at_gte = (
         datetime_to_timestamp_str(requested_from) if requested_from else None
@@ -153,12 +154,24 @@ def _collect_chats_for_user(
             break
 
     unfinished = cache.iter_unfinished_chats(user_id)
-    missing = [chat_id for chat_id in unfinished if chat_id not in chats_by_id]
+    missing = {cid for cid in unfinished if cid not in chats_by_id}
     if missing:
-        extra_page = compliance.list_chats([user_id])
-        for chat in extra_page.data:
-            if chat.id in missing:
-                chats_by_id[chat.id] = chat
+        recovery_after_id: str | None = None
+        while missing:
+            extra_page = compliance.list_chats(
+                [user_id], after_id=recovery_after_id
+            )
+            for chat in extra_page.data:
+                if chat.id in missing:
+                    chats_by_id[chat.id] = chat
+                    missing.discard(chat.id)
+            if not extra_page.has_more or extra_page.last_id is None:
+                break
+            recovery_after_id = extra_page.last_id
+        for cid in missing:
+            cache.mark_chat_deleted(cid, "Not found in chat listing")
+        if missing and not dry_run:
+            cache.commit()
 
     return sorted(chats_by_id.values(), key=lambda c: (c.updated_at, c.id))
 
@@ -185,6 +198,7 @@ def _sync_user(
         cache=cache,
         requested_from=requested_from,
         run_until=run_until,
+        dry_run=config.dry_run,
     )
 
     for chat in chats:
@@ -229,7 +243,12 @@ def _sync_user(
                 )
             except HTTPStatusError as e:
                 if e.response.status_code == 404:
-                    logger.warning("Chat %s not found, skipping", chat.id)
+                    logger.warning(
+                        "Chat %s not found at source, marking deleted", chat.id
+                    )
+                    cache.mark_chat_deleted(chat.id, "Chat not found (404)")
+                    if not config.dry_run:
+                        cache.commit()
                     chat_failed = True
                     break
                 raise
@@ -248,7 +267,11 @@ def _sync_user(
                     counts.failed += 1
                     user_failed = True
                     chat_failed = True
-                    cache.mark_chat_failed(chat.id, "HTTP error sending interaction")
+                    cache.mark_chat_failed(
+                        chat.id,
+                        "HTTP error sending interaction",
+                        new_coverage_until=exported_until,
+                    )
                     if not config.dry_run:
                         cache.commit()
                     logger.error(

@@ -135,6 +135,9 @@ class SyncCache:
     ) -> ChatWorkPlan:
         state = self.get_chat_state(chat.id)
 
+        if state is not None and state.status == "deleted":
+            return ChatWorkPlan(skip=True)
+
         if state is None:
             return ChatWorkPlan(
                 skip=False,
@@ -229,17 +232,58 @@ class SyncCache:
             ),
         )
 
-    def mark_chat_failed(self, chat_id: str, error: str) -> None:
+    def mark_chat_failed(
+        self,
+        chat_id: str,
+        error: str,
+        *,
+        new_coverage_until: datetime | None = None,
+    ) -> None:
+        now = _now_ts()
+        coverage_ts: str | None = None
+        if new_coverage_until is not None:
+            state = self.get_chat_state(chat_id)
+            if state and state.coverage_until is not None:
+                merged = max(state.coverage_until, new_coverage_until)
+            else:
+                merged = new_coverage_until
+            coverage_ts = datetime_to_timestamp_str(merged)
+
+        if coverage_ts is not None:
+            self._conn.execute(
+                """
+                UPDATE sync_chat_state SET
+                  status = 'failed',
+                  last_error = ?,
+                  coverage_until = ?,
+                  updated_at = ?
+                WHERE organization_uuid = ? AND chat_id = ?
+                """,
+                (error, coverage_ts, now, self._organization_uuid, chat_id),
+            )
+        else:
+            self._conn.execute(
+                """
+                UPDATE sync_chat_state SET
+                  status = 'failed',
+                  last_error = ?,
+                  updated_at = ?
+                WHERE organization_uuid = ? AND chat_id = ?
+                """,
+                (error, now, self._organization_uuid, chat_id),
+            )
+
+    def mark_chat_deleted(self, chat_id: str, reason: str) -> None:
         now = _now_ts()
         self._conn.execute(
             """
             UPDATE sync_chat_state SET
-              status = 'failed',
+              status = 'deleted',
               last_error = ?,
               updated_at = ?
             WHERE organization_uuid = ? AND chat_id = ?
             """,
-            (error, now, self._organization_uuid, chat_id),
+            (reason, now, self._organization_uuid, chat_id),
         )
 
     def mark_chat_skipped_extend(self, chat: ChatSummary, run_until: datetime) -> None:

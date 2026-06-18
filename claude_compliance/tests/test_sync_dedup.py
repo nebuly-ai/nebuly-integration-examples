@@ -77,10 +77,14 @@ class FakeComplianceClient:
         self,
         chats: list[ChatSummary],
         messages_by_chat: dict[str, list[ChatMessage]],
+        *,
+        chat_page_size: int = 100,
     ) -> None:
         self._chats = chats
         self._messages_by_chat = messages_by_chat
+        self._chat_page_size = chat_page_size
         self.message_fetch_count = 0
+        self.messages_404_for: set[str] = set()
 
     def list_chats(
         self,
@@ -91,14 +95,29 @@ class FakeComplianceClient:
         after_id: str | None = None,
         limit: int = 100,
     ) -> PaginatedChatsResponse:
-        chats = list(self._chats)
+        chats = sorted(self._chats, key=lambda c: c.id)
         if updated_at_gte is not None:
             gte = timestamp_str_to_datetime(updated_at_gte)
             chats = [c for c in chats if c.updated_at >= gte]
         if updated_at_lte is not None:
             lte = timestamp_str_to_datetime(updated_at_lte)
             chats = [c for c in chats if c.updated_at <= lte]
-        return PaginatedChatsResponse(data=chats, has_more=False)
+        if after_id is not None:
+            ids = [c.id for c in chats]
+            try:
+                start = ids.index(after_id) + 1
+                chats = chats[start:]
+            except ValueError:
+                chats = []
+        page_size = min(limit, self._chat_page_size, 100)
+        page = chats[:page_size]
+        has_more = len(chats) > page_size
+        return PaginatedChatsResponse(
+            data=page,
+            has_more=has_more,
+            first_id=page[0].id if page else None,
+            last_id=page[-1].id if page else None,
+        )
 
     def list_chat_messages(
         self,
@@ -110,6 +129,14 @@ class FakeComplianceClient:
         order: str = "asc",
         limit: int = 1000,
     ) -> ChatMessagesResponse:
+        if chat_id in self.messages_404_for:
+            import httpx
+
+            request = httpx.Request("GET", f"/chats/{chat_id}/messages")
+            response = httpx.Response(404, request=request)
+            raise httpx.HTTPStatusError(
+                "Not found", request=request, response=response
+            )
         self.message_fetch_count += 1
         chat = next(c for c in self._chats if c.id == chat_id)
         messages = list(self._messages_by_chat[chat_id])
@@ -123,10 +150,19 @@ class FakeComplianceClient:
 
 
 class FakeNebulyClient:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_after: int | None = None) -> None:
         self.sent: list[dict[str, Any]] = []
+        self._fail_after = fail_after
 
     def send_interaction(self, payload: dict[str, Any]) -> None:
+        if self._fail_after is not None and len(self.sent) >= self._fail_after:
+            import httpx
+
+            request = httpx.Request("POST", "/events")
+            response = httpx.Response(500, request=request)
+            raise httpx.HTTPStatusError(
+                "Server error", request=request, response=response
+            )
         self.sent.append(payload)
 
 
@@ -333,3 +369,142 @@ def test_backfill_fetches_only_earlier_window(tmp_path: Path) -> None:
     assert counts.sent == 1
     assert counts.fetched == 1
     assert compliance.message_fetch_count == 1
+
+
+def test_unfinished_chat_on_recovery_page_two_is_processed(tmp_path: Path) -> None:
+    chat_in_window = _chat_summary("chat_a", updated_at=_ts(10))
+    chat_stale = _chat_summary("chat_b", updated_at=_ts(5))
+    messages_by_chat = {
+        "chat_a": [
+            _message("a_u1", "user", _ts(9), "hello A"),
+            _message("a_a1", "assistant", _ts(10), "hi A"),
+        ],
+        "chat_b": [
+            _message("b_u1", "user", _ts(9), "hello B"),
+            _message("b_a1", "assistant", _ts(10), "hi B"),
+        ],
+    }
+
+    compliance = FakeComplianceClient(
+        [chat_in_window, chat_stale],
+        messages_by_chat,
+        chat_page_size=1,
+    )
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    cache.mark_chat_in_progress(chat_stale, _ts(8), _ts(12))
+    cache.commit()
+
+    config = _config(tmp_path, from_date=_ts(8))
+    counts = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+
+    assert counts.chats_processed == 2
+    assert counts.sent == 2
+    state = cache.get_chat_state("chat_b")
+    assert state is not None
+    assert state.status == "completed"
+
+
+def test_404_on_messages_marks_deleted_and_skips_retry(tmp_path: Path) -> None:
+    chat = _chat_summary("chat_1", updated_at=_ts(10))
+    messages_by_chat = {
+        "chat_1": [
+            _message("u1", "user", _ts(9), "hello"),
+            _message("a1", "assistant", _ts(10), "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    compliance.messages_404_for.add("chat_1")
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "deleted"
+    assert "404" in (state.last_error or "")
+
+    compliance.message_fetch_count = 0
+    nebuly.sent.clear()
+    counts_retry = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts_retry.chats_processed == 0
+    assert compliance.message_fetch_count == 0
+    assert len(nebuly.sent) == 0
+
+
+def test_send_failure_persists_coverage_and_retries_tail_only(
+    tmp_path: Path,
+) -> None:
+    chat = _chat_summary("chat_1", updated_at=_ts(12))
+    messages_by_chat = {
+        "chat_1": [
+            _message("u1", "user", _ts(9), "one"),
+            _message("a1", "assistant", _ts(10), "reply one"),
+            _message("u2", "user", _ts(11), "two"),
+            _message("a2", "assistant", _ts(12), "reply two"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    nebuly = FakeNebulyClient(fail_after=1)
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    counts = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+
+    assert counts.sent == 1
+    assert counts.failed == 1
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "failed"
+    assert state.coverage_until == _ts(10)
+
+    nebuly_ok = FakeNebulyClient()
+    compliance.message_fetch_count = 0
+    counts_retry = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly_ok,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts_retry.sent == 1
+    assert counts_retry.fetched == 1
+    assert compliance.message_fetch_count == 1
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "completed"

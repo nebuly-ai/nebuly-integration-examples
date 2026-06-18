@@ -235,3 +235,37 @@ def test_dry_run_uses_memory_and_persists_nothing(tmp_path: Path) -> None:
     cache.close()
 
     assert not (tmp_path / "sync_state.db").exists()
+
+
+def test_mark_chat_failed_persists_coverage_without_regressing(
+    tmp_path: Path,
+) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+
+    cache.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache.mark_chat_failed("chat_1", "boom", new_coverage_until=_ts(9))
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "failed"
+    assert state.coverage_until == _ts(9)
+
+    cache.mark_chat_failed("chat_1", "again", new_coverage_until=_ts(8))
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.coverage_until == _ts(9)
+
+
+def test_mark_chat_deleted_excluded_from_unfinished(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+
+    cache.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache.mark_chat_deleted("chat_1", "gone")
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "deleted"
+    assert state.last_error == "gone"
+    assert cache.iter_unfinished_chats("user_1") == []
