@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      - id: ruff-check
+        types_or: [python, pyi, jupyter]
+        args: ["--config", "pyproject.toml", "--fix"]
+      - id: ruff-format
+        types_or: [python, pyi, jupyter]
+        args: ["--config", "pyproject.toml"]
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        args:
+          [
+            "--non-interactive",
+            "--install-types",
+            "--follow-imports=silent",
+            "--ignore-missing-imports",
+            "--config-file=pyproject.toml",
+          ]

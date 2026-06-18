@@ -88,7 +88,7 @@ class FakeComplianceClient:
 
     def list_chats(
         self,
-        user_ids: list[str],
+        user_ids: list[str],  # noqa: ARG002
         *,
         updated_at_gte: str | None = None,
         updated_at_lte: str | None = None,
@@ -125,18 +125,16 @@ class FakeComplianceClient:
         *,
         created_at_gte: str | None = None,
         created_at_lte: str | None = None,
-        after_id: str | None = None,
-        order: str = "asc",
-        limit: int = 1000,
+        after_id: str | None = None,  # noqa: ARG002
+        order: str = "asc",  # noqa: ARG002
+        limit: int = 1000,  # noqa: ARG002
     ) -> ChatMessagesResponse:
         if chat_id in self.messages_404_for:
             import httpx
 
             request = httpx.Request("GET", f"/chats/{chat_id}/messages")
             response = httpx.Response(404, request=request)
-            raise httpx.HTTPStatusError(
-                "Not found", request=request, response=response
-            )
+            raise httpx.HTTPStatusError("Not found", request=request, response=response)
         self.message_fetch_count += 1
         chat = next(c for c in self._chats if c.id == chat_id)
         messages = list(self._messages_by_chat[chat_id])
@@ -405,7 +403,7 @@ def test_unfinished_chat_on_recovery_page_two_is_processed(tmp_path: Path) -> No
     )
     nebuly = FakeNebulyClient()
     cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
-    cache.mark_chat_in_progress(chat_stale, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat_stale)
     cache.commit()
 
     config = _config(tmp_path, from_date=_ts(8))

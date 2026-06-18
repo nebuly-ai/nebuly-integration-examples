@@ -33,7 +33,9 @@ def _chat(
     )
 
 
-def _cache(tmp_path: Path, *, org: str = "org_demo", dry_run: bool = False) -> SyncCache:
+def _cache(
+    tmp_path: Path, *, org: str = "org_demo", dry_run: bool = False
+) -> SyncCache:
     return SyncCache(tmp_path / "sync_state.db", org, dry_run=dry_run)
 
 
@@ -55,7 +57,7 @@ def test_unchanged_chat_is_skipped(tmp_path: Path) -> None:
     chat = _chat("chat_1", updated_at=_ts(10))
     run_until = _ts(12)
 
-    cache.mark_chat_in_progress(chat, _ts(8), run_until)
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -72,7 +74,7 @@ def test_skipped_extend_bumps_coverage_until(tmp_path: Path) -> None:
     chat = _chat("chat_1", updated_at=_ts(10))
     run_until = _ts(12)
 
-    cache.mark_chat_in_progress(chat, _ts(8), run_until)
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -94,7 +96,7 @@ def test_changed_chat_fetches_tail_only(tmp_path: Path) -> None:
     chat = _chat("chat_1", updated_at=_ts(10))
     run_until = _ts(12)
 
-    cache.mark_chat_in_progress(chat, _ts(8), run_until)
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -116,7 +118,7 @@ def test_earlier_requested_from_triggers_backfill(tmp_path: Path) -> None:
     chat = _chat("chat_1", updated_at=_ts(10))
     run_until = _ts(12)
 
-    cache.mark_chat_in_progress(chat, _ts(8), run_until)
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -137,7 +139,7 @@ def test_backfill_and_changed_produce_two_intervals(tmp_path: Path) -> None:
     chat = _chat("chat_1", updated_at=_ts(10))
     run_until = _ts(12)
 
-    cache.mark_chat_in_progress(chat, _ts(8), run_until)
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -160,7 +162,7 @@ def test_status_transitions(tmp_path: Path) -> None:
     cache = _cache(tmp_path)
     chat = _chat("chat_1", updated_at=_ts(10))
 
-    cache.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat)
     state = cache.get_chat_state("chat_1")
     assert state is not None
     assert state.status == "in_progress"
@@ -188,14 +190,14 @@ def test_iter_unfinished_chats(tmp_path: Path) -> None:
     chat_b = _chat("chat_b", updated_at=_ts(11))
     chat_c = _chat("chat_c", updated_at=_ts(12))
 
-    cache.mark_chat_in_progress(chat_a, _ts(8), _ts(12))
-    cache.mark_chat_in_progress(chat_b, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat_a)
+    cache.mark_chat_in_progress(chat_b)
     cache.mark_chat_completed(
         chat_b,
         new_coverage_from=_ts(8),
         new_coverage_until=_ts(12),
     )
-    cache.mark_chat_in_progress(chat_c, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat_c)
     cache.mark_chat_failed("chat_c", "err")
     cache.commit()
 
@@ -208,7 +210,7 @@ def test_org_isolation(tmp_path: Path) -> None:
     cache_b = _cache(tmp_path, org="org_b")
     chat = _chat("chat_1", updated_at=_ts(10))
 
-    cache_a.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache_a.mark_chat_in_progress(chat)
     cache_a.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -225,7 +227,7 @@ def test_dry_run_uses_memory_and_persists_nothing(tmp_path: Path) -> None:
     cache = _cache(tmp_path, dry_run=True)
     chat = _chat("chat_1", updated_at=_ts(10))
 
-    cache.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_completed(
         chat,
         new_coverage_from=_ts(8),
@@ -243,7 +245,7 @@ def test_mark_chat_failed_persists_coverage_without_regressing(
     cache = _cache(tmp_path)
     chat = _chat("chat_1", updated_at=_ts(10))
 
-    cache.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_failed("chat_1", "boom", new_coverage_until=_ts(9))
     state = cache.get_chat_state("chat_1")
     assert state is not None
@@ -260,7 +262,7 @@ def test_mark_chat_deleted_excluded_from_unfinished(tmp_path: Path) -> None:
     cache = _cache(tmp_path)
     chat = _chat("chat_1", updated_at=_ts(10))
 
-    cache.mark_chat_in_progress(chat, _ts(8), _ts(12))
+    cache.mark_chat_in_progress(chat)
     cache.mark_chat_deleted("chat_1", "gone")
     cache.commit()
 

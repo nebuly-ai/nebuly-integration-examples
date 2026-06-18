@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 import httpx
 from httpx import HTTPStatusError
 
-from .cache import SyncCache
+from .cache import ChatState, ChatWorkPlan, SyncCache
 from .compliance_client import ComplianceClient
 from .config import Config, datetime_to_timestamp_str
-from .converter import build_message_pairs, pair_to_payload
+from .converter import MessagePair, build_message_pairs, pair_to_payload
 from .models import ChatSummary
 from .nebuly_client import NebulyClient
 
@@ -121,23 +121,25 @@ def run_sync(config: Config) -> SyncSummary:
     return summary
 
 
-def _collect_chats_for_user(
-    *,
-    user_id: str,
-    compliance: ComplianceClient,
-    cache: SyncCache,
-    requested_from: datetime | None,
-    run_until: datetime,
-    dry_run: bool,
-) -> list[ChatSummary]:
-    updated_at_gte = (
-        datetime_to_timestamp_str(requested_from) if requested_from else None
-    )
-    updated_at_lte = datetime_to_timestamp_str(run_until)
+@dataclass
+class ExportOutcome:
+    fetched: int = 0
+    sent: int = 0
+    skipped: int = 0
+    failed: int = 0
+    user_failed: bool = False
+    chat_failed: bool = False
+    exported_until: datetime | None = None
 
+
+def _paginate_chats_for_user(
+    compliance: ComplianceClient,
+    user_id: str,
+    updated_at_gte: str | None,
+    updated_at_lte: str,
+) -> dict[str, ChatSummary]:
     chats_by_id: dict[str, ChatSummary] = {}
     after_id: str | None = None
-
     while True:
         chats_page = compliance.list_chats(
             [user_id],
@@ -152,28 +154,239 @@ def _collect_chats_for_user(
         after_id = chats_page.last_id
         if after_id is None:
             break
+    return chats_by_id
 
+
+def _recover_missing_chats(
+    *,
+    compliance: ComplianceClient,
+    cache: SyncCache,
+    user_id: str,
+    chats_by_id: dict[str, ChatSummary],
+    dry_run: bool,
+) -> None:
     unfinished = cache.iter_unfinished_chats(user_id)
     missing = {cid for cid in unfinished if cid not in chats_by_id}
-    if missing:
-        recovery_after_id: str | None = None
-        while missing:
-            extra_page = compliance.list_chats(
-                [user_id], after_id=recovery_after_id
-            )
-            for chat in extra_page.data:
-                if chat.id in missing:
-                    chats_by_id[chat.id] = chat
-                    missing.discard(chat.id)
-            if not extra_page.has_more or extra_page.last_id is None:
-                break
-            recovery_after_id = extra_page.last_id
-        for cid in missing:
-            cache.mark_chat_deleted(cid, "Not found in chat listing")
-        if missing and not dry_run:
-            cache.commit()
+    if not missing:
+        return
+    recovery_after_id: str | None = None
+    while missing:
+        extra_page = compliance.list_chats([user_id], after_id=recovery_after_id)
+        for chat in extra_page.data:
+            if chat.id in missing:
+                chats_by_id[chat.id] = chat
+                missing.discard(chat.id)
+        if not extra_page.has_more or extra_page.last_id is None:
+            break
+        recovery_after_id = extra_page.last_id
+    for cid in missing:
+        cache.mark_chat_deleted(cid, "Not found in chat listing")
+    if missing and not dry_run:
+        cache.commit()
+
+
+def _collect_chats_for_user(
+    *,
+    user_id: str,
+    compliance: ComplianceClient,
+    cache: SyncCache,
+    requested_from: datetime | None,
+    run_until: datetime,
+    dry_run: bool,
+) -> list[ChatSummary]:
+    updated_at_gte = (
+        datetime_to_timestamp_str(requested_from) if requested_from else None
+    )
+    updated_at_lte = datetime_to_timestamp_str(run_until)
+
+    chats_by_id = _paginate_chats_for_user(
+        compliance, user_id, updated_at_gte, updated_at_lte
+    )
+    _recover_missing_chats(
+        compliance=compliance,
+        cache=cache,
+        user_id=user_id,
+        chats_by_id=chats_by_id,
+        dry_run=dry_run,
+    )
 
     return sorted(chats_by_id.values(), key=lambda c: (c.updated_at, c.id))
+
+
+def _highest_from_skipped_chat(
+    cache: SyncCache,
+    chat_id: str,
+    highest_completed: datetime | None,
+) -> datetime | None:
+    state = cache.get_chat_state(chat_id)
+    if (
+        state
+        and state.last_exported_chat_updated_at
+        and (
+            highest_completed is None
+            or state.last_exported_chat_updated_at > highest_completed
+        )
+    ):
+        return state.last_exported_chat_updated_at
+    return highest_completed
+
+
+def _send_chat_pairs(
+    *,
+    chat: ChatSummary,
+    pairs: list[MessagePair],
+    nebuly: NebulyClient,
+    cache: SyncCache,
+    config: Config,
+    user_id: str,
+    outcome: ExportOutcome,
+) -> bool:
+    """Send message pairs for one interval. Returns True if export should stop."""
+    for pair in pairs:
+        outcome.fetched += 1
+        payload = pair_to_payload(pair, anonymize=config.anonymize)
+        if payload is None:
+            outcome.skipped += 1
+            continue
+
+        try:
+            nebuly.send_interaction(payload)
+        except HTTPStatusError:
+            outcome.failed += 1
+            outcome.user_failed = True
+            outcome.chat_failed = True
+            cache.mark_chat_failed(
+                chat.id,
+                "HTTP error sending interaction",
+                new_coverage_until=outcome.exported_until,
+            )
+            if not config.dry_run:
+                cache.commit()
+            logger.error(
+                "Failed to send interaction for user=%s chat=%s; "
+                "stopping user to allow resume",
+                user_id,
+                chat.id,
+            )
+            return True
+
+        outcome.sent += 1
+        msg_ts = pair.assistant_message.created_at
+        outcome.exported_until = (
+            msg_ts
+            if outcome.exported_until is None
+            else max(outcome.exported_until, msg_ts)
+        )
+        cache.checkpoint_chat_coverage(chat.id, outcome.exported_until)
+        if not config.dry_run:
+            cache.commit()
+    return False
+
+
+def _export_chat_intervals(
+    *,
+    chat: ChatSummary,
+    plan: ChatWorkPlan,
+    compliance: ComplianceClient,
+    nebuly: NebulyClient,
+    cache: SyncCache,
+    config: Config,
+    user_id: str,
+    prior_state: ChatState | None,
+) -> ExportOutcome:
+    outcome = ExportOutcome(
+        exported_until=(
+            prior_state.coverage_until
+            if prior_state and prior_state.status == "completed"
+            else None
+        )
+    )
+    cache.mark_chat_in_progress(chat)
+
+    for interval in plan.intervals:
+        try:
+            chat_response = compliance.list_chat_messages(
+                chat.id,
+                created_at_gte=(
+                    datetime_to_timestamp_str(interval.created_at_gte)
+                    if interval.created_at_gte is not None
+                    else None
+                ),
+                created_at_lte=datetime_to_timestamp_str(interval.created_at_lte),
+            )
+        except HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Chat %s not found at source, marking deleted", chat.id)
+                cache.mark_chat_deleted(chat.id, "Chat not found (404)")
+                if not config.dry_run:
+                    cache.commit()
+                outcome.chat_failed = True
+                break
+            raise
+
+        pairs = build_message_pairs(chat_response.chat_messages, chat)
+        if _send_chat_pairs(
+            chat=chat,
+            pairs=pairs,
+            nebuly=nebuly,
+            cache=cache,
+            config=config,
+            user_id=user_id,
+            outcome=outcome,
+        ):
+            break
+
+    return outcome
+
+
+def _finalize_successful_chat(
+    *,
+    chat: ChatSummary,
+    cache: SyncCache,
+    config: Config,
+    exported_until: datetime | None,
+    requested_from: datetime | None,
+    run_until: datetime,
+    highest_completed: datetime | None,
+    user_coverage_from: datetime | None,
+    user_coverage_until: datetime | None,
+) -> tuple[datetime | None, datetime | None, datetime | None]:
+    prior = cache.get_chat_state(chat.id)
+    if exported_until is not None:
+        coverage_until = exported_until
+    elif prior and prior.coverage_until is not None:
+        coverage_until = prior.coverage_until
+    else:
+        coverage_until = run_until
+    new_from, new_until = _merge_coverage(
+        prior.coverage_from if prior else None,
+        None,
+        requested_from,
+        coverage_until,
+    )
+    cache.mark_chat_completed(
+        chat,
+        new_coverage_from=new_from,
+        new_coverage_until=new_until,
+    )
+    if not config.dry_run:
+        cache.commit()
+
+    if highest_completed is None or chat.updated_at > highest_completed:
+        highest_completed = chat.updated_at
+    user_coverage_from = (
+        new_from
+        if user_coverage_from is None
+        else min(user_coverage_from, new_from)
+        if new_from is not None
+        else user_coverage_from
+    )
+    user_coverage_until = (
+        new_until
+        if user_coverage_until is None
+        else max(user_coverage_until, new_until)
+    )
+    return highest_completed, user_coverage_from, user_coverage_until
 
 
 def _sync_user(
@@ -211,134 +424,47 @@ def _sync_user(
             if not config.dry_run:
                 cache.commit()
             counts.chats_skipped += 1
-            state = cache.get_chat_state(chat.id)
-            if state and state.last_exported_chat_updated_at:
-                if (
-                    highest_completed is None
-                    or state.last_exported_chat_updated_at > highest_completed
-                ):
-                    highest_completed = state.last_exported_chat_updated_at
+            highest_completed = _highest_from_skipped_chat(
+                cache, chat.id, highest_completed
+            )
             continue
 
         counts.chats_processed += 1
         prior_state = cache.get_chat_state(chat.id)
-        exported_until: datetime | None = (
-            prior_state.coverage_until
-            if prior_state and prior_state.status == "completed"
-            else None
+        outcome = _export_chat_intervals(
+            chat=chat,
+            plan=plan,
+            compliance=compliance,
+            nebuly=nebuly,
+            cache=cache,
+            config=config,
+            user_id=user_id,
+            prior_state=prior_state,
         )
-        cache.mark_chat_in_progress(chat, requested_from, run_until)
-        chat_failed = False
+        counts.fetched += outcome.fetched
+        counts.sent += outcome.sent
+        counts.skipped += outcome.skipped
+        counts.failed += outcome.failed
 
-        for interval in plan.intervals:
-            try:
-                chat_response = compliance.list_chat_messages(
-                    chat.id,
-                    created_at_gte=(
-                        datetime_to_timestamp_str(interval.created_at_gte)
-                        if interval.created_at_gte is not None
-                        else None
-                    ),
-                    created_at_lte=datetime_to_timestamp_str(interval.created_at_lte),
-                )
-            except HTTPStatusError as e:
-                if e.response.status_code == 404:
-                    logger.warning(
-                        "Chat %s not found at source, marking deleted", chat.id
-                    )
-                    cache.mark_chat_deleted(chat.id, "Chat not found (404)")
-                    if not config.dry_run:
-                        cache.commit()
-                    chat_failed = True
-                    break
-                raise
-
-            pairs = build_message_pairs(chat_response.chat_messages, chat)
-            for pair in pairs:
-                counts.fetched += 1
-                payload = pair_to_payload(pair, anonymize=config.anonymize)
-                if payload is None:
-                    counts.skipped += 1
-                    continue
-
-                try:
-                    nebuly.send_interaction(payload)
-                except HTTPStatusError:
-                    counts.failed += 1
-                    user_failed = True
-                    chat_failed = True
-                    cache.mark_chat_failed(
-                        chat.id,
-                        "HTTP error sending interaction",
-                        new_coverage_until=exported_until,
-                    )
-                    if not config.dry_run:
-                        cache.commit()
-                    logger.error(
-                        "Failed to send interaction for user=%s chat=%s; "
-                        "stopping user to allow resume",
-                        user_id,
-                        chat.id,
-                    )
-                    break
-
-                counts.sent += 1
-                # Resume cursor is the assistant timestamp; tail refetch uses
-                # inclusive created_at.gte and drops already-sent pairs when
-                # their user message is earlier.
-                msg_ts = pair.assistant_message.created_at
-                exported_until = (
-                    msg_ts
-                    if exported_until is None
-                    else max(exported_until, msg_ts)
-                )
-                cache.checkpoint_chat_coverage(chat.id, exported_until)
-                if not config.dry_run:
-                    cache.commit()
-
-            if chat_failed:
-                break
-
-        if user_failed:
+        if outcome.user_failed:
+            user_failed = True
             break
 
-        if chat_failed:
+        if outcome.chat_failed:
             continue
 
-        prior = cache.get_chat_state(chat.id)
-        if exported_until is not None:
-            coverage_until = exported_until
-        elif prior and prior.coverage_until is not None:
-            coverage_until = prior.coverage_until
-        else:
-            coverage_until = run_until
-        new_from, new_until = _merge_coverage(
-            prior.coverage_from if prior else None,
-            None,
-            requested_from,
-            coverage_until,
-        )
-        cache.mark_chat_completed(
-            chat,
-            new_coverage_from=new_from,
-            new_coverage_until=new_until,
-        )
-        if not config.dry_run:
-            cache.commit()
-
-        if highest_completed is None or chat.updated_at > highest_completed:
-            highest_completed = chat.updated_at
-        user_coverage_from = (
-            new_from
-            if user_coverage_from is None
-            else min(user_coverage_from, new_from)
-            if new_from is not None
-            else user_coverage_from
-        )
-        user_coverage_until = (
-            new_until
-            if user_coverage_until is None
-            else max(user_coverage_until, new_until)
+        highest_completed, user_coverage_from, user_coverage_until = (
+            _finalize_successful_chat(
+                chat=chat,
+                cache=cache,
+                config=config,
+                exported_until=outcome.exported_until,
+                requested_from=requested_from,
+                run_until=run_until,
+                highest_completed=highest_completed,
+                user_coverage_from=user_coverage_from,
+                user_coverage_until=user_coverage_until,
+            )
         )
 
     if not user_failed:

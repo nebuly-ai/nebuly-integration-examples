@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 from unittest.mock import patch
 
 from compliance_sync import user_defined
@@ -35,7 +36,7 @@ def _chat(chat_id: str = "chat_01", user_id: str = "user_01") -> ChatSummary:
     )
 
 
-def _msg(msg_id: str, role: str, text: str) -> ChatMessage:
+def _msg(msg_id: str, role: Literal["user", "assistant"], text: str) -> ChatMessage:
     return ChatMessage(
         id=msg_id,
         role=role,
@@ -117,4 +118,3 @@ def test_user_defined_hooks_in_payload() -> None:
     assert payload["interaction"]["tags"] == custom_tags
     assert payload["traces"] == custom_traces
     assert payload["user_feedback"] == custom_feedback
-

@@ -89,9 +89,7 @@ def _now_ts() -> str:
 
 
 class SyncCache:
-    def __init__(
-        self, db_path: Path, organization_uuid: str, *, dry_run: bool
-    ) -> None:
+    def __init__(self, db_path: Path, organization_uuid: str, *, dry_run: bool) -> None:
         self._organization_uuid = organization_uuid
         self._dry_run = dry_run
         if dry_run:
@@ -164,7 +162,9 @@ class SyncCache:
             # Tail refetch uses inclusive created_at.gte; already-sent pairs are
             # excluded because their user message has an earlier timestamp.
             tail_from = (
-                state.coverage_until if state.coverage_until is not None else requested_from
+                state.coverage_until
+                if state.coverage_until is not None
+                else requested_from
             )
             intervals.append(FetchInterval(tail_from, run_until))
 
@@ -173,8 +173,6 @@ class SyncCache:
     def mark_chat_in_progress(
         self,
         chat: ChatSummary,
-        requested_from: datetime | None,
-        run_until: datetime,
     ) -> None:
         now = _now_ts()
         self._conn.execute(
@@ -312,11 +310,10 @@ class SyncCache:
         coverage_until = run_until
         if state and state.coverage_until is not None:
             coverage_until = max(state.coverage_until, run_until)
-        last_exported = (
-            state.last_exported_chat_updated_at if state else chat.updated_at
-        )
         if state is None or state.last_exported_chat_updated_at is None:
             last_exported = chat.updated_at
+        else:
+            last_exported = state.last_exported_chat_updated_at
         self._conn.execute(
             """
             INSERT INTO sync_chat_state (
@@ -363,19 +360,22 @@ class SyncCache:
         last_successful_run_at: datetime,
     ) -> None:
         now = _now_ts()
+
+        update_query = """
+        INSERT INTO sync_user_state (
+            user_id, organization_uuid, highest_completed_chat_updated_at,
+            coverage_from, coverage_until, last_successful_run_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (organization_uuid, user_id) DO UPDATE SET
+            highest_completed_chat_updated_at = excluded.highest_completed_chat_updated_at, 
+            coverage_from = excluded.coverage_from,
+            coverage_until = excluded.coverage_until,
+            last_successful_run_at = excluded.last_successful_run_at,
+            updated_at = excluded.updated_at
+        """  # noqa: E501
+
         self._conn.execute(
-            """
-            INSERT INTO sync_user_state (
-              user_id, organization_uuid, highest_completed_chat_updated_at,
-              coverage_from, coverage_until, last_successful_run_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (organization_uuid, user_id) DO UPDATE SET
-              highest_completed_chat_updated_at = excluded.highest_completed_chat_updated_at,
-              coverage_from = excluded.coverage_from,
-              coverage_until = excluded.coverage_until,
-              last_successful_run_at = excluded.last_successful_run_at,
-              updated_at = excluded.updated_at
-            """,
+            update_query,
             (
                 user_id,
                 self._organization_uuid,

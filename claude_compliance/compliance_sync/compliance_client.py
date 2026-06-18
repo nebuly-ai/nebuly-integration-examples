@@ -68,8 +68,12 @@ class ComplianceClient:
 
     @retry(
         retry=retry_if_exception(
-            lambda e: isinstance(e, (ReadTimeout, ConnectTimeout, HTTPStatusError))
-            and (not isinstance(e, HTTPStatusError) or e.response.status_code == 429)
+            lambda e: (
+                isinstance(e, (ReadTimeout, ConnectTimeout, HTTPStatusError))
+                and (
+                    not isinstance(e, HTTPStatusError) or e.response.status_code == 429
+                )
+            )
         ),
         stop=stop_after_attempt(10),
         wait=_retry_after_seconds,
@@ -201,7 +205,7 @@ class ComplianceClient:
             page_after_id = page.last_id
             if page_after_id is None:
                 break
-        
+
         if merged is None:
             return ChatMessagesResponse(
                 chat_messages=[],
@@ -209,5 +213,5 @@ class ComplianceClient:
                 first_id=None,
                 last_id=None,
             )
-            
+
         return merged
