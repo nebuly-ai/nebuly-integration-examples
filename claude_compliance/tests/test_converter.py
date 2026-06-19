@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from compliance_sync import user_defined
 from compliance_sync.converter import (
-    MessagePair,
+    Interaction,
     build_message_pairs,
     extract_text_content,
     pair_to_payload,
@@ -82,7 +82,7 @@ def test_payload_shape() -> None:
 
 def test_build_tags_defaults() -> None:
     chat = _chat()
-    pair = MessagePair(
+    pair = Interaction(
         user_message=_msg("u1", "user", "hello"),
         assistant_message=_msg("a1", "assistant", "hi"),
         chat=chat,
@@ -98,7 +98,7 @@ def test_build_tags_defaults() -> None:
 
 def test_user_defined_hooks_in_payload() -> None:
     chat = _chat()
-    pair = MessagePair(
+    pair = Interaction(
         user_message=_msg("u1", "user", "hello"),
         assistant_message=_msg("a1", "assistant", "hi"),
         chat=chat,

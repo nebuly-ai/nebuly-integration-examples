@@ -9,7 +9,7 @@ from .models import ChatMessage, ChatMessagesResponse, ChatSummary
 
 
 @dataclass(frozen=True)
-class MessagePair:
+class Interaction:
     user_message: ChatMessage
     assistant_message: ChatMessage
     chat: ChatSummary
@@ -25,7 +25,7 @@ def extract_text_content(message: ChatMessage) -> str:
 
 def build_message_pairs(
     chat_messages: list[ChatMessage], chat: ChatSummary
-) -> list[MessagePair]:
+) -> list[Interaction]:
     enumerated = list(enumerate(chat_messages))
     sorted_messages = [
         msg
@@ -35,7 +35,7 @@ def build_message_pairs(
         )
     ]
 
-    pairs: list[MessagePair] = []
+    pairs: list[Interaction] = []
     pending_user: ChatMessage | None = None
     for message in sorted_messages:
         if message.role == "user":
@@ -44,7 +44,7 @@ def build_message_pairs(
             if pending_user is None:
                 continue
             pairs.append(
-                MessagePair(
+                Interaction(
                     user_message=pending_user,
                     assistant_message=message,
                     chat=chat,
@@ -58,7 +58,7 @@ def build_message_pairs(
     )
 
 
-def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | None:
+def pair_to_payload(pair: Interaction, *, anonymize: bool) -> dict[str, Any] | None:
     user_input = extract_text_content(pair.user_message)
     # No user text means no Nebuly input; the pair is permanently non-exportable.
     if not user_input:
@@ -86,7 +86,7 @@ def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | N
     }
 
 
-def pairs_from_chat_response(response: ChatMessagesResponse) -> list[MessagePair]:
+def pairs_from_chat_response(response: ChatMessagesResponse) -> list[Interaction]:
     chat = ChatSummary.model_validate(
         response.model_dump(
             exclude={"chat_messages", "has_more", "first_id", "last_id"}

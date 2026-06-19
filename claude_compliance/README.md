@@ -63,7 +63,7 @@ Edit `compliance_sync/user_defined.py` — the single extension point for custom
 | `build_user_feedback(pair)` | `list[dict]`     | Explicit user feedback events                            |
 
 
-Each function receives a `MessagePair` with `user_message`, `assistant_message`, and `chat` (so `chat.user.id`, `chat.user.email_address`, `chat.model`, and message content blocks are all reachable).
+Each function receives a `Interaction` with `user_message`, `assistant_message` and `chat` (so `chat.user.id`, `chat.user.email_address`, `chat.model`, and message content blocks are all reachable).
 
 `build_tags` ships with default Claude compliance metadata tags (`claude chat-id`, `claude project-id`, `model`, `chat name`, `href`). Remove any you don't need, or add your own. 
 

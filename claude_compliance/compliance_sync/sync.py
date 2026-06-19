@@ -10,7 +10,7 @@ from httpx import HTTPStatusError
 from .cache import ChatState, ChatWorkPlan, SyncCache
 from .compliance_client import ComplianceClient
 from .config import Config, datetime_to_timestamp_str
-from .converter import MessagePair, build_message_pairs, pair_to_payload
+from .converter import Interaction, build_message_pairs, pair_to_payload
 from .models import ChatSummary
 from .nebuly_client import NebulyClient
 
@@ -352,7 +352,7 @@ def _checkpoint_after_send(
 def _send_chat_pairs(
     *,
     chat: ChatSummary,
-    pairs: list[MessagePair],
+    pairs: list[Interaction],
     nebuly: NebulyClient,
     cache: SyncCache,
     config: Config,

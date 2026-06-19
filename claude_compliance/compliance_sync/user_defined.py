@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .converter import MessagePair
+    from .converter import Interaction
 
 
-def build_tags(pair: MessagePair) -> dict[str, str]:
+def build_tags(pair: Interaction) -> dict[str, str]:
     chat = pair.chat
     # Default Claude metadata tags. Remove any you don't need, or add your own below.
     tags = {
@@ -22,14 +22,14 @@ def build_tags(pair: MessagePair) -> dict[str, str]:
     return tags
 
 
-def build_traces(pair: MessagePair) -> list[dict[str, Any]]:
+def build_traces(pair: Interaction) -> list[dict[str, Any]]:  # noqa: ARG001
     # Return intermediate steps behind the answer (LLM/Retrieval/Embedding traces).
     # Example RetrievalTrace built from your RAG layer:
     # return [{"source": "kb_search", "input": query, "outputs": [doc1, doc2]}]
     return []
 
 
-def build_user_feedback(pair: MessagePair) -> list[dict[str, Any]]:
+def build_user_feedback(pair: Interaction) -> list[dict[str, Any]]:  # noqa: ARG001
     # Return explicit feedback for this interaction.
     # Valid slugs: thumbs_up, thumbs_down, copy_input, copy_output, paste,
     #              comment, regenerate, edit, rating.
