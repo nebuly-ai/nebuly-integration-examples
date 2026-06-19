@@ -30,9 +30,9 @@ cp .env.example .env
 
 | Variable                             | Required | Default                                                                      | Description                                                                              |
 | ------------------------------------ | -------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `NEBULY_API_KEY`                     | yes      | —                                                                            | Nebuly secret key, retrieve it fromSettings > Projects > View Nebuly keys > Secret keys |
+| `NEBULY_API_KEY`                     | yes      | —                                                                            | Nebuly secret key, retrieve it from Settings > Projects > View Nebuly keys > Secret keys |
 | `COMPLIANCE_API_KEY`                 | yes      | —                                                                            | Compliance API key (`x-api-key` header)                                                  |
-| `COMPLIANCE_BASE_URL`                | yes      | —                                                                            | Compliance API base URL                                                                  |
+| `COMPLIANCE_BASE_URL`                | no       | `https://api.anthropic.com/v1/compliance`                                    | Compliance API base URL                                                                  |
 | `ORGANIZATION_UUID`                  | yes      | —                                                                            | Organization UUID to sync                                                                |
 | `NEBULY_ENDPOINT`                    | no       | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint override                                                       |
 | `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | no       | `600`                                                                        | Rate limit for Compliance API requests                                                   |

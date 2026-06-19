@@ -100,9 +100,11 @@ class Config:
             nebuly_endpoint=os.environ.get(
                 "NEBULY_ENDPOINT",
                 "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction",
-            ),
+            ).rstrip("/"),
             compliance_api_key=cast(str, compliance_api_key),
-            compliance_base_url=cast(str, compliance_base_url).rstrip("/"),
+            compliance_base_url=cast(
+                str, compliance_base_url or "https://api.anthropic.com/v1/compliance"
+            ).rstrip("/"),
             organization_uuid=cast(str, organization_uuid),
             compliance_max_requests_per_minute=int(
                 os.environ.get("COMPLIANCE_MAX_REQUESTS_PER_MINUTE", "600")
