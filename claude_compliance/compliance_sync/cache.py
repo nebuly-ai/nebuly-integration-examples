@@ -284,6 +284,14 @@ class SyncCache:
                 new_coverage_until,
                 new_coverage_until_msg_id,
             )
+        coverage_from_msg_id = None
+        if (
+            new_coverage_from is not None
+            and state is not None
+            and state.coverage_from is not None
+            and new_coverage_from == state.coverage_from
+        ):
+            coverage_from_msg_id = state.coverage_from_msg_id
         now = _now_ts()
         self._conn.execute(
             """
@@ -305,7 +313,7 @@ class SyncCache:
                 datetime_to_timestamp_str(new_coverage_from)
                 if new_coverage_from
                 else None,
-                None,
+                coverage_from_msg_id,
                 datetime_to_timestamp_str(coverage_until),
                 coverage_until_msg_id,
                 now,

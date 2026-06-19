@@ -391,3 +391,47 @@ def test_mark_chat_completed_never_regresses_coverage_until(tmp_path: Path) -> N
     assert state.coverage_until == _ts(10)
     assert state.coverage_until_msg_id == "a1"
     assert state.coverage_from_msg_id is None
+
+
+def test_mark_chat_completed_preserves_coverage_from_msg_id(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+    tie_ts = _ts(7)
+
+    cache.mark_chat_in_progress(chat)
+    cache.checkpoint_chat_coverage_from("chat_1", tie_ts, "a_high")
+    cache.mark_chat_completed(
+        chat,
+        new_coverage_from=tie_ts,
+        new_coverage_until=_ts(10),
+        new_coverage_until_msg_id="a1",
+    )
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.coverage_from == tie_ts
+    assert state.coverage_from_msg_id == "a_high"
+
+
+def test_mark_chat_completed_clears_coverage_from_msg_id_when_earlier_boundary(
+    tmp_path: Path,
+) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+    tie_ts = _ts(7)
+
+    cache.mark_chat_in_progress(chat)
+    cache.checkpoint_chat_coverage_from("chat_1", tie_ts, "a_high")
+    cache.mark_chat_completed(
+        chat,
+        new_coverage_from=_ts(6),
+        new_coverage_until=_ts(10),
+        new_coverage_until_msg_id="a1",
+    )
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.coverage_from == _ts(6)
+    assert state.coverage_from_msg_id is None

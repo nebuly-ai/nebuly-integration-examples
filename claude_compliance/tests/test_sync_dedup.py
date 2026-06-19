@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 from compliance_sync.cache import SyncCache
+from compliance_sync.compliance_client import _should_retry as compliance_should_retry
 from compliance_sync.config import Config, timestamp_str_to_datetime
 from compliance_sync.models import (
     ChatMessage,
@@ -764,6 +765,105 @@ def test_backfill_resume_after_failure_does_not_replay(tmp_path: Path) -> None:
     assert all_inputs.count("earliest") == 1
 
 
+def test_backfill_tie_pair_not_lost_after_incremental_completion(
+    tmp_path: Path,
+) -> None:
+    tie_ts = _ts(7)
+    d1 = _ts(8)
+    chat = _chat_summary("chat_1", updated_at=_ts(10))
+    messages_by_chat: dict[str, list[ChatMessage]] = {
+        "chat_1": [
+            _message("u_low", "user", tie_ts, "low"),
+            _message("a_01", "assistant", tie_ts, "low reply"),
+            _message("u_high", "user", tie_ts, "high"),
+            _message("a_99", "assistant", tie_ts, "high reply"),
+            _message("u3", "user", _ts(9), "hello"),
+            _message("a3", "assistant", _ts(10), "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config_d1 = _config(tmp_path, from_date=d1)
+
+    _sync_user(
+        user_id="user_1",
+        config=config_d1,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config_d1.to_date,  # type: ignore[arg-type]
+    )
+    assert len(nebuly.sent) == 1
+
+    nebuly_fail = FakeNebulyClient(fail_after=1)
+    compliance.message_fetch_count = 0
+    config_backfill = _config(tmp_path, from_date=_ts(6))
+
+    counts_fail = _sync_user(
+        user_id="user_1",
+        config=config_backfill,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly_fail,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts_fail.sent == 1
+    assert counts_fail.failed == 1
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "failed"
+    assert state.coverage_from == tie_ts
+    assert state.coverage_from_msg_id == "a_99"
+
+    chat_updated = _chat_summary("chat_1", updated_at=_ts(11))
+    compliance._chats = [chat_updated]
+    messages_by_chat["chat_1"].extend(
+        [
+            _message("u4", "user", _ts(10, 30), "new"),
+            _message("a4", "assistant", _ts(11), "new reply"),
+        ]
+    )
+
+    nebuly_incremental = FakeNebulyClient()
+    compliance.message_fetch_count = 0
+    config_incremental = _config(tmp_path)
+
+    counts_incremental = _sync_user(
+        user_id="user_1",
+        config=config_incremental,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly_incremental,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts_incremental.sent == 1
+    assert counts_incremental.failed == 0
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "completed"
+    assert state.coverage_from == tie_ts
+    assert state.coverage_from_msg_id == "a_99"
+
+    nebuly_final = FakeNebulyClient()
+    compliance.message_fetch_count = 0
+
+    counts_final = _sync_user(
+        user_id="user_1",
+        config=config_backfill,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly_final,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts_final.sent == 1
+    assert nebuly_final.sent[0]["interaction"]["input"] == "low"
+
+
 def test_backfill_from_failed_state_never_regresses_coverage_until(
     tmp_path: Path,
 ) -> None:
@@ -967,6 +1067,47 @@ def test_nebuly_transport_error_marks_failed_and_resumes(tmp_path: Path) -> None
             "bad request",
             request=request,
             response=httpx.Response(400, request=request),
+        )
+    )
+
+
+def test_compliance_should_retry() -> None:
+    request = httpx.Request("GET", "/")
+    assert compliance_should_retry(httpx.ReadTimeout("read timeout"))
+    assert compliance_should_retry(httpx.ConnectError("connect failed"))
+    assert compliance_should_retry(
+        httpx.HTTPStatusError(
+            "rate limited",
+            request=request,
+            response=httpx.Response(429, request=request),
+        )
+    )
+    assert compliance_should_retry(
+        httpx.HTTPStatusError(
+            "server error",
+            request=request,
+            response=httpx.Response(500, request=request),
+        )
+    )
+    assert compliance_should_retry(
+        httpx.HTTPStatusError(
+            "service unavailable",
+            request=request,
+            response=httpx.Response(503, request=request),
+        )
+    )
+    assert not compliance_should_retry(
+        httpx.HTTPStatusError(
+            "bad request",
+            request=request,
+            response=httpx.Response(400, request=request),
+        )
+    )
+    assert not compliance_should_retry(
+        httpx.HTTPStatusError(
+            "not found",
+            request=request,
+            response=httpx.Response(404, request=request),
         )
     )
 

@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 API_KEY_HEADER = "x-api-key"
 
 
+def _should_retry(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if not isinstance(exc, HTTPStatusError):
+        return False
+    status = exc.response.status_code
+    return status == 429 or status >= 500
+
+
 def _retry_after_seconds(retry_state: RetryCallState) -> float:
     if retry_state.outcome is None:
         return 60.0
@@ -67,14 +76,7 @@ class ComplianceClient:
         return {API_KEY_HEADER: self._api_key}
 
     @retry(
-        retry=retry_if_exception(
-            lambda e: (
-                isinstance(e, (httpx.TransportError, HTTPStatusError))
-                and (
-                    not isinstance(e, HTTPStatusError) or e.response.status_code == 429
-                )
-            )
-        ),
+        retry=retry_if_exception(_should_retry),
         stop=stop_after_attempt(10),
         wait=_retry_after_seconds,
         reraise=True,
@@ -98,6 +100,7 @@ class ComplianceClient:
             resp.raise_for_status()
             data = resp.json()
         except HTTPStatusError as e:
+            # Logged once per retry attempt (429 and 5xx are retried).
             if e.response.status_code != 429:
                 body_preview = e.response.text[:200]
                 logger.error(
