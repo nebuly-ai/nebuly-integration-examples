@@ -23,10 +23,6 @@ packages = [
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[[tool.mypy.overrides]]
-module = "msgraph_beta.*"
-ignore_missing_imports = true
-
 [tool.poetry.group.dev.dependencies]
 types-aiofiles = "^24.1.0.20250606"
 
@@ -37,3 +33,77 @@ aiofiles = ">=24.1.0"
 python-dotenv = "^1.1.0"
 msgraph-beta-sdk = "^1.36.0"
 
+[tool.ruff]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**.py" = [
+    "E402",
+    "E501",
+]
+"tests/**.py" = [
+    "ARG",
+]
+
+[tool.mypy]
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "msgraph_beta.*"
+ignore_missing_imports = true
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "C90",
+    "ASYNC",
+    "T20",
+    "PL",
+    "SIM",
+    "PIE",
+    "PGH",
+    "TID",
+    "ARG",
+]
+ignore = [
+    "PLR2004",
+    "PLR0913",
+    "PLR0911",
+    "SIM118",
+    "PLC0415",
+]
+
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
