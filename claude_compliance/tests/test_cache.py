@@ -273,7 +273,7 @@ def test_mark_chat_deleted_excluded_from_unfinished(tmp_path: Path) -> None:
     assert cache.iter_unfinished_chats("user_1") == []
 
 
-def test_skipped_extend_normalizes_failed_status(tmp_path: Path) -> None:
+def test_skipped_extend_preserves_failed_status(tmp_path: Path) -> None:
     cache = _cache(tmp_path)
     chat = _chat("chat_1", updated_at=_ts(10))
     run_until = _ts(12)
@@ -292,9 +292,35 @@ def test_skipped_extend_normalizes_failed_status(tmp_path: Path) -> None:
 
     state = cache.get_chat_state("chat_1")
     assert state is not None
-    assert state.status == "completed"
-    assert state.last_error is None
-    assert cache.iter_unfinished_chats("user_1") == []
+    assert state.status == "failed"
+    assert state.last_error == "backfill failed"
+    assert state.coverage_until == _ts(14)
+    assert cache.iter_unfinished_chats("user_1") == ["chat_1"]
+
+
+def test_skipped_extend_preserves_in_progress_status(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+    run_until = _ts(12)
+
+    cache.mark_chat_in_progress(chat)
+    cache.mark_chat_completed(
+        chat,
+        new_coverage_from=_ts(8),
+        new_coverage_until=run_until,
+    )
+    cache.commit()
+
+    cache.mark_chat_in_progress(chat)
+    cache.commit()
+
+    cache.mark_chat_skipped_extend(chat, _ts(14))
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.status == "in_progress"
+    assert cache.iter_unfinished_chats("user_1") == ["chat_1"]
 
 
 def test_skipped_extend_preserves_deleted_status(tmp_path: Path) -> None:
@@ -312,3 +338,56 @@ def test_skipped_extend_preserves_deleted_status(tmp_path: Path) -> None:
     assert state is not None
     assert state.status == "deleted"
     assert state.last_error == "gone"
+
+
+def test_chat_state_round_trips_composite_watermarks(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+
+    cache.mark_chat_in_progress(chat)
+    cache.checkpoint_chat_coverage_until("chat_1", _ts(10), "a1")
+    cache.checkpoint_chat_coverage_from("chat_1", _ts(7), "a0")
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.coverage_until == _ts(10)
+    assert state.coverage_until_msg_id == "a1"
+    assert state.coverage_from == _ts(7)
+    assert state.coverage_from_msg_id == "a0"
+
+
+def test_checkpoint_coverage_until_is_monotonic(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+
+    cache.mark_chat_in_progress(chat)
+    cache.checkpoint_chat_coverage_until("chat_1", _ts(9), "a0")
+    cache.checkpoint_chat_coverage_until("chat_1", _ts(10), "a1")
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.coverage_until == _ts(10)
+    assert state.coverage_until_msg_id == "a1"
+
+
+def test_mark_chat_completed_never_regresses_coverage_until(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    chat = _chat("chat_1", updated_at=_ts(10))
+
+    cache.mark_chat_in_progress(chat)
+    cache.checkpoint_chat_coverage_until("chat_1", _ts(10), "a1")
+    cache.mark_chat_completed(
+        chat,
+        new_coverage_from=_ts(8),
+        new_coverage_until=_ts(7),
+        new_coverage_until_msg_id="a0",
+    )
+    cache.commit()
+
+    state = cache.get_chat_state("chat_1")
+    assert state is not None
+    assert state.coverage_until == _ts(10)
+    assert state.coverage_until_msg_id == "a1"
+    assert state.coverage_from_msg_id is None

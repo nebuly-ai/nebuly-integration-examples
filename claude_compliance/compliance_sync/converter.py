@@ -52,7 +52,10 @@ def build_message_pairs(
             )
             pending_user = None
 
-    return pairs
+    return sorted(
+        pairs,
+        key=lambda p: (p.assistant_message.created_at, p.assistant_message.id),
+    )
 
 
 def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | None:

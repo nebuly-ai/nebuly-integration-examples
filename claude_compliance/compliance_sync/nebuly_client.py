@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 def _should_retry(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
     if not isinstance(exc, HTTPStatusError):
         return False
     status = exc.response.status_code

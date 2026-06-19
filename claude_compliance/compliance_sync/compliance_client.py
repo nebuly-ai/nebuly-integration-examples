@@ -6,7 +6,7 @@ import time
 from typing import Any, cast
 
 import httpx
-from httpx import ConnectTimeout, HTTPStatusError, ReadTimeout
+from httpx import HTTPStatusError
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt
 
 from .models import (
@@ -69,7 +69,7 @@ class ComplianceClient:
     @retry(
         retry=retry_if_exception(
             lambda e: (
-                isinstance(e, (ReadTimeout, ConnectTimeout, HTTPStatusError))
+                isinstance(e, (httpx.TransportError, HTTPStatusError))
                 and (
                     not isinstance(e, HTTPStatusError) or e.response.status_code == 429
                 )
@@ -108,8 +108,8 @@ class ComplianceClient:
                     body_preview,
                 )
             raise
-        except (ReadTimeout, ConnectTimeout) as e:
-            logger.warning("Timeout on %s %s: %s, will retry", method, path, e)
+        except httpx.TransportError as e:
+            logger.warning("Transport error on %s %s: %s, will retry", method, path, e)
             raise
 
         if not isinstance(data, dict):

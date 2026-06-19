@@ -130,6 +130,41 @@ class ExportOutcome:
     user_failed: bool = False
     chat_failed: bool = False
     exported_until: datetime | None = None
+    exported_until_msg_id: str | None = None
+
+
+def _at_or_before_watermark(
+    ts: datetime,
+    msg_id: str,
+    watermark_ts: datetime | None,
+    watermark_msg_id: str | None,
+) -> bool:
+    if watermark_ts is None:
+        return False
+    if ts < watermark_ts:
+        return True
+    if ts > watermark_ts:
+        return False
+    if watermark_msg_id is None:
+        return True
+    return msg_id <= watermark_msg_id
+
+
+def _at_or_after_watermark(
+    ts: datetime,
+    msg_id: str,
+    watermark_ts: datetime | None,
+    watermark_msg_id: str | None,
+) -> bool:
+    if watermark_ts is None:
+        return False
+    if ts > watermark_ts:
+        return True
+    if ts < watermark_ts:
+        return False
+    if watermark_msg_id is None:
+        return True
+    return msg_id >= watermark_msg_id
 
 
 def _paginate_chats_for_user(
@@ -205,6 +240,7 @@ def _collect_chats_for_user(
     chats_by_id = _paginate_chats_for_user(
         compliance, user_id, updated_at_gte, updated_at_lte
     )
+
     _recover_missing_chats(
         compliance=compliance,
         cache=cache,
@@ -234,6 +270,85 @@ def _highest_from_skipped_chat(
     return highest_completed
 
 
+def _pair_already_exported(
+    *,
+    is_backfill: bool,
+    assistant_ts: datetime,
+    assistant_id: str,
+    prior_coverage_from: datetime | None,
+    prior_coverage_from_msg_id: str | None,
+    prior_coverage_until: datetime | None,
+    prior_coverage_until_msg_id: str | None,
+) -> bool:
+    if is_backfill:
+        return _at_or_after_watermark(
+            assistant_ts,
+            assistant_id,
+            prior_coverage_from,
+            prior_coverage_from_msg_id,
+        )
+    return _at_or_before_watermark(
+        assistant_ts,
+        assistant_id,
+        prior_coverage_until,
+        prior_coverage_until_msg_id,
+    )
+
+
+def _handle_send_interaction_failure(
+    *,
+    chat: ChatSummary,
+    cache: SyncCache,
+    config: Config,
+    user_id: str,
+    outcome: ExportOutcome,
+    is_backfill: bool,
+) -> None:
+    outcome.failed += 1
+    outcome.user_failed = True
+    outcome.chat_failed = True
+    if is_backfill:
+        cache.mark_chat_failed(chat.id, "HTTP error sending interaction")
+    else:
+        cache.mark_chat_failed(
+            chat.id,
+            "HTTP error sending interaction",
+            new_coverage_until=outcome.exported_until,
+            new_coverage_until_msg_id=outcome.exported_until_msg_id,
+        )
+    if not config.dry_run:
+        cache.commit()
+    logger.error(
+        "Failed to send interaction for user=%s chat=%s; stopping user to allow resume",
+        user_id,
+        chat.id,
+    )
+
+
+def _checkpoint_after_send(
+    *,
+    chat_id: str,
+    cache: SyncCache,
+    outcome: ExportOutcome,
+    msg_ts: datetime,
+    msg_id: str,
+    is_backfill: bool,
+) -> None:
+    if is_backfill:
+        cache.checkpoint_chat_coverage_from(chat_id, msg_ts, msg_id)
+        return
+    if outcome.exported_until is None or msg_ts > outcome.exported_until:
+        outcome.exported_until = msg_ts
+        outcome.exported_until_msg_id = msg_id
+    elif msg_ts == outcome.exported_until and (
+        outcome.exported_until_msg_id is None or msg_id > outcome.exported_until_msg_id
+    ):
+        outcome.exported_until_msg_id = msg_id
+    cache.checkpoint_chat_coverage_until(
+        chat_id, outcome.exported_until, outcome.exported_until_msg_id or msg_id
+    )
+
+
 def _send_chat_pairs(
     *,
     chat: ChatSummary,
@@ -244,17 +359,25 @@ def _send_chat_pairs(
     user_id: str,
     outcome: ExportOutcome,
     prior_coverage_from: datetime | None = None,
+    prior_coverage_from_msg_id: str | None = None,
     prior_coverage_until: datetime | None = None,
+    prior_coverage_until_msg_id: str | None = None,
     is_backfill: bool = False,
 ) -> bool:
     """Send message pairs for one interval. Returns True if export should stop."""
-    for pair in pairs:
+    ordered_pairs = reversed(pairs) if is_backfill else pairs
+    for pair in ordered_pairs:
         assistant_ts = pair.assistant_message.created_at
-        if is_backfill:
-            if prior_coverage_from is not None and assistant_ts >= prior_coverage_from:
-                outcome.skipped += 1
-                continue
-        elif prior_coverage_until is not None and assistant_ts <= prior_coverage_until:
+        assistant_id = pair.assistant_message.id
+        if _pair_already_exported(
+            is_backfill=is_backfill,
+            assistant_ts=assistant_ts,
+            assistant_id=assistant_id,
+            prior_coverage_from=prior_coverage_from,
+            prior_coverage_from_msg_id=prior_coverage_from_msg_id,
+            prior_coverage_until=prior_coverage_until,
+            prior_coverage_until_msg_id=prior_coverage_until_msg_id,
+        ):
             outcome.skipped += 1
             continue
 
@@ -266,33 +389,28 @@ def _send_chat_pairs(
 
         try:
             nebuly.send_interaction(payload)
-        except HTTPStatusError:
-            outcome.failed += 1
-            outcome.user_failed = True
-            outcome.chat_failed = True
-            cache.mark_chat_failed(
-                chat.id,
-                "HTTP error sending interaction",
-                new_coverage_until=outcome.exported_until,
-            )
-            if not config.dry_run:
-                cache.commit()
-            logger.error(
-                "Failed to send interaction for user=%s chat=%s; "
-                "stopping user to allow resume",
-                user_id,
-                chat.id,
+        except (HTTPStatusError, httpx.RequestError):
+            _handle_send_interaction_failure(
+                chat=chat,
+                cache=cache,
+                config=config,
+                user_id=user_id,
+                outcome=outcome,
+                is_backfill=is_backfill,
             )
             return True
 
         outcome.sent += 1
         msg_ts = pair.assistant_message.created_at
-        outcome.exported_until = (
-            msg_ts
-            if outcome.exported_until is None
-            else max(outcome.exported_until, msg_ts)
+        msg_id = pair.assistant_message.id
+        _checkpoint_after_send(
+            chat_id=chat.id,
+            cache=cache,
+            outcome=outcome,
+            msg_ts=msg_ts,
+            msg_id=msg_id,
+            is_backfill=is_backfill,
         )
-        cache.checkpoint_chat_coverage(chat.id, outcome.exported_until)
         if not config.dry_run:
             cache.commit()
     return False
@@ -314,7 +432,12 @@ def _export_chat_intervals(
             prior_state.coverage_until
             if prior_state and prior_state.status == "completed"
             else None
-        )
+        ),
+        exported_until_msg_id=(
+            prior_state.coverage_until_msg_id
+            if prior_state and prior_state.status == "completed"
+            else None
+        ),
     )
     cache.mark_chat_in_progress(chat)
 
@@ -338,6 +461,19 @@ def _export_chat_intervals(
                 outcome.chat_failed = True
                 break
             raise
+        except httpx.RequestError:
+            outcome.chat_failed = True
+            outcome.user_failed = True
+            cache.mark_chat_failed(chat.id, "Network error fetching chat messages")
+            if not config.dry_run:
+                cache.commit()
+            logger.error(
+                "Failed to fetch messages for user=%s chat=%s; "
+                "stopping user to allow resume",
+                user_id,
+                chat.id,
+            )
+            break
 
         pairs = build_message_pairs(chat_response.chat_messages, chat)
         is_backfill = (
@@ -354,7 +490,13 @@ def _export_chat_intervals(
             user_id=user_id,
             outcome=outcome,
             prior_coverage_from=(prior_state.coverage_from if prior_state else None),
+            prior_coverage_from_msg_id=(
+                prior_state.coverage_from_msg_id if prior_state else None
+            ),
             prior_coverage_until=(prior_state.coverage_until if prior_state else None),
+            prior_coverage_until_msg_id=(
+                prior_state.coverage_until_msg_id if prior_state else None
+            ),
             is_backfill=is_backfill,
         ):
             break
@@ -368,6 +510,7 @@ def _finalize_successful_chat(
     cache: SyncCache,
     config: Config,
     exported_until: datetime | None,
+    exported_until_msg_id: str | None,
     requested_from: datetime | None,
     run_until: datetime,
     highest_completed: datetime | None,
@@ -379,10 +522,13 @@ def _finalize_successful_chat(
     prior = cache.get_chat_state(chat.id)
     if exported_until is not None:
         coverage_until = exported_until
+        coverage_until_msg_id = exported_until_msg_id
     elif prior and prior.coverage_until is not None:
         coverage_until = prior.coverage_until
+        coverage_until_msg_id = prior.coverage_until_msg_id
     else:
         coverage_until = run_until
+        coverage_until_msg_id = None
     new_from, new_until = _merge_coverage(
         prior.coverage_from if prior else None,
         None,
@@ -393,6 +539,7 @@ def _finalize_successful_chat(
         chat,
         new_coverage_from=new_from,
         new_coverage_until=new_until,
+        new_coverage_until_msg_id=coverage_until_msg_id,
     )
     if not config.dry_run:
         cache.commit()
@@ -485,6 +632,7 @@ def _sync_user(
                 cache=cache,
                 config=config,
                 exported_until=outcome.exported_until,
+                exported_until_msg_id=outcome.exported_until_msg_id,
                 requested_from=requested_from,
                 run_until=run_until,
                 highest_completed=highest_completed,

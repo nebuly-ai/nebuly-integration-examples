@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS sync_chat_state (
   last_seen_chat_updated_at      TEXT NOT NULL,
   last_exported_chat_updated_at  TEXT,
   coverage_from                  TEXT,
+  coverage_from_msg_id           TEXT,
   coverage_until                 TEXT,
+  coverage_until_msg_id          TEXT,
   status                         TEXT NOT NULL,
   last_error                     TEXT,
   updated_at                     TEXT NOT NULL,
@@ -52,7 +54,9 @@ class ChatState:
     last_seen_chat_updated_at: datetime
     last_exported_chat_updated_at: datetime | None
     coverage_from: datetime | None
+    coverage_from_msg_id: str | None
     coverage_until: datetime | None
+    coverage_until_msg_id: str | None
     status: str
     last_error: str | None
 
@@ -88,6 +92,23 @@ def _now_ts() -> str:
     return datetime_to_timestamp_str(datetime.now(tz=timezone.utc))
 
 
+def _max_watermark(
+    ts_a: datetime,
+    id_a: str | None,
+    ts_b: datetime,
+    id_b: str | None,
+) -> tuple[datetime, str | None]:
+    if ts_a > ts_b:
+        return ts_a, id_a
+    if ts_b > ts_a:
+        return ts_b, id_b
+    if id_a is None:
+        return ts_b, id_b
+    if id_b is None:
+        return ts_a, id_a
+    return (ts_a, id_a) if id_a >= id_b else (ts_b, id_b)
+
+
 class SyncCache:
     def __init__(self, db_path: Path, organization_uuid: str, *, dry_run: bool) -> None:
         self._organization_uuid = organization_uuid
@@ -104,8 +125,8 @@ class SyncCache:
         row = self._conn.execute(
             """
             SELECT chat_id, user_id, chat_created_at, last_seen_chat_updated_at,
-                   last_exported_chat_updated_at, coverage_from, coverage_until,
-                   status, last_error
+                   last_exported_chat_updated_at, coverage_from, coverage_from_msg_id,
+                   coverage_until, coverage_until_msg_id, status, last_error
             FROM sync_chat_state
             WHERE organization_uuid = ? AND chat_id = ?
             """,
@@ -120,9 +141,11 @@ class SyncCache:
             last_seen_chat_updated_at=timestamp_str_to_datetime(row[3]),
             last_exported_chat_updated_at=_row_ts(row[4]),
             coverage_from=_row_ts(row[5]),
-            coverage_until=_row_ts(row[6]),
-            status=row[7],
-            last_error=row[8],
+            coverage_from_msg_id=row[6],
+            coverage_until=_row_ts(row[7]),
+            coverage_until_msg_id=row[8],
+            status=row[9],
+            last_error=row[10],
         )
 
     def plan_chat_work(
@@ -201,17 +224,42 @@ class SyncCache:
             ),
         )
 
-    def checkpoint_chat_coverage(self, chat_id: str, coverage_until: datetime) -> None:
+    def checkpoint_chat_coverage_until(
+        self, chat_id: str, coverage_until: datetime, coverage_until_msg_id: str
+    ) -> None:
         now = _now_ts()
         self._conn.execute(
             """
             UPDATE sync_chat_state SET
               coverage_until = ?,
+              coverage_until_msg_id = ?,
               updated_at = ?
             WHERE organization_uuid = ? AND chat_id = ?
             """,
             (
                 datetime_to_timestamp_str(coverage_until),
+                coverage_until_msg_id,
+                now,
+                self._organization_uuid,
+                chat_id,
+            ),
+        )
+
+    def checkpoint_chat_coverage_from(
+        self, chat_id: str, coverage_from: datetime, coverage_from_msg_id: str
+    ) -> None:
+        now = _now_ts()
+        self._conn.execute(
+            """
+            UPDATE sync_chat_state SET
+              coverage_from = ?,
+              coverage_from_msg_id = ?,
+              updated_at = ?
+            WHERE organization_uuid = ? AND chat_id = ?
+            """,
+            (
+                datetime_to_timestamp_str(coverage_from),
+                coverage_from_msg_id,
                 now,
                 self._organization_uuid,
                 chat_id,
@@ -224,7 +272,18 @@ class SyncCache:
         *,
         new_coverage_from: datetime | None,
         new_coverage_until: datetime,
+        new_coverage_until_msg_id: str | None = None,
     ) -> None:
+        state = self.get_chat_state(chat.id)
+        coverage_until = new_coverage_until
+        coverage_until_msg_id = new_coverage_until_msg_id
+        if state and state.coverage_until is not None:
+            coverage_until, coverage_until_msg_id = _max_watermark(
+                state.coverage_until,
+                state.coverage_until_msg_id,
+                new_coverage_until,
+                new_coverage_until_msg_id,
+            )
         now = _now_ts()
         self._conn.execute(
             """
@@ -232,7 +291,9 @@ class SyncCache:
               last_seen_chat_updated_at = ?,
               last_exported_chat_updated_at = ?,
               coverage_from = ?,
+              coverage_from_msg_id = ?,
               coverage_until = ?,
+              coverage_until_msg_id = ?,
               status = 'completed',
               last_error = NULL,
               updated_at = ?
@@ -244,7 +305,9 @@ class SyncCache:
                 datetime_to_timestamp_str(new_coverage_from)
                 if new_coverage_from
                 else None,
-                datetime_to_timestamp_str(new_coverage_until),
+                None,
+                datetime_to_timestamp_str(coverage_until),
+                coverage_until_msg_id,
                 now,
                 self._organization_uuid,
                 chat.id,
@@ -257,28 +320,38 @@ class SyncCache:
         error: str,
         *,
         new_coverage_until: datetime | None = None,
+        new_coverage_until_msg_id: str | None = None,
     ) -> None:
         now = _now_ts()
-        coverage_ts: str | None = None
+        state = self.get_chat_state(chat_id)
         if new_coverage_until is not None:
-            state = self.get_chat_state(chat_id)
             if state and state.coverage_until is not None:
-                merged = max(state.coverage_until, new_coverage_until)
+                merged_ts, merged_id = _max_watermark(
+                    state.coverage_until,
+                    state.coverage_until_msg_id,
+                    new_coverage_until,
+                    new_coverage_until_msg_id,
+                )
             else:
-                merged = new_coverage_until
-            coverage_ts = datetime_to_timestamp_str(merged)
-
-        if coverage_ts is not None:
+                merged_ts, merged_id = new_coverage_until, new_coverage_until_msg_id
             self._conn.execute(
                 """
                 UPDATE sync_chat_state SET
                   status = 'failed',
                   last_error = ?,
                   coverage_until = ?,
+                  coverage_until_msg_id = ?,
                   updated_at = ?
                 WHERE organization_uuid = ? AND chat_id = ?
                 """,
-                (error, coverage_ts, now, self._organization_uuid, chat_id),
+                (
+                    error,
+                    datetime_to_timestamp_str(merged_ts),
+                    merged_id,
+                    now,
+                    self._organization_uuid,
+                    chat_id,
+                ),
             )
         else:
             self._conn.execute(
@@ -326,8 +399,6 @@ class SyncCache:
             ON CONFLICT (organization_uuid, chat_id) DO UPDATE SET
               last_seen_chat_updated_at = excluded.last_seen_chat_updated_at,
               coverage_until = excluded.coverage_until,
-              status = CASE WHEN status = 'deleted' THEN 'deleted' ELSE 'completed' END,
-              last_error = CASE WHEN status = 'deleted' THEN last_error ELSE NULL END,
               updated_at = excluded.updated_at
             """,
             (
