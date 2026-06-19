@@ -74,7 +74,6 @@ class Config:
 
         nebuly_api_key = os.environ.get("NEBULY_API_KEY")
         compliance_api_key = os.environ.get("COMPLIANCE_API_KEY")
-        compliance_base_url = os.environ.get("COMPLIANCE_BASE_URL")
         organization_uuid = os.environ.get("ORGANIZATION_UUID")
 
         missing = [
@@ -82,7 +81,6 @@ class Config:
             for name, val in [
                 ("NEBULY_API_KEY", nebuly_api_key),
                 ("COMPLIANCE_API_KEY", compliance_api_key),
-                ("COMPLIANCE_BASE_URL", compliance_base_url),
                 ("ORGANIZATION_UUID", organization_uuid),
             ]
             if not val
@@ -102,8 +100,8 @@ class Config:
                 "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction",
             ).rstrip("/"),
             compliance_api_key=cast(str, compliance_api_key),
-            compliance_base_url=cast(
-                str, compliance_base_url or "https://api.anthropic.com/v1/compliance"
+            compliance_base_url=os.environ.get(
+                "COMPLIANCE_BASE_URL", "https://api.anthropic.com/v1/compliance"
             ).rstrip("/"),
             organization_uuid=cast(str, organization_uuid),
             compliance_max_requests_per_minute=int(

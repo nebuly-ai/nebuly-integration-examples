@@ -381,11 +381,12 @@ def _send_chat_pairs(
             outcome.skipped += 1
             continue
 
-        outcome.fetched += 1
         payload = pair_to_payload(pair, anonymize=config.anonymize)
         if payload is None:
             outcome.skipped += 1
             continue
+
+        outcome.fetched += 1
 
         try:
             nebuly.send_interaction(payload)
