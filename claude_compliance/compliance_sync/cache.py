@@ -159,8 +159,10 @@ class SyncCache:
         if backfill and state.coverage_from is not None:
             intervals.append(FetchInterval(requested_from, state.coverage_from))
         if changed:
-            # Tail refetch uses inclusive created_at.gte; already-sent pairs are
-            # excluded because their user message has an earlier timestamp.
+            # Tail refetch uses inclusive created_at.gte = coverage_until. Normally
+            # already-sent pairs are dropped because the user message is earlier;
+            # when user and assistant share the exact watermark timestamp, sync
+            # skips those pairs explicitly (see _send_chat_pairs).
             tail_from = (
                 state.coverage_until
                 if state.coverage_until is not None
@@ -324,6 +326,8 @@ class SyncCache:
             ON CONFLICT (organization_uuid, chat_id) DO UPDATE SET
               last_seen_chat_updated_at = excluded.last_seen_chat_updated_at,
               coverage_until = excluded.coverage_until,
+              status = CASE WHEN status = 'deleted' THEN 'deleted' ELSE 'completed' END,
+              last_error = CASE WHEN status = 'deleted' THEN last_error ELSE NULL END,
               updated_at = excluded.updated_at
             """,
             (

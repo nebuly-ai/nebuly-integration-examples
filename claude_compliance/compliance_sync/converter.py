@@ -57,6 +57,7 @@ def build_message_pairs(
 
 def pair_to_payload(pair: MessagePair, *, anonymize: bool) -> dict[str, Any] | None:
     user_input = extract_text_content(pair.user_message)
+    # No user text means no Nebuly input; the pair is permanently non-exportable.
     if not user_input:
         return None
 

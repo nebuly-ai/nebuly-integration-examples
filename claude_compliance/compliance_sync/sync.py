@@ -198,6 +198,9 @@ def _collect_chats_for_user(
         datetime_to_timestamp_str(requested_from) if requested_from else None
     )
     updated_at_lte = datetime_to_timestamp_str(run_until)
+    # requested_from drives both the chat updated_at.gte listing window and
+    # message backfill start; coverage_from <= updated_at for cached chats, so
+    # backfill-eligible chats are always included in the listing.
 
     chats_by_id = _paginate_chats_for_user(
         compliance, user_id, updated_at_gte, updated_at_lte
@@ -240,9 +243,21 @@ def _send_chat_pairs(
     config: Config,
     user_id: str,
     outcome: ExportOutcome,
+    prior_coverage_from: datetime | None = None,
+    prior_coverage_until: datetime | None = None,
+    is_backfill: bool = False,
 ) -> bool:
     """Send message pairs for one interval. Returns True if export should stop."""
     for pair in pairs:
+        assistant_ts = pair.assistant_message.created_at
+        if is_backfill:
+            if prior_coverage_from is not None and assistant_ts >= prior_coverage_from:
+                outcome.skipped += 1
+                continue
+        elif prior_coverage_until is not None and assistant_ts <= prior_coverage_until:
+            outcome.skipped += 1
+            continue
+
         outcome.fetched += 1
         payload = pair_to_payload(pair, anonymize=config.anonymize)
         if payload is None:
@@ -325,6 +340,11 @@ def _export_chat_intervals(
             raise
 
         pairs = build_message_pairs(chat_response.chat_messages, chat)
+        is_backfill = (
+            prior_state is not None
+            and prior_state.coverage_from is not None
+            and interval.created_at_lte == prior_state.coverage_from
+        )
         if _send_chat_pairs(
             chat=chat,
             pairs=pairs,
@@ -333,6 +353,9 @@ def _export_chat_intervals(
             config=config,
             user_id=user_id,
             outcome=outcome,
+            prior_coverage_from=(prior_state.coverage_from if prior_state else None),
+            prior_coverage_until=(prior_state.coverage_until if prior_state else None),
+            is_backfill=is_backfill,
         ):
             break
 
@@ -351,6 +374,8 @@ def _finalize_successful_chat(
     user_coverage_from: datetime | None,
     user_coverage_until: datetime | None,
 ) -> tuple[datetime | None, datetime | None, datetime | None]:
+    # pair_to_payload returns None only when the user message has no text; such
+    # pairs are permanently non-exportable, so completing the chat is intentional.
     prior = cache.get_chat_state(chat.id)
     if exported_until is not None:
         coverage_until = exported_until
@@ -419,6 +444,7 @@ def _sync_user(
             break
 
         plan = cache.plan_chat_work(chat, requested_from, run_until)
+
         if plan.skip:
             cache.mark_chat_skipped_extend(chat, run_until)
             if not config.dry_run:

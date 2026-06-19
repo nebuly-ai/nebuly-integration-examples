@@ -580,3 +580,98 @@ def test_crash_mid_chat_does_not_replay_sent_interactions(
     state = cache2.get_chat_state("chat_1")
     assert state is not None
     assert state.status == "completed"
+
+
+def test_tail_boundary_pair_not_duplicated(tmp_path: Path) -> None:
+    watermark = _ts(10)
+    chat_v1 = _chat_summary("chat_1", updated_at=watermark)
+    messages_v1 = {
+        "chat_1": [
+            _message("u1", "user", watermark, "hello"),
+            _message("a1", "assistant", watermark, "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat_v1], messages_v1)
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8))
+
+    _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+    assert len(nebuly.sent) == 1
+
+    chat_v2 = _chat_summary("chat_1", updated_at=_ts(12))
+    compliance._chats = [chat_v2]
+    compliance._messages_by_chat = {
+        "chat_1": messages_v1["chat_1"]
+        + [
+            _message("u2", "user", _ts(11), "more"),
+            _message("a2", "assistant", _ts(12), "again"),
+        ],
+    }
+    nebuly.sent.clear()
+    compliance.message_fetch_count = 0
+
+    counts = _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts.sent == 1
+    assert len(nebuly.sent) == 1
+    assert nebuly.sent[0]["interaction"]["input"] == "more"
+
+
+def test_backfill_boundary_pair_not_duplicated(tmp_path: Path) -> None:
+    boundary = _ts(8)
+    chat = _chat_summary("chat_1", updated_at=_ts(10))
+    messages_by_chat = {
+        "chat_1": [
+            _message("u0", "user", boundary, "early"),
+            _message("a0", "assistant", boundary, "early reply"),
+            _message("u1", "user", _ts(9), "hello"),
+            _message("a1", "assistant", _ts(10), "hi"),
+        ],
+    }
+
+    compliance = FakeComplianceClient([chat], messages_by_chat)
+    nebuly = FakeNebulyClient()
+    cache = SyncCache(tmp_path / "sync_state.db", "org_demo", dry_run=False)
+    config = _config(tmp_path, from_date=boundary)
+
+    _sync_user(
+        user_id="user_1",
+        config=config,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=config.to_date,  # type: ignore[arg-type]
+    )
+    assert len(nebuly.sent) == 2
+
+    nebuly.sent.clear()
+    compliance.message_fetch_count = 0
+    config_backfill = _config(tmp_path, from_date=_ts(6))
+
+    counts = _sync_user(
+        user_id="user_1",
+        config=config_backfill,
+        compliance=compliance,  # type: ignore[arg-type]
+        nebuly=nebuly,  # type: ignore[arg-type]
+        cache=cache,
+        run_until=_ts(17),
+    )
+
+    assert counts.sent == 0
+    assert len(nebuly.sent) == 0
