@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
 
@@ -48,7 +48,6 @@ class Config:
     cache_dir: Path
     dry_run: bool
     verbose: bool
-    safety_lag_minutes: int
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -114,12 +113,9 @@ class Config:
             cache_dir=args.cache_dir,
             dry_run=args.dry_run,
             verbose=args.verbose,
-            safety_lag_minutes=int(
-                os.environ.get("COMPLIANCE_SAFETY_LAG_MINUTES", "5")
-            ),
         )
 
     def run_until(self) -> datetime:
         if self.to_date is not None:
             return self.to_date
-        return datetime.now(timezone.utc) - timedelta(minutes=self.safety_lag_minutes)
+        return datetime.now(timezone.utc)

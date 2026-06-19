@@ -28,28 +28,27 @@ cp .env.example .env
 ### Environment variables
 
 
-| Variable                             | Required | Default                                                                      | Description                                                                                          |
-| ------------------------------------ | -------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `NEBULY_API_KEY`                     | yes      | —                                                                            | Nebuly secret key, retrieve it fromSettings > Projects > View Nebuly keys > Secret keys             |
-| `COMPLIANCE_API_KEY`                 | yes      | —                                                                            | Compliance API key (`x-api-key` header)                                                              |
-| `COMPLIANCE_BASE_URL`                | yes      | —                                                                            | Compliance API base URL                                                                              |
-| `ORGANIZATION_UUID`                  | yes      | —                                                                            | Organization UUID to sync                                                                            |
-| `NEBULY_ENDPOINT`                    | no       | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint override                                                                   |
-| `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | no       | `600`                                                                        | Rate limit for Compliance API requests                                                               |
-| `ANONYMIZE`                          | no       | `false`                                                                      | Set to `true` to anonymize content in the Nebuly payload                                             |
-| `COMPLIANCE_SAFETY_LAG_MINUTES`      | no       | `5`                                                                          | Minutes to subtract from "now" when no `--to-date` is set, to avoid syncing chats still being edited |
+| Variable                             | Required | Default                                                                      | Description                                                                              |
+| ------------------------------------ | -------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `NEBULY_API_KEY`                     | yes      | —                                                                            | Nebuly secret key, retrieve it fromSettings > Projects > View Nebuly keys > Secret keys |
+| `COMPLIANCE_API_KEY`                 | yes      | —                                                                            | Compliance API key (`x-api-key` header)                                                  |
+| `COMPLIANCE_BASE_URL`                | yes      | —                                                                            | Compliance API base URL                                                                  |
+| `ORGANIZATION_UUID`                  | yes      | —                                                                            | Organization UUID to sync                                                                |
+| `NEBULY_ENDPOINT`                    | no       | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint override                                                       |
+| `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | no       | `600`                                                                        | Rate limit for Compliance API requests                                                   |
+| `ANONYMIZE`                          | no       | `false`                                                                      | Set to `true` to anonymize content in the Nebuly payload                                 |
 
 
 ### CLI flags
 
 
-| Flag          | Default    | Description                                         |
-| ------------- | ---------- | --------------------------------------------------- |
-| `--from-date` | —          | ISO backfill start date (e.g. `2025-01-01`)         |
-| `--to-date`   | —          | ISO end date filter                                 |
-| `--cache-dir` | `./.cache` | Directory for the sync state database               |
-| `--dry-run`   | off        | Build and log payloads without POSTing to Nebuly    |
-| `--verbose`   | off        | Enable debug logging (includes HTTP request traces) |
+| Flag          | Default    | Description                                            |
+| ------------- | ---------- | ------------------------------------------------------ |
+| `--from-date` | —          | ISO backfill start date (e.g. `2025-01-01`)            |
+| `--to-date`   | —          | ISO end date filter                                    |
+| `--cache-dir` | `./.cache` | Directory for the sync state database                  |
+| `--dry-run`   | off        | Query Claude Compliance data without POSTing to Nebuly |
+| `--verbose`   | off        | Enable debug logging (includes HTTP request traces)    |
 
 
 ## Customizing the payload
@@ -87,16 +86,7 @@ After each interaction is successfully sent to Nebuly, the cache is checkpointed
 
 ## Running
 
-Start with a dry run to inspect payloads:
-
 ```bash
-cd claude_compliance
-poetry run python -m compliance_sync --from-date 2025-01-01 --dry-run
-```
-
-Then run for real:
-
-```bash
-poetry run python -m compliance_sync --from-date 2025-01-01
+poetry run python -m compliance_sync --from-date 2026-01-01
 ```
 

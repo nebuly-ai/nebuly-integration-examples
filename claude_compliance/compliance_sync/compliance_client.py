@@ -131,7 +131,7 @@ class ComplianceClient:
             params.append(("page", page))
         raw = self._request(
             "GET",
-            f"v1/compliance/organizations/{org_uuid}/users",
+            f"organizations/{org_uuid}/users",
             params=params,
         )
         return PaginatedUsersResponse.model_validate(raw)
@@ -167,7 +167,7 @@ class ComplianceClient:
             params.append(("updated_at.lte", updated_at_lte))
         if after_id is not None:
             params.append(("after_id", after_id))
-        raw = self._request("GET", "v1/compliance/apps/chats", params=params)
+        raw = self._request("GET", "apps/chats", params=params)
         return PaginatedChatsResponse.model_validate(raw)
 
     def list_chat_messages(
@@ -195,7 +195,7 @@ class ComplianceClient:
                 params.append(("after_id", page_after_id))
             raw = self._request(
                 "GET",
-                f"v1/compliance/apps/chats/{chat_id}/messages",
+                f"apps/chats/{chat_id}/messages",
                 params=params,
             )
             page = ChatMessagesResponse.model_validate(raw)

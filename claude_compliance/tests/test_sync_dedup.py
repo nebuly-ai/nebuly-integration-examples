@@ -211,7 +211,6 @@ def _config(tmp_path: Path, *, from_date: datetime | None = None) -> Config:
         cache_dir=tmp_path,
         dry_run=False,
         verbose=False,
-        safety_lag_minutes=5,
     )
 
 
