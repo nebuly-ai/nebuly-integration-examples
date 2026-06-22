@@ -1,10 +1,6 @@
 # nebuly-integration-examples
 
-Integration examples for syncing AI/LLM interactions to and from the
-[Nebuly](https://www.nebuly.com/) analytics platform.
-
-Most folders are older, single-file example scripts. **`claude_compliance/` is the
-only production-grade, maintained package** — use it as the reference implementation.
+Integration examples for syncing AI/LLM interactions to and from the [Nebuly](https://www.nebuly.com/) analytics platform.
 
 ## Components
 
