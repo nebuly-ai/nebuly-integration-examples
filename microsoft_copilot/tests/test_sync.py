@@ -217,6 +217,91 @@ def test_403_skips_user_without_advancing_coverage(tmp_path: Path) -> None:
         cache.close()
 
 
+def _response_dict_html_no_card(
+    request_id: str,
+    *,
+    hour: int,
+    minute: int = 0,
+) -> dict[str, object]:
+    data = _response_dict_at(request_id, hour=hour, minute=minute)
+    data["body"] = {
+        "contentType": "html",
+        "content": '<attachment id="x"></attachment>',
+    }
+    return data
+
+
+def test_empty_output_turn_counted_as_empty(tmp_path: Path) -> None:
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_empty", hour=10, minute=0),
+            _response_dict_html_no_card("req_empty", hour=10, minute=1),
+        ],
+    )
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        summary = asyncio.run(run_sync(config))
+
+    nebuly.send_interaction.assert_not_called()
+    assert summary.totals.empty == 1
+    assert summary.totals.sent == 0
+
+
+def test_in_flight_turn_deferred_then_sent(tmp_path: Path) -> None:
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+
+    interactions = [
+        _interaction_dict_at("req_x", hour=11, minute=59, second=30),
+        _response_dict_at("req_x", hour=11, minute=59, second=50),
+    ]
+
+    run1_config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    mock_graph.fetch_interactions = AsyncMock(return_value=interactions)
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(run1_config))
+
+    nebuly.send_interaction.assert_not_called()
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(11, 59, 30) - timedelta(microseconds=1)
+    finally:
+        cache.close()
+
+    run2_config = _config(tmp_path, from_date=None, to_date=_ts(13))
+    mock_graph.fetch_interactions = AsyncMock(return_value=interactions)
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(run2_config))
+
+    nebuly.send_interaction.assert_called_once()
+
+
 def test_split_pair_watermark_holds_back_coverage(tmp_path: Path) -> None:
     user = [CopilotUser(id="user_a", mail="a@example.com")]
     mock_graph = MagicMock()

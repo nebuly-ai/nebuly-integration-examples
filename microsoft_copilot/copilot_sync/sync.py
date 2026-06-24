@@ -9,7 +9,7 @@ import httpx
 from httpx import HTTPStatusError
 
 from .cache import SyncCache, UserCoverage
-from .converter import pair_interactions, pair_to_payload
+from .converter import SkipReason, group_interactions, turn_to_payload
 from .graph_client import GraphClient
 from .models import AiInteraction, CopilotUser
 from .nebuly_client import NebulyClient
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from .config import Config
+    from .converter import InteractionTurn
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class Counts:
     fetched: int = 0
     sent: int = 0
     skipped: int = 0
+    empty: int = 0
     failed: int = 0
     users_skipped: int = 0
 
@@ -67,6 +69,38 @@ def _resolve_requested_from(
     )
 
 
+async def _send_turns(
+    turns: list[InteractionTurn],
+    *,
+    user: CopilotUser,
+    nebuly: NebulyClient,
+    config: Config,
+    counts: Counts,
+    is_tail: bool,
+    settle_edge: datetime,
+) -> list[datetime]:
+    """Send settled turns and return the start times of deferred in-flight turns."""
+    in_flight_starts: list[datetime] = []
+    for turn in turns:
+        if is_tail and turn.time_end > settle_edge:
+            in_flight_starts.append(turn.time_start)
+            continue
+        counts.fetched += 1
+        result = turn_to_payload(turn, user=user, anonymize=config.anonymize)
+        if isinstance(result, SkipReason):
+            if result is SkipReason.EMPTY_OUTPUT:
+                counts.empty += 1
+            else:
+                counts.skipped += 1
+            continue
+        if config.dry_run:
+            counts.sent += 1
+            continue
+        await nebuly.send_interaction(result)
+        counts.sent += 1
+    return in_flight_starts
+
+
 async def _sync_user(
     user: CopilotUser,
     *,
@@ -99,23 +133,28 @@ async def _sync_user(
                 return counts
             raise
 
-        interactions = [AiInteraction.model_validate(item) for item in raw]
-        pairs, unresolved_prompts = pair_interactions(interactions)
-        counts.fetched += len(pairs)
+        interactions = sorted(
+            [AiInteraction.model_validate(item) for item in raw],
+            key=lambda x: x.created_datetime,
+        )
+        turns, dangling_prompts = group_interactions(interactions)
+        is_tail = interval.lte == run_until
+        settle_edge = interval.lte - timedelta(seconds=config.settle_lag_seconds)
+        in_flight_starts = await _send_turns(
+            turns,
+            user=user,
+            nebuly=nebuly,
+            config=config,
+            counts=counts,
+            is_tail=is_tail,
+            settle_edge=settle_edge,
+        )
 
-        for pair in pairs:
-            payload = pair_to_payload(pair, user=user, anonymize=config.anonymize)
-            if payload is None:
-                counts.skipped += 1
-                continue
-            if config.dry_run:
-                counts.sent += 1
-                continue
-            await nebuly.send_interaction(payload)
-            counts.sent += 1
-
-        if interval.lte == run_until and unresolved_prompts:
-            earliest = min(p.created_datetime for p in unresolved_prompts)
+        hold_back = [p.created_datetime for p in dangling_prompts]
+        if is_tail:
+            hold_back += in_flight_starts
+        if hold_back:
+            earliest = min(hold_back)
             coverage_until = max(earliest - timedelta(microseconds=1), interval.gte)
         else:
             coverage_until = interval.lte
@@ -182,6 +221,7 @@ async def run_sync(config: Config) -> SyncSummary:
                 summary.totals.fetched += user_counts.fetched
                 summary.totals.sent += user_counts.sent
                 summary.totals.skipped += user_counts.skipped
+                summary.totals.empty += user_counts.empty
                 summary.totals.users_skipped += user_counts.users_skipped
     finally:
         if graph is not None:
@@ -190,12 +230,13 @@ async def run_sync(config: Config) -> SyncSummary:
 
     logger.info(
         "Sync complete: users=%d skipped=%d | interactions fetched=%d sent=%d "
-        "skipped=%d failed=%d",
+        "skipped=%d empty=%d failed=%d",
         summary.users_processed,
         summary.totals.users_skipped,
         summary.totals.fetched,
         summary.totals.sent,
         summary.totals.skipped,
+        summary.totals.empty,
         summary.totals.failed,
     )
     return summary

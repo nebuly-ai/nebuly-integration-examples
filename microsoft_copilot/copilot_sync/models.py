@@ -24,7 +24,7 @@ class InteractionBody(BaseModel):
 
 
 class Attachment(BaseModel):
-    attachment_id: str = Field(..., alias="attachmentId")
+    attachment_id: str | None = Field(None, alias="attachmentId")
     content: str | None = Field(None, alias="content")
     content_type: str = Field(..., alias="contentType")
     content_url: str | None = Field(None, alias="contentUrl")
@@ -32,15 +32,29 @@ class Attachment(BaseModel):
 
 
 class Link(BaseModel):
-    display_name: str = Field(..., alias="displayName")
-    link_type: str = Field(..., alias="linkType")
-    link_url: str = Field(..., alias="linkUrl")
+    display_name: str | None = Field(None, alias="displayName")
+    link_type: str | None = Field(None, alias="linkType")
+    link_url: str | None = Field(None, alias="linkUrl")
 
 
 class Context(BaseModel):
-    context_reference: str = Field(..., alias="contextReference")
-    context_type: str = Field(..., alias="contextType")
-    display_name: str = Field(..., alias="displayName")
+    context_reference: str | None = Field(None, alias="contextReference")
+    context_type: str | None = Field(None, alias="contextType")
+    display_name: str | None = Field(None, alias="displayName")
+
+
+class TeamworkApplicationIdentity(BaseModel):
+    id: str | None = None
+    display_name: str | None = Field(None, alias="displayName")
+
+    model_config = ConfigDict(validate_by_name=True, extra="allow")
+
+
+class FromIdentitySet(BaseModel):
+    user: dict[str, Any] | None = None
+    application: TeamworkApplicationIdentity | None = None
+
+    model_config = ConfigDict(validate_by_name=True, extra="allow")
 
 
 # https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/api/ai-services/interaction-export/resources/aiinteraction?pivots=graph-v1
@@ -64,5 +78,12 @@ class AiInteraction(BaseModel):
     # Kept simple as it a very complex object
     mentions: list[dict[str, Any]] = Field(default_factory=list)
     contexts: list[Context] = Field(default_factory=list)
+    sender: FromIdentitySet | None = Field(None, alias="from")
 
     model_config = ConfigDict(validate_by_name=True, extra="allow")
+
+    @property
+    def sender_model_name(self) -> str | None:
+        if self.sender and self.sender.application:
+            return self.sender.application.display_name
+        return None

@@ -49,6 +49,7 @@ class Config:
     cache_dir: Path
     dry_run: bool
     verbose: bool
+    settle_lag_seconds: int = 60
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -132,6 +133,7 @@ class Config:
             cache_dir=args.cache_dir,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            settle_lag_seconds=int(os.environ.get("COPILOT_SETTLE_LAG_SECONDS", "60")),
         )
 
     def run_until(self) -> datetime:
