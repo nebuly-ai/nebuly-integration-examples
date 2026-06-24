@@ -86,39 +86,35 @@ async def _sync_user(
 
     logger.info("Processing user %s (%d interval(s))", user.email, len(intervals))
 
-    try:
-        for interval in intervals:
-            try:
-                raw = await graph.fetch_interactions(
-                    user_id=user.id, gte=interval.gte, lte=interval.lte
-                )
-            except HTTPStatusError as exc:
-                if exc.response.status_code == 403:
-                    logger.warning("403 for user %s — skipping", user.email)
-                    counts.users_skipped += 1
-                    return counts
-                raise
+    for interval in intervals:
+        try:
+            raw = await graph.fetch_interactions(
+                user_id=user.id, gte=interval.gte, lte=interval.lte
+            )
+        except HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                logger.warning("403 for user %s — skipping", user.email)
+                counts.users_skipped += 1
+                return counts
+            raise
 
-            interactions = [AiInteraction.model_validate(item) for item in raw]
-            pairs = pair_interactions(interactions)
-            counts.fetched += len(pairs)
+        interactions = [AiInteraction.model_validate(item) for item in raw]
+        pairs = pair_interactions(interactions)
+        counts.fetched += len(pairs)
 
-            for pair in pairs:
-                payload = pair_to_payload(pair, user=user, anonymize=config.anonymize)
-                if payload is None:
-                    counts.skipped += 1
-                    continue
-                if config.dry_run:
-                    counts.sent += 1
-                    continue
-                await nebuly.send_interaction(payload)
+        for pair in pairs:
+            payload = pair_to_payload(pair, user=user, anonymize=config.anonymize)
+            if payload is None:
+                counts.skipped += 1
+                continue
+            if config.dry_run:
                 counts.sent += 1
+                continue
+            await nebuly.send_interaction(payload)
+            counts.sent += 1
 
-        cache.save_user_coverage(user.id, requested_from, run_until)
+        cache.save_user_coverage(user.id, requested_from, interval.lte)
         cache.commit()
-    except Exception:
-        counts.failed += 1
-        raise
 
     return counts
 
@@ -162,19 +158,23 @@ async def run_sync(config: Config) -> SyncSummary:
             logger.info("Found %d Copilot-licensed users", len(users))
 
             for user in sorted(users, key=lambda u: u.id):
-                user_counts = await _sync_user(
-                    user,
-                    config=config,
-                    graph=graph,
-                    nebuly=nebuly,
-                    cache=cache,
-                    run_until=run_until,
-                )
+                try:
+                    user_counts = await _sync_user(
+                        user,
+                        config=config,
+                        graph=graph,
+                        nebuly=nebuly,
+                        cache=cache,
+                        run_until=run_until,
+                    )
+                except Exception:
+                    logger.exception("Sync failed for user %s", user.email)
+                    summary.totals.failed += 1
+                    continue
                 summary.users_processed += 1
                 summary.totals.fetched += user_counts.fetched
                 summary.totals.sent += user_counts.sent
                 summary.totals.skipped += user_counts.skipped
-                summary.totals.failed += user_counts.failed
                 summary.totals.users_skipped += user_counts.users_skipped
     finally:
         if graph is not None:

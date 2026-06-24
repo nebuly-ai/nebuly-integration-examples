@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from copilot_sync.cache import SyncCache
@@ -66,7 +66,7 @@ def test_tail_interval(tmp_path: Path) -> None:
     intervals = cache.plan_intervals(coverage, _ts(8), _ts(14))
 
     assert len(intervals) == 1
-    assert intervals[0].gte == _ts(12)
+    assert intervals[0].gte == _ts(12) + timedelta(microseconds=1)
     assert intervals[0].lte == _ts(14)
 
 
@@ -82,7 +82,7 @@ def test_backfill_and_tail_produce_two_intervals(tmp_path: Path) -> None:
     assert len(intervals) == 2
     assert intervals[0].gte == _ts(6)
     assert intervals[0].lte == _ts(8)
-    assert intervals[1].gte == _ts(12)
+    assert intervals[1].gte == _ts(12) + timedelta(microseconds=1)
     assert intervals[1].lte == _ts(14)
 
 

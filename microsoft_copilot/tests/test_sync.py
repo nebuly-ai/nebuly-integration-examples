@@ -138,9 +138,9 @@ def test_failed_user_does_not_advance_coverage_earlier_user_committed(
     ):
         nebuly = nebuly_cls.return_value
         nebuly.send_interaction = AsyncMock()
-        with pytest.raises(httpx.HTTPStatusError):
-            asyncio.run(run_sync(config))
+        summary = asyncio.run(run_sync(config))
 
+    assert summary.totals.failed == 1
     cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
     try:
         user_a = cache.get_user_coverage("user_a")

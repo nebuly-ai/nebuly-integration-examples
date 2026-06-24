@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from .config import datetime_to_timestamp_str, timestamp_str_to_datetime
@@ -129,7 +129,11 @@ class SyncCache:
         ):
             intervals.append(FetchInterval(requested_from, coverage.coverage_from))
         if coverage.coverage_until is not None and run_until > coverage.coverage_until:
-            intervals.append(FetchInterval(coverage.coverage_until, run_until))
+            intervals.append(
+                FetchInterval(
+                    coverage.coverage_until + timedelta(microseconds=1), run_until
+                )
+            )
 
         return tuple(intervals)
 

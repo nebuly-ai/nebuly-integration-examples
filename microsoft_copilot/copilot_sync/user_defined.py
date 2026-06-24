@@ -47,7 +47,9 @@ def build_traces(pair: InteractionPair) -> list[dict[str, Any]]:
     )
 
     for ment in response.mentions:
-        text = ment["mentionText"] or str(ment["id"])
+        text = ment.get("mentionText") or str(ment.get("id") or "")
+        if not text:
+            continue
         retrieval_traces.append({"source": text, "input": text, "outputs": []})
 
     return retrieval_traces
