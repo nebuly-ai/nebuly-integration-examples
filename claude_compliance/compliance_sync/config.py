@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -16,17 +16,17 @@ def timestamp_str_to_datetime(timestamp: str) -> datetime:
     ts = timestamp.replace("Z", "+00:00")
     dt = datetime.fromisoformat(ts)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt
 
 
 def datetime_to_timestamp_str(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt.isoformat().replace("+00:00", "Z")
 
 
@@ -118,4 +118,4 @@ class Config:
     def run_until(self) -> datetime:
         if self.to_date is not None:
             return self.to_date
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)

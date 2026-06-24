@@ -103,7 +103,7 @@ class ComplianceClient:
             # Logged once per retry attempt (429 and 5xx are retried).
             if e.response.status_code != 429:
                 body_preview = e.response.text[:200]
-                logger.error(
+                logger.exception(
                     "HTTP error from Compliance API %s %s: status=%s body=%r",
                     method,
                     path,
@@ -158,13 +158,13 @@ class ComplianceClient:
         after_id: str | None = None,
         limit: int = 100,
     ) -> PaginatedChatsResponse:
-        params: list[tuple[str, str]] = [("limit", str(min(limit, 100)))]
-        for user_id in user_ids:
-            params.append(("user_ids[]", user_id))
+        params = [("limit", str(min(limit, 100)))]
+        params.extend([("user_ids[]", user_id) for user_id in user_ids])
+
         if updated_at_gte is not None:
             params.append(("updated_at.gte", updated_at_gte))
         if updated_at_lte is not None:
-            params.append(("updated_at.lte", updated_at_lte))
+            params.extend([("updated_at.lte", updated_at_lte)])
         if after_id is not None:
             params.append(("after_id", after_id))
         raw = self._request("GET", "apps/chats", params=params)
@@ -208,13 +208,5 @@ class ComplianceClient:
             page_after_id = page.last_id
             if page_after_id is None:
                 break
-
-        if merged is None:
-            return ChatMessagesResponse(
-                chat_messages=[],
-                has_more=False,
-                first_id=None,
-                last_id=None,
-            )
 
         return merged

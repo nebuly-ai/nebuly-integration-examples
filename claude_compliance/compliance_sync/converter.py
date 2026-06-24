@@ -16,10 +16,9 @@ class Interaction:
 
 
 def extract_text_content(message: ChatMessage) -> str:
-    parts: list[str] = []
-    for block in message.content:
-        if block.type == "text" and block.text:
-            parts.append(block.text)
+    parts = [
+        block.text for block in message.content if block.type == "text" and block.text
+    ]
     return "\n".join(parts)
 
 
