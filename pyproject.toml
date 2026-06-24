@@ -51,6 +51,9 @@ exclude = [
     "dist",
     "node_modules",
     "venv",
+    "api",
+    "export",
+    "langfuse",
 ]
 
 line-length = 88
@@ -96,6 +99,11 @@ convention = "google"
 strict = true
 disallow_untyped_defs = true
 plugins = ['pydantic.mypy']
+exclude = [
+    "api",
+    "export",
+    "langfuse",
+]
 
 [[tool.mypy.overrides]]
 module = "msgraph_beta.*"
