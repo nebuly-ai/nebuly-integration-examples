@@ -59,11 +59,9 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "PLR2004",
-    "PLR0913",
-    "PLR0911",
-    "SIM118",
-    "PLC0415",
+    "PLR2004", # Magic value comparison
+    "PLR0913", # Too many arguments
+    "PLR0911", # Too many return statements
     "D",       # Docstrings related errors
     "SIM108",  # Use ternary operator instead of if/else
     "TRY003",  # Avoid specifying long messages outside the exception class
