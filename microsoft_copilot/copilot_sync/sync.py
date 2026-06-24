@@ -90,9 +90,7 @@ async def _sync_user(
         for interval in intervals:
             try:
                 raw = await graph.fetch_interactions(
-                    user.id,
-                    interval.gte,
-                    interval.lte,
+                    user_id=user.id, gte=interval.gte, lte=interval.lte
                 )
             except HTTPStatusError as exc:
                 if exc.response.status_code == 403:
@@ -145,10 +143,10 @@ async def run_sync(config: Config) -> SyncSummary:
             )
 
         graph = GraphClient(
-            config.azure_tenant_id,
-            config.azure_client_id,
-            config.azure_client_secret,
-            config.copilot_sku,
+            tenant_id=config.azure_tenant_id,
+            client_id=config.azure_client_id,
+            client_secret=config.azure_client_secret,
+            copilot_sku=config.copilot_sku,
             max_requests_per_minute=config.graph_max_requests_per_minute,
         )
 

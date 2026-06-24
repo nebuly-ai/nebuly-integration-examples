@@ -70,11 +70,11 @@ class _AsyncRateLimiter:
 class GraphClient:
     def __init__(
         self,
+        *,
         tenant_id: str,
         client_id: str,
         client_secret: str,
         copilot_sku: str,
-        *,
         max_requests_per_minute: int = 600,
     ) -> None:
         self._copilot_sku = copilot_sku
@@ -83,10 +83,7 @@ class GraphClient:
             client_id=client_id,
             client_secret=client_secret,
         )
-        self._graph = GraphServiceClient(
-            credentials=self._cred,
-            scopes=[GRAPH_SCOPE],
-        )
+        self._graph = GraphServiceClient(credentials=self._cred, scopes=[GRAPH_SCOPE])
         self._http = httpx.AsyncClient()
         self._rate_limiter = _AsyncRateLimiter(max_requests_per_minute)
 
@@ -100,32 +97,37 @@ class GraphClient:
 
     async def list_copilot_users(self) -> list[CopilotUser]:
         users: list[CopilotUser] = []
+        # For any item u in assignedLicenses,
+        # check whether u.skuId equals self._copilot_sku
         sku_filter = f"assignedLicenses/any(u:u/skuId eq {self._copilot_sku})"
         query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
             select=["id", "displayName", "mail", "userPrincipalName"],
             filter=sku_filter,
             top=BATCH_TOP,
-            count=True,
         )
         request_config = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
             query_parameters=query_params,
         )
-        request_config.headers.add("ConsistencyLevel", "eventual")
 
         page = await self._graph.users.get(request_configuration=request_config)
         while page is not None:
             if page.value:
-                users.extend(
-                    [
+                for user in page.value:
+                    if user.id is None:
+                        # Unlikely but typings says it's possible...
+                        logger.warning(
+                            "User %s has no ID, skipping", user.user_principal_name
+                        )
+                        continue
+                    users.append(
                         CopilotUser(
-                            id=user.id or "",
+                            id=user.id,
                             mail=user.mail,
                             # I'm using the alias name to make mypy happy
                             userPrincipalName=user.user_principal_name,
                         )
-                        for user in page.value
-                    ]
-                )
+                    )
+
             if not page.odata_next_link:
                 break
             page = await self._graph.users.with_url(page.odata_next_link).get()
@@ -140,8 +142,8 @@ class GraphClient:
     )
     async def _fetch_page(
         self,
-        url: str,
         *,
+        url: str,
         headers: dict[str, str],
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -153,6 +155,7 @@ class GraphClient:
 
     async def fetch_interactions(
         self,
+        *,
         user_id: str,
         gte: datetime,
         lte: datetime,
@@ -173,12 +176,12 @@ class GraphClient:
         url = INTERACTIONS_PATH.format(user_id=user_id)
         items: list[dict[str, Any]] = []
 
-        data = await self._fetch_page(url, headers=headers, params=params)
+        data = await self._fetch_page(url=url, headers=headers, params=params)
         if data.get("value"):
             items.extend(data["value"])
 
         while next_link := data.get("@odata.nextLink"):
-            data = await self._fetch_page(next_link, headers=headers)
+            data = await self._fetch_page(url=next_link, headers=headers)
             if data.get("value"):
                 items.extend(data["value"])
 

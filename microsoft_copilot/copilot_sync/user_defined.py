@@ -25,28 +25,29 @@ def build_traces(pair: InteractionPair) -> list[dict[str, Any]]:
     retrieval_traces: list[dict[str, Any]] = []
 
     for att in response.attachments:
-        source = att.get("name") or att.get("contentUrl") or "attachment"
+        source = att.name or att.content_url or "attachment"
         retrieval_traces.append(
             {
                 "source": source,
-                "input": att.get("contentUrl") or source,
-                "outputs": [att.get("name") or source],
+                "input": att.content_url or source,
+                "outputs": [att.name or source],
             },
         )
 
-    for link in response.links:
-        url = link.get("href") or link.get("url") or ""
-        if url:
-            retrieval_traces.append(
-                {
-                    "source": url,
-                    "input": url,
-                    "outputs": [link.get("displayName") or url],
-                },
-            )
+    retrieval_traces.extend(
+        [
+            {
+                "source": link.link_url,
+                "input": link.link_url,
+                "outputs": [link.display_name or link.link_url],
+            }
+            for link in response.links
+            if link.link_url
+        ]
+    )
 
     for ment in response.mentions:
-        text = ment.get("mentionText") or str(ment.get("id", ""))
+        text = ment["mentionText"] or str(ment["id"])
         retrieval_traces.append({"source": text, "input": text, "outputs": []})
 
     return retrieval_traces

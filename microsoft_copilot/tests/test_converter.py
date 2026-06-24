@@ -5,7 +5,13 @@ from unittest.mock import patch
 
 from copilot_sync import user_defined
 from copilot_sync.converter import InteractionPair, pair_interactions, pair_to_payload
-from copilot_sync.models import AiInteraction, CopilotUser, InteractionBody
+from copilot_sync.models import (
+    AiInteraction,
+    Attachment,
+    CopilotUser,
+    InteractionBody,
+    Link,
+)
 
 
 def _user() -> CopilotUser:
@@ -19,6 +25,7 @@ def _prompt(
     session_id: str = "sess_1",
 ) -> AiInteraction:
     return AiInteraction(
+        id=f"prompt_{request_id}",
         requestId=request_id,
         sessionId=session_id,
         interactionType="userPrompt",
@@ -26,8 +33,17 @@ def _prompt(
         conversationType="appchat",
         locale="en-US",
         createdDateTime=datetime(2025, 6, 15, 10, 0, tzinfo=UTC),
+        completedDateTime=datetime(2025, 6, 15, 10, 0, tzinfo=UTC),
         body=InteractionBody(contentType="text", content=content),
-        attachments=[{"name": "doc.pdf"}],
+        attachments=[
+            Attachment(
+                attachmentId="att_1",
+                content="",
+                contentType="application/pdf",
+                contentUrl="https://example.com/doc.pdf",
+                name="doc.pdf",
+            ),
+        ],
     )
 
 
@@ -37,12 +53,23 @@ def _response(
     content: str = "hi there",
 ) -> AiInteraction:
     return AiInteraction(
+        id=f"response_{request_id}",
         requestId=request_id,
         sessionId="sess_1",
         interactionType="aiResponse",
+        appClass="IPM.SkypeTeams.Message.Copilot.Word",
+        conversationType="appchat",
+        locale="en-US",
         createdDateTime=datetime(2025, 6, 15, 10, 1, tzinfo=UTC),
+        completedDateTime=datetime(2025, 6, 15, 10, 1, tzinfo=UTC),
         body=InteractionBody(contentType="text", content=content),
-        links=[{"href": "https://example.com", "displayName": "Example"}],
+        links=[
+            Link(
+                displayName="Example",
+                linkType="web",
+                linkUrl="https://example.com",
+            ),
+        ],
     )
 
 

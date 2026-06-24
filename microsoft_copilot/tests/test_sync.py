@@ -15,6 +15,8 @@ from copilot_sync.sync import FirstRunRequiresFromDateError, run_sync
 if TYPE_CHECKING:
     from pathlib import Path
 
+_UNSET: object = object()
+
 
 def _ts(hour: int) -> datetime:
     return datetime(2025, 6, 15, hour, 0, tzinfo=UTC)
@@ -26,9 +28,6 @@ def _config(
     from_date: datetime | None = None,
     dry_run: bool = False,
 ) -> Config:
-    if from_date is None:
-        from_date = _ts(8)
-
     return Config(
         azure_tenant_id="tenant_1",
         azure_client_id="client_1",
@@ -49,20 +48,30 @@ def _config(
 
 def _interaction_dict(request_id: str = "req_1") -> dict[str, object]:
     return {
+        "id": f"prompt_{request_id}",
         "requestId": request_id,
         "sessionId": "sess_1",
         "interactionType": "userPrompt",
+        "conversationType": "appchat",
+        "appClass": "IPM.SkypeTeams.Message.Copilot.Word",
+        "locale": "en-US",
         "createdDateTime": "2025-06-15T10:00:00Z",
+        "completedDateTime": "2025-06-15T10:00:00Z",
         "body": {"contentType": "text", "content": "hello"},
     }
 
 
 def _response_dict(request_id: str = "req_1") -> dict[str, object]:
     return {
+        "id": f"response_{request_id}",
         "requestId": request_id,
         "sessionId": "sess_1",
         "interactionType": "aiResponse",
+        "conversationType": "appchat",
+        "appClass": "IPM.SkypeTeams.Message.Copilot.Word",
+        "locale": "en-US",
         "createdDateTime": "2025-06-15T10:01:00Z",
+        "completedDateTime": "2025-06-15T10:01:00Z",
         "body": {"contentType": "text", "content": "hi"},
     }
 
@@ -82,7 +91,7 @@ def test_first_run_without_from_date_raises(tmp_path: Path) -> None:
 
 
 def test_dry_run_sends_nothing(tmp_path: Path) -> None:
-    config = _config(tmp_path, dry_run=True)
+    config = _config(tmp_path, dry_run=True, from_date=_ts(8))
     mock_graph = MagicMock()
     mock_graph.list_copilot_users = AsyncMock(return_value=_users())
     mock_graph.fetch_interactions = AsyncMock(
@@ -104,7 +113,7 @@ def test_dry_run_sends_nothing(tmp_path: Path) -> None:
 def test_failed_user_does_not_advance_coverage_earlier_user_committed(
     tmp_path: Path,
 ) -> None:
-    config = _config(tmp_path)
+    config = _config(tmp_path, from_date=_ts(8))
     mock_graph = MagicMock()
     mock_graph.list_copilot_users = AsyncMock(return_value=_users())
     mock_graph.close = AsyncMock()
@@ -146,7 +155,7 @@ def test_failed_user_does_not_advance_coverage_earlier_user_committed(
 
 
 def test_403_skips_user_without_advancing_coverage(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+    config = _config(tmp_path, from_date=_ts(8))
     mock_graph = MagicMock()
     mock_graph.list_copilot_users = AsyncMock(return_value=_users())
     mock_graph.close = AsyncMock()
