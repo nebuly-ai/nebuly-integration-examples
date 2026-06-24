@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,17 +15,16 @@ from copilot_sync.sync import FirstRunRequiresFromDateError, run_sync
 if TYPE_CHECKING:
     from pathlib import Path
 
-_UNSET: object = object()
 
-
-def _ts(hour: int) -> datetime:
-    return datetime(2025, 6, 15, hour, 0, tzinfo=UTC)
+def _ts(hour: int, minute: int = 0, second: int = 0) -> datetime:
+    return datetime(2025, 6, 15, hour, minute, second, tzinfo=UTC)
 
 
 def _config(
     tmp_path: Path,
     *,
     from_date: datetime | None = None,
+    to_date: datetime | None = None,
     dry_run: bool = False,
 ) -> Config:
     return Config(
@@ -38,7 +37,7 @@ def _config(
         nebuly_endpoint="https://example.com/events",
         anonymize=False,
         from_date=from_date,
-        to_date=_ts(12),
+        to_date=to_date,
         cache_dir=tmp_path,
         dry_run=dry_run,
         verbose=False,
@@ -60,6 +59,20 @@ def _interaction_dict(request_id: str = "req_1") -> dict[str, object]:
     }
 
 
+def _interaction_dict_at(
+    request_id: str,
+    *,
+    hour: int,
+    minute: int = 0,
+    second: int = 0,
+) -> dict[str, object]:
+    ts = f"2025-06-15T{hour:02d}:{minute:02d}:{second:02d}Z"
+    data = _interaction_dict(request_id)
+    data["createdDateTime"] = ts
+    data["completedDateTime"] = ts
+    return data
+
+
 def _response_dict(request_id: str = "req_1") -> dict[str, object]:
     return {
         "id": f"response_{request_id}",
@@ -73,6 +86,20 @@ def _response_dict(request_id: str = "req_1") -> dict[str, object]:
         "completedDateTime": "2025-06-15T10:01:00Z",
         "body": {"contentType": "text", "content": "hi"},
     }
+
+
+def _response_dict_at(
+    request_id: str,
+    *,
+    hour: int,
+    minute: int = 0,
+    second: int = 0,
+) -> dict[str, object]:
+    ts = f"2025-06-15T{hour:02d}:{minute:02d}:{second:02d}Z"
+    data = _response_dict(request_id)
+    data["createdDateTime"] = ts
+    data["completedDateTime"] = ts
+    return data
 
 
 def _users() -> list[CopilotUser]:
@@ -112,7 +139,7 @@ def test_dry_run_sends_nothing(tmp_path: Path) -> None:
 def test_failed_user_does_not_advance_coverage_earlier_user_committed(
     tmp_path: Path,
 ) -> None:
-    config = _config(tmp_path, from_date=_ts(8))
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
     mock_graph = MagicMock()
     mock_graph.list_copilot_users = AsyncMock(return_value=_users())
     mock_graph.close = AsyncMock()
@@ -186,5 +213,63 @@ def test_403_skips_user_without_advancing_coverage(tmp_path: Path) -> None:
     try:
         assert cache.get_user_coverage("user_a") is not None
         assert cache.get_user_coverage("user_b") is None
+    finally:
+        cache.close()
+
+
+def test_split_pair_watermark_holds_back_coverage(tmp_path: Path) -> None:
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+
+    run1_config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_complete", hour=10, minute=0),
+            _response_dict_at("req_complete", hour=10, minute=1),
+            _interaction_dict_at("req_dangling", hour=11, minute=59),
+        ],
+    )
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(run1_config))
+
+    nebuly.send_interaction.assert_called_once()
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(11, 59) - timedelta(microseconds=1)
+    finally:
+        cache.close()
+
+    run2_config = _config(tmp_path, from_date=None, to_date=_ts(13))
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_dangling", hour=11, minute=59),
+            _response_dict_at("req_dangling", hour=12, minute=30),
+        ],
+    )
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(run2_config))
+
+    nebuly.send_interaction.assert_called_once()
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(13)
     finally:
         cache.close()

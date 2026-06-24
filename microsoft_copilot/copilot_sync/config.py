@@ -104,6 +104,12 @@ class Config:
         )
         to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
 
+        if from_date is not None and to_date is not None and from_date > to_date:
+            raise RuntimeError(
+                f"--from-date ({from_date.isoformat()}) cannot be after "
+                f"--to-date ({to_date.isoformat()})"
+            )
+
         return cls(
             azure_tenant_id=cast("str", azure_tenant_id),
             azure_client_id=cast("str", azure_client_id),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -99,7 +100,7 @@ async def _sync_user(
             raise
 
         interactions = [AiInteraction.model_validate(item) for item in raw]
-        pairs = pair_interactions(interactions)
+        pairs, unresolved_prompts = pair_interactions(interactions)
         counts.fetched += len(pairs)
 
         for pair in pairs:
@@ -113,7 +114,13 @@ async def _sync_user(
             await nebuly.send_interaction(payload)
             counts.sent += 1
 
-        cache.save_user_coverage(user.id, requested_from, interval.lte)
+        if interval.lte == run_until and unresolved_prompts:
+            earliest = min(p.created_datetime for p in unresolved_prompts)
+            coverage_until = max(earliest - timedelta(microseconds=1), interval.gte)
+        else:
+            coverage_until = interval.lte
+
+        cache.save_user_coverage(user.id, requested_from, coverage_until)
         cache.commit()
 
     return counts

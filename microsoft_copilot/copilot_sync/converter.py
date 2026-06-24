@@ -16,7 +16,9 @@ class InteractionPair:
     response: AiInteraction
 
 
-def pair_interactions(interactions: list[AiInteraction]) -> list[InteractionPair]:
+def pair_interactions(
+    interactions: list[AiInteraction],
+) -> tuple[list[InteractionPair], list[AiInteraction]]:
     pending_prompts: dict[str, AiInteraction] = {}
     pending_responses: dict[str, AiInteraction] = {}
     pairs: list[InteractionPair] = []
@@ -36,7 +38,7 @@ def pair_interactions(interactions: list[AiInteraction]) -> list[InteractionPair
             else:
                 pending_responses[rid] = inter
 
-    return pairs
+    return pairs, list(pending_prompts.values())
 
 
 def pair_to_payload(

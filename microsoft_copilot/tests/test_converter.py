@@ -76,25 +76,30 @@ def _response(
 
 
 def test_pairs_prompt_before_response() -> None:
-    pairs = pair_interactions([_prompt(), _response()])
+    pairs, unresolved = pair_interactions([_prompt(), _response()])
     assert len(pairs) == 1
     assert pairs[0].prompt.interaction_type == "userPrompt"
     assert pairs[0].response.interaction_type == "aiResponse"
+    assert unresolved == []
 
 
 def test_pairs_response_before_prompt() -> None:
-    pairs = pair_interactions([_response(), _prompt()])
+    pairs, unresolved = pair_interactions([_response(), _prompt()])
     assert len(pairs) == 1
+    assert unresolved == []
 
 
 def test_orphan_prompt_dropped() -> None:
-    pairs = pair_interactions([_prompt()])
+    prompt = _prompt()
+    pairs, unresolved = pair_interactions([prompt])
     assert pairs == []
+    assert unresolved == [prompt]
 
 
 def test_orphan_response_dropped() -> None:
-    pairs = pair_interactions([_response()])
+    pairs, unresolved = pair_interactions([_response()])
     assert pairs == []
+    assert unresolved == []
 
 
 def test_payload_shape() -> None:
