@@ -25,10 +25,10 @@ class InteractionBody(BaseModel):
 
 class Attachment(BaseModel):
     attachment_id: str = Field(..., alias="attachmentId")
-    content: str = Field(..., alias="content")
+    content: str | None = Field(None, alias="content")
     content_type: str = Field(..., alias="contentType")
-    content_url: str = Field(..., alias="contentUrl")
-    name: str = Field(..., alias="name")
+    content_url: str | None = Field(None, alias="contentUrl")
+    name: str | None = Field(None, alias="name")
 
 
 class Link(BaseModel):
