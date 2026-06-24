@@ -34,8 +34,7 @@ cp .env.example .env
 | `NEBULY_API_KEY` | yes | — | Nebuly secret key |
 | `NEBULY_ENDPOINT` | no | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint |
 | `COPILOT_SKU` | no | `639dec6b-bb19-468b-871c-c5c441c4b0cb` | Microsoft 365 Copilot SKU GUID |
-| `GRAPH_MAX_REQUESTS_PER_MINUTE` | no | `600` | Rate limit for Graph interaction requests |
-| `INGESTION_LAG_MINUTES` | no | `15` | Minutes to subtract from now when no `--to-date` |
+| `GRAPH_MAX_REQUESTS_PER_MINUTE` | no | `1800` | Rate limit for Graph interaction requests |
 | `ANONYMIZE` | no | `false` | Set to `true` to anonymize content in the Nebuly payload |
 
 ### CLI flags

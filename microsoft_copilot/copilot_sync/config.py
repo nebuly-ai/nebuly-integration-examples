@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -41,7 +41,6 @@ class Config:
     azure_client_secret: str
     copilot_sku: str
     graph_max_requests_per_minute: int
-    ingestion_lag_minutes: int
     nebuly_api_key: str
     nebuly_endpoint: str
     anonymize: bool
@@ -114,9 +113,8 @@ class Config:
                 "639dec6b-bb19-468b-871c-c5c441c4b0cb",
             ),
             graph_max_requests_per_minute=int(
-                os.environ.get("GRAPH_MAX_REQUESTS_PER_MINUTE", "600"),
+                os.environ.get("GRAPH_MAX_REQUESTS_PER_MINUTE", "1800"),
             ),
-            ingestion_lag_minutes=int(os.environ.get("INGESTION_LAG_MINUTES", "15")),
             nebuly_api_key=cast("str", nebuly_api_key),
             nebuly_endpoint=os.environ.get(
                 "NEBULY_ENDPOINT",
@@ -133,5 +131,4 @@ class Config:
     def run_until(self) -> datetime:
         if self.to_date is not None:
             return self.to_date
-        lag = timedelta(minutes=self.ingestion_lag_minutes)
-        return datetime.now(UTC) - lag
+        return datetime.now(UTC)
