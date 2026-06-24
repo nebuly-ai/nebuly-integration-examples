@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from azure.identity.aio import ClientSecretCredential
 from httpx import HTTPStatusError
-from msgraph import GraphServiceClient
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+from msgraph.graph_service_client import GraphServiceClient
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt
 
 from .config import datetime_to_timestamp_str
@@ -151,7 +151,7 @@ class GraphClient:
         response = await self._http.get(url, headers=headers, params=params)
         if response.is_error:
             response.raise_for_status()
-        return response.json()
+        return cast(dict[str, Any], response.json())
 
     async def fetch_interactions(
         self,

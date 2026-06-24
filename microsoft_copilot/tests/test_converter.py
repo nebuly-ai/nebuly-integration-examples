@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 from copilot_sync import user_defined
-from copilot_sync.converter import InteractionPair, pair_interactions, pair_to_payload
+from copilot_sync.converter import (
+    InteractionPair,
+    pair_interactions,
+    pair_to_payload,
+)
 from copilot_sync.models import (
     AiInteraction,
     Attachment,
@@ -26,15 +30,14 @@ def _prompt(
 ) -> AiInteraction:
     return AiInteraction(
         id=f"prompt_{request_id}",
-        requestId=request_id,
-        sessionId=session_id,
-        interactionType="userPrompt",
-        appClass="IPM.SkypeTeams.Message.Copilot.Word",
-        conversationType="appchat",
+        request_id=request_id,
+        session_id=session_id,
+        interaction_type="userPrompt",
+        app_class="IPM.SkypeTeams.Message.Copilot.Word",
+        conversation_type="appchat",
         locale="en-US",
-        createdDateTime=datetime(2025, 6, 15, 10, 0, tzinfo=UTC),
-        completedDateTime=datetime(2025, 6, 15, 10, 0, tzinfo=UTC),
-        body=InteractionBody(contentType="text", content=content),
+        created_datetime=datetime(2025, 6, 15, 10, 0, tzinfo=UTC),
+        body=InteractionBody(content_type="text", content=content),
         attachments=[
             Attachment(
                 attachmentId="att_1",
@@ -54,15 +57,14 @@ def _response(
 ) -> AiInteraction:
     return AiInteraction(
         id=f"response_{request_id}",
-        requestId=request_id,
-        sessionId="sess_1",
-        interactionType="aiResponse",
-        appClass="IPM.SkypeTeams.Message.Copilot.Word",
-        conversationType="appchat",
+        request_id=request_id,
+        session_id="sess_1",
+        interaction_type="aiResponse",
+        app_class="IPM.SkypeTeams.Message.Copilot.Word",
+        conversation_type="appchat",
         locale="en-US",
-        createdDateTime=datetime(2025, 6, 15, 10, 1, tzinfo=UTC),
-        completedDateTime=datetime(2025, 6, 15, 10, 1, tzinfo=UTC),
-        body=InteractionBody(contentType="text", content=content),
+        created_datetime=datetime(2025, 6, 15, 10, 1, tzinfo=UTC),
+        body=InteractionBody(content_type="text", content=content),
         links=[
             Link(
                 displayName="Example",

@@ -2,9 +2,7 @@
 name = "microsoft-copilot"
 version = "0.1.0"
 description = "Nebuly integration examples for various platforms"
-authors = [
-    {name = "Nebuly Team"}
-]
+authors = [{ name = "Nebuly Team" }]
 readme = "README.md"
 requires-python = ">=3.9,<4.0"
 dependencies = [
@@ -14,9 +12,7 @@ dependencies = [
     "python-dotenv>=1.1.0,<2.0.0",
     "httpx (>=0.28.1,<0.29.0)",
 ]
-packages = [
-    { include = "microsoft_copilot" }
-]
+packages = [{ include = "microsoft_copilot" }]
 
 
 [build-system]
@@ -68,23 +64,21 @@ ignore = [
     "PLR0911",
     "SIM118",
     "PLC0415",
-    "D", # Docstrings related errors
-    "SIM108", # Use ternary operator instead of if/else
-    "TRY003", # Avoid specifying long messages outside the exception class
-    "EM101", # Exception must not use a string literal, assign to variable first
-    "EM102", # Exception must not use an f-string literal, assign to variable first
-    "COM812", # Checks for the absence of trailing commas,
-    "S106", # Possible hardcoded password assigned to argument
+    "D",       # Docstrings related errors
+    "SIM108",  # Use ternary operator instead of if/else
+    "TRY003",  # Avoid specifying long messages outside the exception class
+    "EM101",   # Exception must not use a string literal, assign to variable first
+    "EM102",   # Exception must not use an f-string literal, assign to variable first
+    "COM812",  # Checks for the absence of trailing commas,
+    "S106",    # Possible hardcoded password assigned to argument
+    "TC006",   # Add quotes to type expression in `typing.cast()`
 ]
 
 fixable = ["ALL"]
 unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/**.py" = [
-    "E402",
-    "E501",
-]
+"scripts/**.py" = ["E402", "E501"]
 "**/tests/**.py" = [
     "ARG",
     "S101",
@@ -98,7 +92,9 @@ max-complexity = 10
 convention = "google"
 
 [tool.mypy]
+strict = true
 disallow_untyped_defs = true
+plugins = ['pydantic.mypy']
 
 [[tool.mypy.overrides]]
 module = "msgraph_beta.*"

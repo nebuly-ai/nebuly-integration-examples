@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from . import user_defined
@@ -40,34 +39,19 @@ def pair_interactions(interactions: list[AiInteraction]) -> list[InteractionPair
     return pairs
 
 
-def _interaction_time(inter: AiInteraction) -> datetime:
-    if inter.created_date_time is not None:
-        return inter.created_date_time
-    return datetime.now(tz=UTC)
-
-
 def pair_to_payload(
-    pair: InteractionPair,
-    *,
-    user: CopilotUser,
-    anonymize: bool,
+    pair: InteractionPair, *, user: CopilotUser, anonymize: bool
 ) -> dict[str, Any] | None:
-    user_input = (pair.prompt.body.content if pair.prompt.body else None) or ""
+    user_input = pair.prompt.body.content
     if not user_input:
         return None
 
-    assistant_output = (
-        pair.response.body.content if pair.response.body else None
-    ) or ""
-    time_start = _interaction_time(pair.prompt)
-    time_end = (
-        pair.response.completed_date_time
-        or pair.response.created_date_time
-        or time_start
-    )
+    assistant_output = pair.response.body.content
+    time_start = pair.prompt.created_datetime
+    time_end = pair.response.created_datetime
 
     interaction = {
-        "conversation_id": pair.prompt.session_id or pair.prompt.request_id or user.id,
+        "conversation_id": pair.prompt.session_id,
         "input": user_input,
         "output": assistant_output,
         "time_start": datetime_to_timestamp_str(time_start),
