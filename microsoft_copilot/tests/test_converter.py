@@ -51,12 +51,13 @@ def _response(
     content: str = "hi there",
     model: str = "Microsoft 365 Chat",
     minute: int = 1,
+    session_id: str = "sess_1",
     links: list[Link] | None = None,
 ) -> AiInteraction:
     return AiInteraction(
         id=f"response_{request_id}_{minute}",
         request_id=request_id,
-        session_id="sess_1",
+        session_id=session_id,
         interaction_type="aiResponse",
         app_class="IPM.SkypeTeams.Message.Copilot.Word",
         conversation_type="appchat",
@@ -143,6 +144,62 @@ def test_duplicate_prompts_pick_non_empty() -> None:
     real_prompt = _prompt(content="real question", minute=0)
     turns, _ = group_interactions([empty_prompt, real_prompt, _response()])
     assert len(turns) == 1
+    assert turns[0].prompt.body.content == "real question"
+
+
+def test_cross_request_id_pair_grouped() -> None:
+    turns, dangling = group_interactions(
+        [_prompt("req_a", minute=0), _response("req_b", minute=1)]
+    )
+    assert len(turns) == 1
+    assert dangling == []
+    assert turns[0].responses[0].request_id == "req_b"
+
+
+def test_interleaved_sessions_not_merged() -> None:
+    turns, dangling = group_interactions(
+        [
+            _prompt("req_a", session_id="sess_a", minute=0),
+            _prompt("req_b", session_id="sess_b", minute=1),
+            _response("req_a", session_id="sess_a", minute=2),
+            _response("req_b", session_id="sess_b", minute=3),
+        ]
+    )
+    assert len(turns) == 2
+    assert dangling == []
+    by_session = {t.prompt.session_id: t for t in turns}
+    assert by_session["sess_a"].prompt.request_id == "req_a"
+    assert by_session["sess_a"].responses[0].request_id == "req_a"
+    assert by_session["sess_b"].prompt.request_id == "req_b"
+    assert by_session["sess_b"].responses[0].request_id == "req_b"
+
+
+def test_unanswered_prompt_midconversation_skipped() -> None:
+    turns, dangling = group_interactions(
+        [_prompt(minute=0), _prompt(minute=2), _response(minute=3)]
+    )
+    assert len(turns) == 1
+    assert dangling == []
+    assert turns[0].prompt.created_datetime == datetime(2025, 6, 15, 10, 2, tzinfo=UTC)
+
+
+def test_trailing_unanswered_prompt_is_dangling() -> None:
+    trailing = _prompt(minute=2)
+    turns, dangling = group_interactions(
+        [_prompt(minute=0), _response(minute=1), trailing]
+    )
+    assert len(turns) == 1
+    assert dangling == [trailing]
+
+
+def test_consecutive_empty_then_real_prompt_collapsed() -> None:
+    empty_prompt = _prompt(content="", minute=0)
+    real_prompt = _prompt(content="real question", minute=0)
+    turns, dangling = group_interactions(
+        [empty_prompt, real_prompt, _response(minute=1)]
+    )
+    assert len(turns) == 1
+    assert dangling == []
     assert turns[0].prompt.body.content == "real question"
 
 

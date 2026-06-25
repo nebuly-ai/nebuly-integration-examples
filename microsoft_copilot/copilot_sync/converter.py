@@ -39,41 +39,95 @@ class InteractionTurn:
         return final.created_datetime if final else self.prompt.created_datetime
 
 
-def group_interactions(
+_TYPE_RANK = {"userPrompt": 0, "aiResponse": 1}
+_RELEVANT_INTERACTION_TYPES = frozenset({"userPrompt", "aiResponse"})
+
+
+def _group_by_session(
     interactions: list[AiInteraction],
-) -> tuple[list[InteractionTurn], list[AiInteraction]]:
-    """Group interactions by request_id into turns.
-
-    Returns (turns, dangling_prompts) where dangling_prompts are prompts whose
-    request_id has no response yet within this window (needed for the coverage
-    hold-back in sync.py).
-    """
-    prompts: dict[str, list[AiInteraction]] = defaultdict(list)
-    responses: dict[str, list[AiInteraction]] = defaultdict(list)
-
+) -> dict[str, list[AiInteraction]]:
+    by_session: dict[str, list[AiInteraction]] = defaultdict(list)
     for inter in interactions:
-        rid = inter.request_id
-        if not rid:
-            continue
-        if inter.interaction_type == "userPrompt":
-            prompts[rid].append(inter)
-        elif inter.interaction_type == "aiResponse":
-            responses[rid].append(inter)
+        if inter.interaction_type in _RELEVANT_INTERACTION_TYPES:
+            by_session[inter.session_id].append(inter)
+    return by_session
+
+
+def _consume_prompt_run(
+    session_interactions: list[AiInteraction], start: int, n: int
+) -> tuple[list[AiInteraction], int]:
+    first_dt = session_interactions[start].created_datetime
+    end = start
+    while end < n and session_interactions[end].interaction_type == "userPrompt":
+        if session_interactions[end].created_datetime != first_dt:
+            break
+        end += 1
+    return session_interactions[start:end], end
+
+
+def _consume_response_run(
+    session_interactions: list[AiInteraction], start: int, n: int
+) -> tuple[list[AiInteraction], int]:
+    end = start
+    while end < n and session_interactions[end].interaction_type == "aiResponse":
+        end += 1
+    return session_interactions[start:end], end
+
+
+def _chosen_prompt(prompt_run: list[AiInteraction]) -> AiInteraction:
+    return next(
+        (p for p in prompt_run if parser.parse_interaction_text(p)),
+        prompt_run[0],
+    )
+
+
+def _process_session_interactions(
+    session_interactions: list[AiInteraction],
+) -> tuple[list[InteractionTurn], list[AiInteraction]]:
+    session_interactions.sort(
+        key=lambda x: (x.created_datetime, _TYPE_RANK[x.interaction_type])
+    )
 
     turns: list[InteractionTurn] = []
     dangling: list[AiInteraction] = []
+    i = 0
+    n = len(session_interactions)
 
-    for rid, rid_prompts in prompts.items():
-        rid_prompts.sort(key=lambda x: x.created_datetime)
-        chosen = next(
-            (p for p in rid_prompts if parser.parse_interaction_text(p)),
-            rid_prompts[0],
-        )
-        rid_responses = sorted(responses.get(rid, []), key=lambda x: x.created_datetime)
-        if not rid_responses:
-            dangling.append(rid_prompts[0])
+    while i < n:
+        if session_interactions[i].interaction_type == "aiResponse":
+            i += 1
             continue
-        turns.append(InteractionTurn(rid, chosen, tuple(rid_responses)))
+
+        prompt_run, i = _consume_prompt_run(session_interactions, i, n)
+        chosen = _chosen_prompt(prompt_run)
+        responses, i = _consume_response_run(session_interactions, i, n)
+
+        if responses:
+            turns.append(InteractionTurn(chosen.request_id, chosen, tuple(responses)))
+        elif i >= n:
+            dangling.append(prompt_run[0])
+
+    return turns, dangling
+
+
+def group_interactions(
+    interactions: list[AiInteraction],
+) -> tuple[list[InteractionTurn], list[AiInteraction]]:
+    """Group interactions by chronological adjacency within each session into turns.
+
+    Returns (turns, dangling_prompts) where dangling_prompts are trailing prompts
+    with no response yet within this window (needed for the coverage hold-back
+    in sync.py).
+    """
+    turns: list[InteractionTurn] = []
+    dangling: list[AiInteraction] = []
+
+    for session_interactions in _group_by_session(interactions).values():
+        session_turns, session_dangling = _process_session_interactions(
+            session_interactions
+        )
+        turns.extend(session_turns)
+        dangling.extend(session_dangling)
 
     turns.sort(key=lambda t: t.time_start)
     return turns, dangling
