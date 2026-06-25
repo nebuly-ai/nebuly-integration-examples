@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .models import AiInteraction
@@ -10,6 +10,20 @@ if TYPE_CHECKING:
 _ATTACHMENT_TAG_RE = re.compile(r'<attachment id="[^"]*"></attachment>')
 _POINTER_ID_RE = re.compile(r'<attachment id="([^"]+)"></attachment>')
 _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
+
+
+def _unwrap_final_response(text: str) -> str:
+    """Some app cards (e.g. Copilot in Excel) embed
+    {"thoughts": ..., "finalResponse": ...} as the TextBlock text.
+    Return only the user-facing finalResponse when present; otherwise
+    the text unchanged."""
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return text
+    if isinstance(payload, dict) and isinstance(payload.get("finalResponse"), str):
+        return cast(str, payload["finalResponse"])
+    return text
 
 
 def strip_attachment_tags(text: str) -> str:
@@ -38,7 +52,7 @@ def extract_adaptive_card_text(card_content: str) -> str:
         if element.get("type") == "TextBlock":
             text = element.get("text")
             if text:
-                parts.append(text)
+                parts.append(_unwrap_final_response(text))
         elif element.get("type") == "RichTextBlock":
             joined = "".join(
                 inline.get("text", "")

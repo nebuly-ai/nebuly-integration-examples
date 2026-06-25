@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from datetime import datetime, timedelta
+from typing import Any, cast
 
 import httpx
 from azure.identity.aio import ClientSecretCredential
@@ -14,10 +15,9 @@ from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attem
 from .config import datetime_to_timestamp_str
 from .models import CopilotUser
 
-if TYPE_CHECKING:
-    from datetime import datetime
-
 logger = logging.getLogger(__name__)
+
+_FILTER_EPSILON = timedelta(microseconds=1)
 
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 INTERACTIONS_PATH = (
@@ -25,6 +25,17 @@ INTERACTIONS_PATH = (
     "/interactionHistory/getAllEnterpriseInteractions"
 )
 BATCH_TOP = 100
+
+
+def _interactions_filter(gte: datetime, lte: datetime) -> str:
+    """Build the createdDateTime filter.
+
+    The Graph endpoint only supports strict gt/lt, so the inclusive [gte, lte]
+    window is expressed by shifting each bound one tick outward.
+    """
+    gte_str = datetime_to_timestamp_str(gte - _FILTER_EPSILON)
+    lte_str = datetime_to_timestamp_str(lte + _FILTER_EPSILON)
+    return f"createdDateTime gt {gte_str} and createdDateTime lt {lte_str}"
 
 
 def _should_retry(exc: BaseException) -> bool:
@@ -78,12 +89,12 @@ class GraphClient:
         max_requests_per_minute: int = 600,
     ) -> None:
         self._copilot_sku = copilot_sku
-        self._cred = ClientSecretCredential(
-            tenant_id=tenant_id,
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-        self._graph = GraphServiceClient(credentials=self._cred, scopes=[GRAPH_SCOPE])
+        self._cred_kwargs = {
+            "tenant_id": tenant_id,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        self._cred = ClientSecretCredential(**self._cred_kwargs)
         self._http = httpx.AsyncClient()
         self._rate_limiter = _AsyncRateLimiter(max_requests_per_minute)
 
@@ -97,8 +108,6 @@ class GraphClient:
 
     async def list_copilot_users(self) -> list[CopilotUser]:
         users: list[CopilotUser] = []
-        # For any item u in assignedLicenses,
-        # check whether u.skuId equals self._copilot_sku
         sku_filter = f"assignedLicenses/any(u:u/skuId eq {self._copilot_sku})"
         query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
             select=["id", "displayName", "mail", "userPrincipalName"],
@@ -109,28 +118,33 @@ class GraphClient:
             query_parameters=query_params,
         )
 
-        page = await self._graph.users.get(request_configuration=request_config)
-        while page is not None:
-            if page.value:
-                for user in page.value:
-                    if user.id is None:
-                        # Unlikely but typings says it's possible...
-                        logger.warning(
-                            "User %s has no ID, skipping", user.user_principal_name
+        # Kiota closes async credentials after token fetch; scope the SDK to this call.
+        graph_cred = ClientSecretCredential(**self._cred_kwargs)
+        graph = GraphServiceClient(credentials=graph_cred, scopes=[GRAPH_SCOPE])
+        try:
+            page = await graph.users.get(request_configuration=request_config)
+            while page is not None:
+                if page.value:
+                    for user in page.value:
+                        if user.id is None:
+                            logger.warning(
+                                "User %s has no ID, skipping",
+                                user.user_principal_name,
+                            )
+                            continue
+                        users.append(
+                            CopilotUser(
+                                id=user.id,
+                                mail=user.mail,
+                                userPrincipalName=user.user_principal_name,
+                            )
                         )
-                        continue
-                    users.append(
-                        CopilotUser(
-                            id=user.id,
-                            mail=user.mail,
-                            # I'm using the alias name to make mypy happy
-                            userPrincipalName=user.user_principal_name,
-                        )
-                    )
 
-            if not page.odata_next_link:
-                break
-            page = await self._graph.users.with_url(page.odata_next_link).get()
+                if not page.odata_next_link:
+                    break
+                page = await graph.users.with_url(page.odata_next_link).get()
+        finally:
+            await graph_cred.close()
 
         return users
 
@@ -165,13 +179,9 @@ class GraphClient:
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
         }
-        gte_str = datetime_to_timestamp_str(gte)
-        lte_str = datetime_to_timestamp_str(lte)
         params: dict[str, Any] = {
             "$top": BATCH_TOP,
-            "$filter": (
-                f"createdDateTime ge {gte_str} and createdDateTime le {lte_str}"
-            ),
+            "$filter": _interactions_filter(gte, lte),
         }
         url = INTERACTIONS_PATH.format(user_id=user_id)
         items: list[dict[str, Any]] = []

@@ -99,7 +99,7 @@ def turn_to_payload(
         "output": assistant_output,
         "time_start": datetime_to_timestamp_str(turn.time_start),
         "time_end": datetime_to_timestamp_str(turn.time_end),
-        "end_user": user.email,
+        "end_user": user.id,
         "hide_content": False,
         "tags": user_defined.build_tags(turn),
     }

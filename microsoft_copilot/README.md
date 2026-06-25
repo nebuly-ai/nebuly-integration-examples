@@ -71,3 +71,8 @@ poetry run python -m copilot_sync
 ## Customizing the payload
 
 Edit `copilot_sync/user_defined.py` for customer-specific tags, traces, and user feedback.
+
+## Known limitations
+
+- **Excel & PowerPoint conversation grouping:** Graph returns unstable `sessionId`/`requestId` for these apps that change between turns of the same user session, so their multi-turn conversations can't be grouped — each turn lands as a separate conversation in Nebuly. Microsoft Graph limitation; no workaround.
+- **No per-trace token/cost metrics:** Graph doesn't expose input/output tokens, so only retrieval (grounding) traces are sent; LLM-level token/cost traces are intentionally omitted.

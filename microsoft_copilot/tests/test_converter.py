@@ -154,7 +154,7 @@ def test_turn_payload_shape() -> None:
     assert payload["interaction"]["conversation_id"] == "sess_1"
     assert payload["interaction"]["input"] == "hello"
     assert payload["interaction"]["output"] == "hi there"
-    assert payload["interaction"]["end_user"] == "alice@example.com"
+    assert payload["interaction"]["end_user"] == "user_1"
     assert payload["interaction"]["time_start"] == "2025-06-15T10:00:00Z"
     assert payload["interaction"]["time_end"] == "2025-06-15T10:01:00Z"
     assert payload["anonymize"] is False
@@ -184,11 +184,10 @@ def test_build_tags() -> None:
     assert tags["app_class"] == "IPM.SkypeTeams.Message.Copilot.Word"
     assert tags["session_id"] == "sess_1"
     assert tags["request_id"] == "req_1"
-    assert tags["response_count"] == "2"
     assert tags["final_model"] == "Microsoft 365 Chat"
 
 
-def test_build_traces_llm_then_retrieval() -> None:
+def test_build_traces_retrieval_only() -> None:
     final = _response(
         content="final answer",
         minute=2,
@@ -199,28 +198,10 @@ def test_build_traces_llm_then_retrieval() -> None:
     turn = InteractionTurn("req_1", _prompt(), (_response(content="step1"), final))
     traces = user_defined.build_traces(turn)
 
-    llm = traces[0]
-    assert llm["model"] == "Microsoft 365 Chat"
-    assert llm["output"] == "final answer"
-    assert llm["messages"] == [
-        {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "step1"},
-        {"role": "assistant", "content": "final answer"},
-    ]
-    assert traces[1]["source"] == "https://example.com"
-
-
-def test_build_traces_skips_empty_assistant_messages() -> None:
-    turn = InteractionTurn(
-        "req_1",
-        _prompt(),
-        (_response(content=""), _response(content="final", minute=2)),
-    )
-    llm = user_defined.build_traces(turn)[0]
-    assert llm["messages"] == [
-        {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "final"},
-    ]
+    assert len(traces) == 1
+    assert traces[0]["source"] == "https://example.com"
+    assert "messages" not in traces[0]
+    assert "model" not in traces[0]
 
 
 def test_user_defined_hooks_in_payload() -> None:

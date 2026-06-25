@@ -50,6 +50,7 @@ def _configure_logging(*, verbose: bool) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
+    logging.getLogger("azure").setLevel(logging.WARNING)
 
 
 def _resolve_requested_from(

@@ -59,6 +59,22 @@ def test_extract_single_textblock() -> None:
     assert extract_adaptive_card_text(card) == "Hello world"
 
 
+def test_extract_textblock_unwraps_final_response() -> None:
+    card = _card(
+        {
+            "type": "TextBlock",
+            "text": '{"thoughts":"internal reasoning","finalResponse":"answer"}',
+        }
+    )
+    assert extract_adaptive_card_text(card) == "answer"
+
+
+def test_extract_textblock_without_final_response_returns_raw_json() -> None:
+    raw = '{"thoughts":"x"}'
+    card = _card({"type": "TextBlock", "text": raw})
+    assert extract_adaptive_card_text(card) == raw
+
+
 def test_extract_multiple_textblocks_joined_by_newline() -> None:
     card = _card(
         {"type": "TextBlock", "text": "First"},

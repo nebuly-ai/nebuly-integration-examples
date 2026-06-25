@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from . import parser
-
 if TYPE_CHECKING:
     from .converter import InteractionTurn
     from .models import AiInteraction
@@ -11,59 +9,24 @@ if TYPE_CHECKING:
 _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
 
 
-def build_tags(turn: InteractionTurn) -> dict[str, str]:
+def build_tags(turn: InteractionTurn) -> dict[str, str | None]:
     prompt = turn.prompt
     final = turn.final_response
     return {
-        "app_class": str(prompt.app_class or ""),
-        "conversation_type": str(prompt.conversation_type or ""),
-        "locale": str(prompt.locale or ""),
-        "session_id": str(prompt.session_id or ""),
-        "request_id": str(prompt.request_id or ""),
-        "response_count": str(len(turn.responses)),
-        "final_model": str((final.sender_model_name if final else None) or ""),
-        "user_attachments_count": str(len(prompt.attachments)),
-        "user_links_count": str(len(prompt.links)),
-        "user_mentions_count": str(len(prompt.mentions)),
+        "app_class": prompt.app_class,
+        "conversation_type": prompt.conversation_type,
+        "locale": prompt.locale,
+        "session_id": prompt.session_id,
+        "request_id": prompt.request_id,
+        "final_model": final.sender_model_name if final else None,
     }
 
 
 def build_traces(turn: InteractionTurn) -> list[dict[str, Any]]:
-    traces: list[dict[str, Any]] = []
-
-    llm_trace = _build_llm_trace(turn)
-    if llm_trace is not None:
-        traces.append(llm_trace)
-
-    final = turn.final_response
-    if final is not None:
-        traces.extend(_build_retrieval_traces(final))
-
-    return traces
-
-
-def _build_llm_trace(turn: InteractionTurn) -> dict[str, Any] | None:
     final = turn.final_response
     if final is None:
-        return None
-
-    messages: list[dict[str, str]] = []
-    user_text = parser.parse_interaction_text(turn.prompt)
-    if user_text:
-        messages.append({"role": "user", "content": user_text})
-    for response in turn.responses:
-        text = parser.parse_interaction_text(response)
-        if text:
-            messages.append({"role": "assistant", "content": text})
-
-    if not any(m["role"] == "assistant" for m in messages):
-        return None
-
-    return {
-        "model": final.sender_model_name or "copilot",
-        "messages": messages,
-        "output": parser.parse_interaction_text(final),
-    }
+        return []
+    return _build_retrieval_traces(final)
 
 
 def _build_retrieval_traces(final: AiInteraction) -> list[dict[str, Any]]:

@@ -55,6 +55,6 @@ class NebulyClient:
             logger.error(
                 "Nebuly POST failed: status=%s body=%r",
                 resp.status_code,
-                resp.text[:500],
+                resp.text,
             )
             resp.raise_for_status()
