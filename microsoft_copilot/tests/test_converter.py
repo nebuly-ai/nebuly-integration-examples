@@ -31,6 +31,7 @@ def _prompt(
     content: str = "hello",
     session_id: str = "sess_1",
     minute: int = 0,
+    second: int = 0,
 ) -> AiInteraction:
     return AiInteraction(
         id=f"prompt_{request_id}_{minute}",
@@ -40,7 +41,7 @@ def _prompt(
         app_class="IPM.SkypeTeams.Message.Copilot.Word",
         conversation_type="appchat",
         locale="en-US",
-        created_datetime=datetime(2025, 6, 15, 10, minute, tzinfo=UTC),
+        created_datetime=datetime(2025, 6, 15, 10, minute, second, tzinfo=UTC),
         body=InteractionBody(content_type="text", content=content),
     )
 
@@ -51,6 +52,7 @@ def _response(
     content: str = "hi there",
     model: str = "Microsoft 365 Chat",
     minute: int = 1,
+    second: int = 0,
     session_id: str = "sess_1",
     links: list[Link] | None = None,
 ) -> AiInteraction:
@@ -62,7 +64,7 @@ def _response(
         app_class="IPM.SkypeTeams.Message.Copilot.Word",
         conversation_type="appchat",
         locale="en-US",
-        created_datetime=datetime(2025, 6, 15, 10, minute, tzinfo=UTC),
+        created_datetime=datetime(2025, 6, 15, 10, minute, second, tzinfo=UTC),
         body=InteractionBody(content_type="text", content=content),
         sender=FromIdentitySet(
             application=TeamworkApplicationIdentity(displayName=model),
@@ -310,3 +312,56 @@ def test_adaptive_card_response_parsed_as_output() -> None:
     payload = turn_to_payload(turn, user=_user(), anonymize=False)
     assert not isinstance(payload, SkipReason)
     assert payload["interaction"]["output"] == "Risposta dalla card"
+
+
+def test_near_duplicate_turn_dropped() -> None:
+    turns, dangling = group_interactions(
+        [
+            _prompt("req_a", minute=0, second=0),
+            _response("req_a", minute=0, second=1),
+            _prompt("req_b", minute=0, second=2),
+            _response("req_b", minute=0, second=3),
+        ]
+    )
+    assert len(turns) == 1
+    assert dangling == []
+    assert turns[0].prompt.request_id == "req_a"
+
+
+def test_outside_duplicate_window_kept() -> None:
+    turns, dangling = group_interactions(
+        [
+            _prompt("req_a", minute=0, second=0),
+            _response("req_a", minute=0, second=1),
+            _prompt("req_b", minute=0, second=10),
+            _response("req_b", minute=0, second=11),
+        ]
+    )
+    assert len(turns) == 2
+    assert dangling == []
+
+
+def test_near_duplicate_different_session_kept() -> None:
+    turns, dangling = group_interactions(
+        [
+            _prompt("req_a", session_id="sess_a", minute=0, second=0),
+            _response("req_a", session_id="sess_a", minute=0, second=1),
+            _prompt("req_b", session_id="sess_b", minute=0, second=2),
+            _response("req_b", session_id="sess_b", minute=0, second=3),
+        ]
+    )
+    assert len(turns) == 2
+    assert dangling == []
+
+
+def test_near_duplicate_different_output_kept() -> None:
+    turns, dangling = group_interactions(
+        [
+            _prompt("req_a", minute=0, second=0),
+            _response("req_a", content="answer one", minute=0, second=1),
+            _prompt("req_b", minute=0, second=2),
+            _response("req_b", content="answer two", minute=0, second=3),
+        ]
+    )
+    assert len(turns) == 2
+    assert dangling == []

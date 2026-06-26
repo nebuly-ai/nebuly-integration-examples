@@ -117,10 +117,10 @@ async def _sync_user(
     intervals = cache.plan_intervals(coverage, requested_from, run_until)
 
     if not intervals:
-        logger.debug("No intervals for user %s", user.email)
+        logger.debug("No intervals for user %s", user.id)
         return counts
 
-    logger.info("Processing user %s (%d interval(s))", user.email, len(intervals))
+    logger.info("Processing user %s (%d interval(s))", user.id, len(intervals))
 
     for interval in intervals:
         try:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +14,8 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from .models import AiInteraction, CopilotUser
+
+logger = logging.getLogger(__name__)
 
 
 class SkipReason(Enum):
@@ -110,6 +114,54 @@ def _process_session_interactions(
     return turns, dangling
 
 
+_DUPLICATE_WINDOW = timedelta(seconds=5)
+
+
+def _drop_near_duplicates(turns: list[InteractionTurn]) -> list[InteractionTurn]:
+    """Drop turns the Microsoft Graph API duplicated with a small timestamp jitter.
+
+    The API occasionally emits the same interaction twice (same session, same
+    prompt/response text) with createdDateTime differing by a second or two and
+    a fresh id/request_id. Exact-timestamp grouping in _consume_prompt_run does
+    not catch these, so they would otherwise be sent to Nebuly as two distinct
+    interactions. We treat a turn as a duplicate when an earlier kept turn in
+    the same conversation has identical parsed input and output and started
+    within _DUPLICATE_WINDOW.
+    """
+    sorted_turns = sorted(turns, key=lambda t: t.time_start)
+    kept: list[InteractionTurn] = []
+    first_kept_time: dict[tuple[str, str, str], datetime] = {}
+
+    for turn in sorted_turns:
+        final = turn.final_response
+        if final is None:
+            kept.append(turn)
+            continue
+
+        output_text = parser.parse_interaction_text(final)
+        if not output_text:
+            kept.append(turn)
+            continue
+
+        input_text = parser.parse_interaction_text(turn.prompt)
+        key = (turn.prompt.session_id, input_text, output_text)
+
+        anchor = first_kept_time.get(key)
+        if anchor is not None and turn.time_start - anchor <= _DUPLICATE_WINDOW:
+            logger.debug(
+                "Dropping near-duplicate turn session_id=%s input=%r",
+                turn.prompt.session_id,
+                input_text[:80],
+            )
+            continue
+
+        kept.append(turn)
+        if anchor is None:
+            first_kept_time[key] = turn.time_start
+
+    return kept
+
+
 def group_interactions(
     interactions: list[AiInteraction],
 ) -> tuple[list[InteractionTurn], list[AiInteraction]]:
@@ -129,6 +181,7 @@ def group_interactions(
         turns.extend(session_turns)
         dangling.extend(session_dangling)
 
+    turns = _drop_near_duplicates(turns)
     turns.sort(key=lambda t: t.time_start)
     return turns, dangling
 
