@@ -10,7 +10,9 @@ Microsoft Graph (licensed users → interactions) → pair conversion → Nebuly
 
 - Python ≥ 3.12
 - [Poetry](https://python-poetry.org/docs/#installing-with-the-official-installer)
-- Azure app registration with `AiEnterpriseInteraction.Read.All` (application permission)
+- Azure app registration with authorizations:
+  - `AiEnterpriseInteraction.Read.All`
+  - `User.Read.All`
 
 ## Setup
 
@@ -26,26 +28,30 @@ cp .env.example .env
 
 ### Environment variables
 
-| Variable | Required | Default | Description |
-| -------- | -------- | ------- | ----------- |
-| `AZURE_TENANT_ID` | yes | — | Azure AD tenant ID |
-| `AZURE_CLIENT_ID` | yes | — | App registration client ID |
-| `AZURE_CLIENT_SECRET` | yes | — | App registration client secret |
-| `NEBULY_API_KEY` | yes | — | Nebuly secret key |
-| `NEBULY_ENDPOINT` | no | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint |
-| `COPILOT_SKU` | no | `639dec6b-bb19-468b-871c-c5c441c4b0cb` | Microsoft 365 Copilot SKU GUID |
-| `GRAPH_MAX_REQUESTS_PER_MINUTE` | no | `1800` | Rate limit for Graph interaction requests |
-| `ANONYMIZE` | no | `false` | Set to `true` to anonymize content in the Nebuly payload |
+
+| Variable                        | Required | Default                                                                      | Description                                              |
+| ------------------------------- | -------- | ---------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `AZURE_TENANT_ID`               | yes      | —                                                                            | Azure AD tenant ID                                       |
+| `AZURE_CLIENT_ID`               | yes      | —                                                                            | App registration client ID                               |
+| `AZURE_CLIENT_SECRET`           | yes      | —                                                                            | App registration client secret                           |
+| `NEBULY_API_KEY`                | yes      | —                                                                            | Nebuly secret key                                        |
+| `NEBULY_ENDPOINT`               | no       | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint                                |
+| `COPILOT_SKU`                   | no       | `639dec6b-bb19-468b-871c-c5c441c4b0cb`                                       | Microsoft 365 Copilot SKU GUID                           |
+| `GRAPH_MAX_REQUESTS_PER_MINUTE` | no       | `1800`                                                                       | Rate limit for Graph interaction requests                |
+| `ANONYMIZE`                     | no       | `false`                                                                      | Set to `true` to anonymize content in the Nebuly payload |
+
 
 ### CLI flags
 
-| Flag | Default | Description |
-| ---- | ------- | ----------- |
-| `--from-date` | — | ISO backfill start date (required on first run) |
-| `--to-date` | — | ISO end date filter |
-| `--cache-dir` | `./.cache` | Directory for the sync state database |
-| `--dry-run` | off | Fetch interactions without POSTing to Nebuly |
-| `--verbose` | off | Enable debug logging |
+
+| Flag          | Default    | Description                                     |
+| ------------- | ---------- | ----------------------------------------------- |
+| `--from-date` | —          | ISO backfill start date (required on first run) |
+| `--to-date`   | —          | ISO end date filter                             |
+| `--cache-dir` | `./.cache` | Directory for the sync state database           |
+| `--dry-run`   | off        | Fetch interactions without POSTing to Nebuly    |
+| `--verbose`   | off        | Enable debug logging                            |
+
 
 ## Caching & resumable sync
 
@@ -74,5 +80,10 @@ Edit `copilot_sync/user_defined.py` for customer-specific tags, traces, and user
 
 ## Known limitations
 
-- **Excel & PowerPoint conversation grouping:** Graph returns unstable `sessionId`/`requestId` for these apps that change between turns of the same user session, so their multi-turn conversations can't be grouped — each turn lands as a separate conversation in Nebuly. Microsoft Graph limitation; no workaround.
+- **Excel & PowerPoint conversation grouping:** Graph returns unstable `sessionId`/`requestId` for these apps that change between turns of the same user session, so their multi-turn conversations can't be grouped — each turn lands as a separate conversation in Nebuly.
 - **No per-trace token/cost metrics:** Graph doesn't expose input/output tokens, so only retrieval (grounding) traces are sent; LLM-level token/cost traces are intentionally omitted.
+
+## References
+
+- [Microsoft Teams export content Copilot](https://learn.microsoft.com/en-us/microsoftteams/export-teams-content-copilot)
+- [Nebuly ingestion API reference](https://docs.nebuly.com/tracking/api-reference/events/post-events-interaction-with-trace-v2)
