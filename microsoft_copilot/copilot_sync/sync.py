@@ -34,6 +34,7 @@ class Counts:
     skipped: int = 0
     empty: int = 0
     failed: int = 0
+    users_failed: int = 0
     users_skipped: int = 0
 
 
@@ -79,11 +80,15 @@ async def _send_turns(
     counts: Counts,
     is_tail: bool,
     settle_edge: datetime,
-) -> list[datetime]:
-    """Send settled turns and return the start times of deferred in-flight turns."""
+) -> tuple[list[datetime], list[datetime]]:
+    """Send settled turns and return deferred in-flight and failed turn start times."""
     in_flight_starts: list[datetime] = []
+    failed_starts: list[datetime] = []
     for turn in turns:
         if is_tail and turn.time_end > settle_edge:
+            # Hold back to time_start (not time_end): re-fetch filters on the prompt's
+            # created_datetime, and group_interactions needs that prompt to rebuild the
+            # turn.
             in_flight_starts.append(turn.time_start)
             continue
         counts.fetched += 1
@@ -97,9 +102,14 @@ async def _send_turns(
         if config.dry_run:
             counts.sent += 1
             continue
-        await nebuly.send_interaction(result)
-        counts.sent += 1
-    return in_flight_starts
+        try:
+            await nebuly.send_interaction(result)
+            counts.sent += 1
+        except Exception:
+            logger.exception("Failed to send turn for user %s", user.id)
+            counts.failed += 1
+            failed_starts.append(turn.time_start)
+    return in_flight_starts, failed_starts
 
 
 async def _sync_user(
@@ -141,7 +151,7 @@ async def _sync_user(
         turns, dangling_prompts = group_interactions(interactions)
         is_tail = interval.lte == run_until
         settle_edge = interval.lte - timedelta(seconds=config.settle_lag_seconds)
-        in_flight_starts = await _send_turns(
+        in_flight_starts, failed_starts = await _send_turns(
             turns,
             user=user,
             nebuly=nebuly,
@@ -154,9 +164,10 @@ async def _sync_user(
         hold_back = [p.created_datetime for p in dangling_prompts]
         if is_tail:
             hold_back += in_flight_starts
+        hold_back += failed_starts
         if hold_back:
             earliest = min(hold_back)
-            coverage_until = max(earliest - timedelta(microseconds=1), interval.gte)
+            coverage_until = earliest - timedelta(microseconds=1)
         else:
             coverage_until = interval.lte
 
@@ -198,7 +209,6 @@ async def run_sync(config: Config) -> SyncSummary:
                 nebuly_http,
                 config.nebuly_api_key,
                 config.nebuly_endpoint,
-                dry_run=config.dry_run,
             )
 
             users = await graph.list_copilot_users()
@@ -216,13 +226,14 @@ async def run_sync(config: Config) -> SyncSummary:
                     )
                 except Exception:
                     logger.exception("Sync failed for user %s", user.email)
-                    summary.totals.failed += 1
+                    summary.totals.users_failed += 1
                     continue
                 summary.users_processed += 1
                 summary.totals.fetched += user_counts.fetched
                 summary.totals.sent += user_counts.sent
                 summary.totals.skipped += user_counts.skipped
                 summary.totals.empty += user_counts.empty
+                summary.totals.failed += user_counts.failed
                 summary.totals.users_skipped += user_counts.users_skipped
     finally:
         if graph is not None:
@@ -231,7 +242,7 @@ async def run_sync(config: Config) -> SyncSummary:
 
     logger.info(
         "Sync complete: users=%d skipped=%d | interactions fetched=%d sent=%d "
-        "skipped=%d empty=%d failed=%d",
+        "skipped=%d empty=%d failed=%d users_failed=%d",
         summary.users_processed,
         summary.totals.users_skipped,
         summary.totals.fetched,
@@ -239,5 +250,6 @@ async def run_sync(config: Config) -> SyncSummary:
         summary.totals.skipped,
         summary.totals.empty,
         summary.totals.failed,
+        summary.totals.users_failed,
     )
     return summary

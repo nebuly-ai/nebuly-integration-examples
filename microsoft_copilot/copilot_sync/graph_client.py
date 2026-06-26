@@ -14,6 +14,7 @@ from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attem
 
 from .config import datetime_to_timestamp_str
 from .models import CopilotUser
+from .utils import should_retry
 
 logger = logging.getLogger(__name__)
 
@@ -36,15 +37,6 @@ def _interactions_filter(gte: datetime, lte: datetime) -> str:
     gte_str = datetime_to_timestamp_str(gte - _FILTER_EPSILON)
     lte_str = datetime_to_timestamp_str(lte + _FILTER_EPSILON)
     return f"createdDateTime gt {gte_str} and createdDateTime lt {lte_str}"
-
-
-def _should_retry(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.TransportError):
-        return True
-    if not isinstance(exc, HTTPStatusError):
-        return False
-    status = exc.response.status_code
-    return status == 429 or status >= 500
 
 
 def _retry_after_seconds(retry_state: RetryCallState) -> float:
@@ -149,7 +141,7 @@ class GraphClient:
         return users
 
     @retry(
-        retry=retry_if_exception(_should_retry),
+        retry=retry_if_exception(should_retry),
         stop=stop_after_attempt(10),
         wait=_retry_after_seconds,
         reraise=True,
@@ -191,6 +183,8 @@ class GraphClient:
             items.extend(data["value"])
 
         while next_link := data.get("@odata.nextLink"):
+            token = await self._get_token()
+            headers["Authorization"] = f"Bearer {token}"
             data = await self._fetch_page(url=next_link, headers=headers)
             if data.get("value"):
                 items.extend(data["value"])

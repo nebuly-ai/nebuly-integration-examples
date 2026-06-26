@@ -167,7 +167,7 @@ def test_failed_user_does_not_advance_coverage_earlier_user_committed(
         nebuly.send_interaction = AsyncMock()
         summary = asyncio.run(run_sync(config))
 
-    assert summary.totals.failed == 1
+    assert summary.totals.users_failed == 1
     cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
     try:
         user_a = cache.get_user_coverage("user_a")
@@ -358,3 +358,158 @@ def test_split_pair_watermark_holds_back_coverage(tmp_path: Path) -> None:
         assert coverage.coverage_until == _ts(13)
     finally:
         cache.close()
+
+
+def test_failed_turn_holds_back_coverage_then_resent(tmp_path: Path) -> None:
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_fail", hour=10, minute=0),
+            _response_dict_at("req_fail", hour=10, minute=1),
+        ],
+    )
+
+    run1_config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock(side_effect=RuntimeError("send failed"))
+        summary = asyncio.run(run_sync(run1_config))
+
+    assert summary.totals.failed == 1
+    assert summary.totals.sent == 0
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(10, 0) - timedelta(microseconds=1)
+    finally:
+        cache.close()
+
+    run2_config = _config(tmp_path, from_date=None, to_date=_ts(13))
+    nebuly.send_interaction = AsyncMock()
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(run2_config))
+
+    nebuly.send_interaction.assert_called_once()
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(13)
+    finally:
+        cache.close()
+
+
+def test_one_failed_turn_does_not_abort_interval(tmp_path: Path) -> None:
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_fail", hour=10, minute=0),
+            _response_dict_at("req_fail", hour=10, minute=1),
+            _interaction_dict_at("req_ok", hour=10, minute=30),
+            _response_dict_at("req_ok", hour=10, minute=31),
+        ],
+    )
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock(
+            side_effect=[RuntimeError("send failed"), None],
+        )
+        summary = asyncio.run(run_sync(config))
+
+    assert summary.totals.sent == 1
+    assert summary.totals.failed == 1
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(10, 0) - timedelta(microseconds=1)
+    finally:
+        cache.close()
+
+
+def test_earliest_hold_back_wins_across_categories(tmp_path: Path) -> None:
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_fail", hour=10, minute=0),
+            _response_dict_at("req_fail", hour=10, minute=1),
+            _interaction_dict_at("req_dangling", hour=11, minute=59),
+        ],
+    )
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock(side_effect=RuntimeError("send failed"))
+        summary = asyncio.run(run_sync(config))
+
+    assert summary.totals.failed == 1
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(10, 0) - timedelta(microseconds=1)
+    finally:
+        cache.close()
+
+
+def test_per_turn_and_whole_user_counters_independent(tmp_path: Path) -> None:
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=_users())
+    mock_graph.close = AsyncMock()
+
+    async def fetch_side_effect(
+        user_id: str,
+        gte: datetime,
+        lte: datetime,
+    ) -> list[dict[str, object]]:
+        if user_id == "user_a":
+            return [
+                _interaction_dict_at("req_fail", hour=10, minute=0),
+                _response_dict_at("req_fail", hour=10, minute=1),
+            ]
+        raise httpx.HTTPStatusError(
+            "fail",
+            request=MagicMock(),
+            response=MagicMock(status_code=500),
+        )
+
+    mock_graph.fetch_interactions = AsyncMock(side_effect=fetch_side_effect)
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock(side_effect=RuntimeError("send failed"))
+        summary = asyncio.run(run_sync(config))
+
+    assert summary.totals.failed == 1
+    assert summary.totals.users_failed == 1
