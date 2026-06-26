@@ -2,12 +2,12 @@ repos:
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.15.16
     hooks:
-      - id: ruff-check
-        types_or: [python, pyi, jupyter]
-        args: ["--config", "pyproject.toml", "--fix"]
       - id: ruff-format
         types_or: [python, pyi, jupyter]
         args: ["--config", "pyproject.toml"]
+      - id: ruff-check
+        types_or: [python, pyi, jupyter]
+        args: ["--config", "pyproject.toml", "--fix"]
   - repo: local
     hooks:
       - id: mypy
