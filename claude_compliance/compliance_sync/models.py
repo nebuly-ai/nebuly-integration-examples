@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Literal
+from datetime import datetime  # noqa: TC003
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 
 class ChatUser(BaseModel):
