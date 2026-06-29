@@ -513,3 +513,150 @@ def test_per_turn_and_whole_user_counters_independent(tmp_path: Path) -> None:
 
     assert summary.totals.failed == 1
     assert summary.totals.users_failed == 1
+
+
+def test_backfill_failure_does_not_mask_gap_when_tail_succeeds(tmp_path: Path) -> None:
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache.save_user_coverage("user_a", _ts(8), _ts(12))
+    cache.commit()
+    cache.close()
+
+    async def fetch_side_effect(
+        user_id: str,
+        gte: datetime,
+        lte: datetime,
+    ) -> list[dict[str, object]]:
+        if lte == _ts(8):
+            return [
+                _interaction_dict_at("req_fail", hour=6, minute=30),
+                _response_dict_at("req_fail", hour=6, minute=31),
+            ]
+        return [
+            _interaction_dict_at("req_tail", hour=13, minute=0),
+            _response_dict_at("req_tail", hour=13, minute=1),
+        ]
+
+    mock_graph.fetch_interactions = AsyncMock(side_effect=fetch_side_effect)
+
+    config = _config(tmp_path, from_date=_ts(6), to_date=_ts(14))
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock(
+            side_effect=[RuntimeError("send failed"), None],
+        )
+        summary = asyncio.run(run_sync(config))
+
+    assert summary.totals.failed == 1
+    assert summary.totals.sent == 1
+
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_until == _ts(6, 30) - timedelta(microseconds=1)
+        intervals = cache.plan_intervals(coverage, _ts(6), _ts(14))
+        assert any(iv.gte <= _ts(6, 30) <= iv.lte for iv in intervals)
+    finally:
+        cache.close()
+
+
+def test_backfill_and_tail_clean_merges_coverage(tmp_path: Path) -> None:
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache.save_user_coverage("user_a", _ts(8), _ts(12))
+    cache.commit()
+    cache.close()
+
+    async def fetch_side_effect(
+        user_id: str,
+        gte: datetime,
+        lte: datetime,
+    ) -> list[dict[str, object]]:
+        if lte == _ts(8):
+            return [
+                _interaction_dict_at("req_backfill", hour=7, minute=0),
+                _response_dict_at("req_backfill", hour=7, minute=1),
+            ]
+        return [
+            _interaction_dict_at("req_tail", hour=13, minute=0),
+            _response_dict_at("req_tail", hour=13, minute=1),
+        ]
+
+    mock_graph.fetch_interactions = AsyncMock(side_effect=fetch_side_effect)
+
+    config = _config(tmp_path, from_date=_ts(6), to_date=_ts(14))
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(config))
+
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_from == _ts(6)
+        assert coverage.coverage_until == _ts(14)
+    finally:
+        cache.close()
+
+
+def test_tail_hold_back_with_clean_backfill(tmp_path: Path) -> None:
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.close = AsyncMock()
+
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache.save_user_coverage("user_a", _ts(8), _ts(12))
+    cache.commit()
+    cache.close()
+
+    async def fetch_side_effect(
+        user_id: str,
+        gte: datetime,
+        lte: datetime,
+    ) -> list[dict[str, object]]:
+        if lte == _ts(8):
+            return [
+                _interaction_dict_at("req_backfill", hour=7, minute=0),
+                _response_dict_at("req_backfill", hour=7, minute=1),
+            ]
+        return [
+            _interaction_dict_at("req_inflight", hour=13, minute=59, second=30),
+            _response_dict_at("req_inflight", hour=13, minute=59, second=50),
+        ]
+
+    mock_graph.fetch_interactions = AsyncMock(side_effect=fetch_side_effect)
+
+    config = _config(tmp_path, from_date=_ts(6), to_date=_ts(14))
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        asyncio.run(run_sync(config))
+
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    try:
+        coverage = cache.get_user_coverage("user_a")
+        assert coverage is not None
+        assert coverage.coverage_from == _ts(6)
+        assert coverage.coverage_until == _ts(13, 59, 30) - timedelta(microseconds=1)
+    finally:
+        cache.close()

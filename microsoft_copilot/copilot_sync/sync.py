@@ -132,6 +132,8 @@ async def _sync_user(
 
     logger.info("Processing user %s (%d interval(s))", user.id, len(intervals))
 
+    run_hold_back: list[datetime] = []
+
     for interval in intervals:
         try:
             raw = await graph.fetch_interactions(
@@ -161,18 +163,22 @@ async def _sync_user(
             settle_edge=settle_edge,
         )
 
-        hold_back = [p.created_datetime for p in dangling_prompts]
+        interval_hold_back = [p.created_datetime for p in dangling_prompts]
         if is_tail:
-            hold_back += in_flight_starts
-        hold_back += failed_starts
-        if hold_back:
-            earliest = min(hold_back)
-            coverage_until = earliest - timedelta(microseconds=1)
-        else:
-            coverage_until = interval.lte
+            interval_hold_back += in_flight_starts
+        interval_hold_back += failed_starts
+        run_hold_back.extend(interval_hold_back)
 
-        cache.save_user_coverage(user.id, requested_from, coverage_until)
-        cache.commit()
+    if run_hold_back:
+        cache.save_user_coverage(
+            user.id,
+            requested_from,
+            run_until,
+            hold_back=min(run_hold_back),
+        )
+    else:
+        cache.save_user_coverage(user.id, requested_from, run_until)
+    cache.commit()
 
     return counts
 

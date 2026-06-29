@@ -132,3 +132,29 @@ def test_has_any_coverage(tmp_path: Path) -> None:
     cache.save_user_coverage("user_1", _ts(8), _ts(12))
     cache.commit()
     assert cache.has_any_coverage()
+
+
+def test_save_with_hold_back_reopens_gap_below_existing_until(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    cache.save_user_coverage("user_1", _ts(8), _ts(12))
+    cache.save_user_coverage("user_1", _ts(6), _ts(14), hold_back=_ts(6, 30))
+    cache.commit()
+
+    coverage = cache.get_user_coverage("user_1")
+    assert coverage is not None
+    assert coverage.coverage_from == _ts(8)
+    assert coverage.coverage_until == _ts(6, 30) - timedelta(microseconds=1)
+
+
+def test_save_with_hold_back_advances_from_when_hold_back_after_existing_from(
+    tmp_path: Path,
+) -> None:
+    cache = _cache(tmp_path)
+    cache.save_user_coverage("user_1", _ts(8), _ts(12))
+    cache.save_user_coverage("user_1", _ts(6), _ts(14), hold_back=_ts(13))
+    cache.commit()
+
+    coverage = cache.get_user_coverage("user_1")
+    assert coverage is not None
+    assert coverage.coverage_from == _ts(6)
+    assert coverage.coverage_until == _ts(13) - timedelta(microseconds=1)

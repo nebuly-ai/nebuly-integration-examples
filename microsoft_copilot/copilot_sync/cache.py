@@ -24,6 +24,20 @@ def _merge_coverage(
     return new_from, new_until
 
 
+def _merge_coverage_with_hold_back(
+    state_from: datetime | None,
+    requested_from: datetime,
+    hold_back: datetime,
+) -> tuple[datetime | None, datetime]:
+    new_until = hold_back - timedelta(microseconds=1)
+    if state_from is None or hold_back >= state_from:
+        from_candidates = [x for x in [state_from, requested_from] if x is not None]
+        new_from = min(from_candidates) if from_candidates else None
+    else:
+        new_from = state_from
+    return new_from, new_until
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_user_coverage (
   tenant_id              TEXT NOT NULL,
@@ -142,16 +156,25 @@ class SyncCache:
         user_id: str,
         requested_from: datetime,
         run_until: datetime,
+        *,
+        hold_back: datetime | None = None,
     ) -> None:
         existing = self.get_user_coverage(user_id)
         state_from = existing.coverage_from if existing else None
         state_until = existing.coverage_until if existing else None
-        new_from, new_until = _merge_coverage(
-            state_from,
-            state_until,
-            requested_from,
-            run_until,
-        )
+        if hold_back is not None:
+            new_from, new_until = _merge_coverage_with_hold_back(
+                state_from,
+                requested_from,
+                hold_back,
+            )
+        else:
+            new_from, new_until = _merge_coverage(
+                state_from,
+                state_until,
+                requested_from,
+                run_until,
+            )
         now = _now_ts()
         self._conn.execute(
             """
