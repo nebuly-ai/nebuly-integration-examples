@@ -36,34 +36,44 @@ def _parse_bool(value: str) -> bool:
 
 @dataclass(frozen=True)
 class Config:
+    azure_tenant_id: str
+    azure_client_id: str
+    azure_client_secret: str
+    copilot_sku: str
+    graph_max_requests_per_minute: int
     nebuly_api_key: str
     nebuly_endpoint: str
-    compliance_api_key: str
-    compliance_base_url: str
-    organization_uuid: str
-    compliance_max_requests_per_minute: int
     anonymize: bool
     from_date: datetime | None
     to_date: datetime | None
     cache_dir: Path
     dry_run: bool
     verbose: bool
+    settle_lag_seconds: int = 60
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
         load_dotenv()
         parser = argparse.ArgumentParser(
-            description="Sync Claude Compliance data to Nebuly"
+            description="Sync Microsoft Copilot Enterprise interactions to Nebuly",
         )
         parser.add_argument(
-            "--from-date", type=str, default=None, help="ISO backfill start date"
+            "--from-date",
+            type=str,
+            default=None,
+            help="ISO backfill start date",
         )
         parser.add_argument(
-            "--to-date", type=str, default=None, help="ISO end date filter"
+            "--to-date",
+            type=str,
+            default=None,
+            help="ISO end date filter",
         )
         parser.add_argument("--cache-dir", type=Path, default=Path("./.cache"))
         parser.add_argument(
-            "--dry-run", action="store_true", help="Build payloads without POSTing"
+            "--dry-run",
+            action="store_true",
+            help="Build payloads without POSTing",
         )
         parser.add_argument(
             "--verbose",
@@ -72,16 +82,18 @@ class Config:
         )
         args = parser.parse_args(argv)
 
+        azure_tenant_id = os.environ.get("AZURE_TENANT_ID")
+        azure_client_id = os.environ.get("AZURE_CLIENT_ID")
+        azure_client_secret = os.environ.get("AZURE_CLIENT_SECRET")
         nebuly_api_key = os.environ.get("NEBULY_API_KEY")
-        compliance_api_key = os.environ.get("COMPLIANCE_API_KEY")
-        organization_uuid = os.environ.get("ORGANIZATION_UUID")
 
         missing = [
             name
             for name, val in [
+                ("AZURE_TENANT_ID", azure_tenant_id),
+                ("AZURE_CLIENT_ID", azure_client_id),
+                ("AZURE_CLIENT_SECRET", azure_client_secret),
                 ("NEBULY_API_KEY", nebuly_api_key),
-                ("COMPLIANCE_API_KEY", compliance_api_key),
-                ("ORGANIZATION_UUID", organization_uuid),
             ]
             if not val
         ]
@@ -93,26 +105,35 @@ class Config:
         )
         to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
 
+        if from_date is not None and to_date is not None and from_date > to_date:
+            raise RuntimeError(
+                f"--from-date ({from_date.isoformat()}) cannot be after "
+                f"--to-date ({to_date.isoformat()})"
+            )
+
         return cls(
-            nebuly_api_key=cast(str, nebuly_api_key),
+            azure_tenant_id=cast("str", azure_tenant_id),
+            azure_client_id=cast("str", azure_client_id),
+            azure_client_secret=cast("str", azure_client_secret),
+            copilot_sku=os.environ.get(
+                "COPILOT_SKU",
+                "639dec6b-bb19-468b-871c-c5c441c4b0cb",
+            ),
+            graph_max_requests_per_minute=int(
+                os.environ.get("GRAPH_MAX_REQUESTS_PER_MINUTE", "1800"),
+            ),
+            nebuly_api_key=cast("str", nebuly_api_key),
             nebuly_endpoint=os.environ.get(
                 "NEBULY_ENDPOINT",
                 "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction",
             ).rstrip("/"),
-            compliance_api_key=cast(str, compliance_api_key),
-            compliance_base_url=os.environ.get(
-                "COMPLIANCE_BASE_URL", "https://api.anthropic.com/v1/compliance"
-            ).rstrip("/"),
-            organization_uuid=cast(str, organization_uuid),
-            compliance_max_requests_per_minute=int(
-                os.environ.get("COMPLIANCE_MAX_REQUESTS_PER_MINUTE", "600")
-            ),
             anonymize=_parse_bool(os.environ.get("ANONYMIZE", "false")),
             from_date=from_date,
             to_date=to_date,
             cache_dir=args.cache_dir,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            settle_lag_seconds=int(os.environ.get("COPILOT_SETTLE_LAG_SECONDS", "60")),
         )
 
     def run_until(self) -> datetime:

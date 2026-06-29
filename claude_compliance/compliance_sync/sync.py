@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import httpx
 from httpx import HTTPStatusError
@@ -11,8 +12,10 @@ from .cache import ChatState, ChatWorkPlan, SyncCache
 from .compliance_client import ComplianceClient
 from .config import Config, datetime_to_timestamp_str
 from .converter import Interaction, build_message_pairs, pair_to_payload
-from .models import ChatSummary
 from .nebuly_client import NebulyClient
+
+if TYPE_CHECKING:
+    from .models import ChatSummary
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +471,7 @@ def _export_chat_intervals(
             cache.mark_chat_failed(chat.id, "Network error fetching chat messages")
             if not config.dry_run:
                 cache.commit()
-            logger.error(
+            logger.exception(
                 "Failed to fetch messages for user=%s chat=%s; "
                 "stopping user to allow resume",
                 user_id,
@@ -648,7 +651,7 @@ def _sync_user(
             highest_completed_chat_updated_at=highest_completed,
             coverage_from=user_coverage_from,
             coverage_until=user_coverage_until,
-            last_successful_run_at=datetime.now(timezone.utc),
+            last_successful_run_at=datetime.now(UTC),
         )
         if not config.dry_run:
             cache.commit()

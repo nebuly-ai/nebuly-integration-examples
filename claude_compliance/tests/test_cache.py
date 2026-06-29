@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from compliance_sync.cache import SyncCache
 from compliance_sync.models import ChatSummary, ChatUser
 
-UTC = timezone.utc
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _ts(hour: int, minute: int = 0) -> datetime:

@@ -3,11 +3,15 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from .config import datetime_to_timestamp_str, timestamp_str_to_datetime
-from .models import ChatSummary
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .models import ChatSummary
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +93,7 @@ def _row_ts(value: str | None) -> datetime | None:
 
 
 def _now_ts() -> str:
-    return datetime_to_timestamp_str(datetime.now(tz=timezone.utc))
+    return datetime_to_timestamp_str(datetime.now(tz=UTC))
 
 
 def _max_watermark(

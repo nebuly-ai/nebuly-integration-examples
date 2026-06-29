@@ -1,37 +1,17 @@
 [project]
-name = "microsoft-copilot"
+name = "nebuly-integration-examples"
 version = "0.1.0"
 description = "Nebuly integration examples for various platforms"
-authors = [
-    {name = "Nebuly Team"}
-]
+authors = [{ name = "The Nebuly Team" }]
 readme = "README.md"
-requires-python = ">=3.9,<4.0"
-dependencies = [
-    "azure-identity>=1.23.0",
-    "aiofiles>=24.1.0",
-    "msgraph-beta-sdk>=1.36.0",
-    "python-dotenv>=1.1.0,<2.0.0",
-    "httpx (>=0.28.1,<0.29.0)",
-]
-packages = [
-    { include = "microsoft_copilot" }
-]
+requires-python = ">=3.12,<4.0"
+dependencies = []
+package_mode = false
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.group.dev.dependencies]
-types-aiofiles = "^24.1.0.20250606"
-
-[tool.poetry.dependencies]
-python = ">=3.9,<4.0"
-azure-identity = ">=1.23.0"
-aiofiles = ">=24.1.0"
-python-dotenv = "^1.1.0"
-msgraph-beta-sdk = "^1.36.0"
 
 [tool.ruff]
 exclude = [
@@ -55,55 +35,54 @@ exclude = [
     "dist",
     "node_modules",
     "venv",
+    "export",
 ]
 
 line-length = 88
 target-version = "py312"
 
-[tool.ruff.lint.per-file-ignores]
-"scripts/**.py" = [
-    "E402",
-    "E501",
-]
-"tests/**.py" = [
-    "ARG",
-]
-
-[tool.mypy]
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "msgraph_beta.*"
-ignore_missing_imports = true
-
 [tool.ruff.lint]
-select = [
-    "E",
-    "F",
-    "I",
-    "C90",
-    "ASYNC",
-    "T20",
-    "PL",
-    "SIM",
-    "PIE",
-    "PGH",
-    "TID",
-    "ARG",
-]
+select = ["ALL"]
 ignore = [
-    "PLR2004",
-    "PLR0913",
-    "PLR0911",
-    "SIM118",
-    "PLC0415",
+    "PLR2004", # Magic value comparison
+    "PLR0913", # Too many arguments
+    "PLR0911", # Too many return statements
+    "D",       # Docstrings related errors
+    "SIM108",  # Use ternary operator instead of if/else
+    "TRY003",  # Avoid specifying long messages outside the exception class
+    "EM101",   # Exception must not use a string literal, assign to variable first
+    "EM102",   # Exception must not use an f-string literal, assign to variable first
+    "COM812",  # Checks for the absence of trailing commas,
+    "S106",    # Possible hardcoded password assigned to argument
+    "TC006",   # Add quotes to type expression in `typing.cast()`
+    "W291",    # Trailing whitespace
+    "ERA001",  # Found commented-out code
 ]
 
 fixable = ["ALL"]
 unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**.py" = ["E402", "E501"]
+"**/tests/**.py" = [
+    "ARG",
+    "S101",
+    "INP001", # Add an `__init__.py`.
+    "SLF001", # Private member accessed
+]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.mypy]
+strict = true
+disallow_untyped_defs = true
+plugins = ['pydantic.mypy']
+exclude = ["export"]
+
+[[tool.mypy.overrides]]
+module = "msgraph_beta.*"
+ignore_missing_imports = true

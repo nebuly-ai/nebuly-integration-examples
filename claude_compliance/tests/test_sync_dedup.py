@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import httpx
+import pytest
 from compliance_sync.cache import SyncCache
 from compliance_sync.compliance_client import _should_retry as compliance_should_retry
 from compliance_sync.config import Config, timestamp_str_to_datetime
@@ -19,7 +19,8 @@ from compliance_sync.models import (
 from compliance_sync.nebuly_client import _should_retry
 from compliance_sync.sync import _sync_user
 
-UTC = timezone.utc
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _ts(hour: int, minute: int = 0) -> datetime:
@@ -49,7 +50,7 @@ def _chat_summary(
 def _message(msg_id: str, role: str, created_at: datetime, text: str) -> ChatMessage:
     return ChatMessage(
         id=msg_id,
-        role=role,  # type: ignore[arg-type]
+        role=role,
         created_at=created_at,
         content=[TextContent(type="text", text=text)],
     )
@@ -92,7 +93,7 @@ class FakeComplianceClient:
 
     def list_chats(
         self,
-        user_ids: list[str],  # noqa: ARG002
+        user_ids: list[str],
         *,
         updated_at_gte: str | None = None,
         updated_at_lte: str | None = None,
@@ -129,9 +130,9 @@ class FakeComplianceClient:
         *,
         created_at_gte: str | None = None,
         created_at_lte: str | None = None,
-        after_id: str | None = None,  # noqa: ARG002
-        order: str = "asc",  # noqa: ARG002
-        limit: int = 1000,  # noqa: ARG002
+        after_id: str | None = None,
+        order: str = "asc",
+        limit: int = 1000,
     ) -> ChatMessagesResponse:
         if chat_id in self.messages_404_for:
             request = httpx.Request("GET", f"/chats/{chat_id}/messages")
@@ -559,8 +560,6 @@ def test_crash_mid_chat_does_not_replay_sent_interactions(
     nebuly_crash = CrashNebulyClient(crash_after=2)
     cache1 = SyncCache(db_path, "org_demo", dry_run=False)
     config = _config(tmp_path, from_date=_ts(8))
-
-    import pytest
 
     with pytest.raises(RuntimeError):
         _sync_user(

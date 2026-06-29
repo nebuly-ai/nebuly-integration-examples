@@ -9,17 +9,17 @@ if TYPE_CHECKING:
 def build_tags(pair: Interaction) -> dict[str, str]:
     chat = pair.chat
     # Default Claude metadata tags. Remove any you don't need, or add your own below.
-    tags = {
+    # Example — enrich with your own business metadata:
+    # tags["department"] = lookup_department(chat.user.email_address)
+    # tags["country"] = "US"
+
+    return {
         "claude chat-id": chat.id,
         "claude project-id": chat.project_id,
         "model": str(chat.model or "unknown"),
         "chat name": chat.name,
         "href": chat.href,
     }
-    # Example — enrich with your own business metadata:
-    # tags["department"] = lookup_department(chat.user.email_address)
-    # tags["country"] = "US"
-    return tags
 
 
 def build_traces(pair: Interaction) -> list[dict[str, Any]]:  # noqa: ARG001

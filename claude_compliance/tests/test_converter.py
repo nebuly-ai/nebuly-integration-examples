@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from unittest.mock import patch
 
@@ -21,7 +21,7 @@ from compliance_sync.models import (
 
 
 def _chat(chat_id: str = "chat_01", user_id: str = "user_01") -> ChatSummary:
-    now = datetime(2025, 2, 1, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2025, 2, 1, 10, 0, tzinfo=UTC)
     return ChatSummary(
         id=chat_id,
         name="Test chat",
@@ -40,7 +40,7 @@ def _msg(msg_id: str, role: Literal["user", "assistant"], text: str) -> ChatMess
     return ChatMessage(
         id=msg_id,
         role=role,
-        created_at=datetime(2025, 2, 1, 10, 1, tzinfo=timezone.utc),
+        created_at=datetime(2025, 2, 1, 10, 1, tzinfo=UTC),
         content=[TextContent(type="text", text=text)],
     )
 
@@ -58,7 +58,7 @@ def test_tool_blocks_excluded() -> None:
     assistant = ChatMessage(
         id="a1",
         role="assistant",
-        created_at=datetime(2025, 2, 1, 10, 2, tzinfo=timezone.utc),
+        created_at=datetime(2025, 2, 1, 10, 2, tzinfo=UTC),
         content=[
             TextContent(type="text", text="done"),
             ToolUseContent(type="tool_use", id="t1", name="tool", input="{}"),
