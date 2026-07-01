@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "gemini-enterprise"
+version = "0.1.0"
+description = "Gemini Enterprise (Discovery Engine) integration"
+authors = ["The Nebuly Team"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4"
+google-auth = "^2.0"
+requests = "^2.32"
+httpx = "^0.28.0"
+pydantic = "^2.0"
+python-dotenv = "^1.0.0"
+tenacity = "^9.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pre-commit = "^4.6.0"
+ruff = "^0.15.0"
+mypy = "^1.20.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
