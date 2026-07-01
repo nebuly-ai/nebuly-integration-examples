@@ -1,0 +1,4 @@
+google-adk[otel-gcp,mcp]==2.3.0
+opentelemetry-instrumentation-google-genai==0.7b1
+fsspec==2026.6.0
+gcsfs==2026.6.0

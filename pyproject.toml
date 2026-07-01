@@ -57,6 +57,7 @@ ignore = [
     "TC006",   # Add quotes to type expression in `typing.cast()`
     "W291",    # Trailing whitespace
     "ERA001",  # Found commented-out code
+    "PTH123",  # `open()` should be replaced by `Path.open()`
 ]
 
 fixable = ["ALL"]

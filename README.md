@@ -8,6 +8,7 @@ Integration examples for syncing AI/LLM interactions to and from the [Nebuly](ht
 |--------|---------|
 | [claude_compliance/](claude_compliance/) | Syncs Claude conversations from the Anthropic Compliance API to Nebuly. See its [README](claude_compliance/README.md) for setup and configuration. |
 | [microsoft_copilot/](microsoft_copilot/) | Syncs Microsoft Copilot Enterprise interactions from the Microsoft Graph API to Nebuly. See its [README](microsoft_copilot/README.md) for setup and configuration. |
+| [gcp_agents/](gcp_agents/) | Syncs GCP Vertex AI Reasoning Engine agent sessions to Nebuly. See its [README](gcp_agents/README.md) for setup and configuration. |
 | [export/](export/) | Simple utility — fetches historical interactions from Nebuly with pagination and date ranges, saving to JSON (optional Power BI format) (`export_in_json.py`). |
 
 
