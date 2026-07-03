@@ -58,6 +58,7 @@ ignore = [
     "W291",    # Trailing whitespace
     "ERA001",  # Found commented-out code
     "PTH123",  # `open()` should be replaced by `Path.open()`
+    "PTH105",  # `Path.replace()` should be used instead of `os.replace()`
 ]
 
 fixable = ["ALL"]

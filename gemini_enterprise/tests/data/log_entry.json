@@ -1,0 +1,46 @@
+{
+  "request": {
+    "query": {
+      "parts": [
+        {
+          "text": "What if I want to download the logs from the past 1h ?"
+        }
+      ]
+    },
+    "name": "projects/556023144431/locations/eu/collections/default_collection/engines/gemini-enterprise-17828149_1782814981868/assistants/default_assistant"
+  },
+  "serviceTextReply": "Excellent question. To filter by a specific time range, you just need to add a `timestamp` condition to your log filter string.\n\nCloud Logging's filter syntax supports RFC 3339 timestamps. You can specify a start and/or end time to narrow down your query.\n\nHere is the updated Python script. I've modified the `log_filter` section to dynamically include a start time that is exactly one hour before the script is run.\n\n### The Updated Python Script (Logs from Past Hour)\n\nThe only significant change is in the `CONFIGURATION` section, where we now construct the `log_filter` with a timestamp.\n\n```python\nimport csv\nfrom google.cloud import logging_v2\nfrom datetime import datetime, timedelta, timezone\n\ndef download_recent_gemini_logs():\n    \"\"\"\n    Downloads Gemini Enterprise user activity logs from the past hour \n    and saves them to a CSV file.\n    \"\"\"\n    # ------------------- CONFIGURATION -------------------\n    # Your Google Cloud project ID\n    project_id = \"leafy-sunrise-500612-v1\"\n    # Base log name filter\n    base_log_name = 'logName=\"projects/leafy-sunrise-500612-v1/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity\"'\n    # The name of the output CSV file\n    output_csv_file = \"gemini_activity_logs_past_hour.csv\"\n\n    # --- DYNAMICALLY CREATE THE TIME FILTER ---\n    # Get the current time in UTC and format it for the logging query\n    now_utc = datetime.now(timezone.utc)\n    # Get the time one hour ago\n    one_hour_ago_utc = now_utc - timedelta(hours=1)\n    \n    # Format timestamps into RFC 3339 format (e.g., \"2023-10-27T10:00:00Z\")\n    time_filter = f'timestamp >= \"{one_hour_ago_utc.isoformat()}\"'\n\n    # Combine the base log name filter with the time filter\n    log_filter = f\"{base_log_name} AND {time_filter}\"\n    # -----------------------------------------------------\n\n    print(f\"Starting log download for project '{project_id}'...\")\n\n    # Instantiate a client\n    client = logging_v2.LoggingServiceV2Client()\n\n    # The resource name of the project\n    resource_name = f\"projects/{project_id}\"\n\n    # Prepare to write to a CSV file\n    with open(output_csv_file, mode='w', newline='', encoding='utf-8') as csv_file:\n        csv_writer = csv.writer(csv_file)\n        csv_writer.writerow([\"Timestamp\", \"User Prompt\", \"AI Response\"])\n\n        print(f\"Querying logs with filter: {log_filter}\")\n        print(f\"Results will be saved to '{output_csv_file}'\")\n\n        log_entries = client.list_log_entries(\n            resource_names=[resource_name],\n            filter_=log_filter,\n            order_by=\"timestamp desc\"\n        )\n        \n        entry_count = 0\n        for entry in log_entries:\n            payload = entry.proto_payload\n            timestamp = entry.timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')\n            user_prompt = payload.get(\"request\", {}).get(\"query\", \"N/A\")\n            ai_response = payload.get(\"response\", {}).get(\"reply\", \"N/A\")\n\n            csv_writer.writerow([timestamp, user_prompt, ai_response])\n            entry_count += 1\n\n    print(f\"\\nDownload complete. A total of {entry_count} log entries from the past hour were saved.\")\n\nif __name__ == \"__main__\":\n    download_recent_gemini_logs()\n\n```\n\n### Key Changes\n\n1.  **Import `datetime`, `timedelta`, `timezone`:** These standard Python libraries are now used to handle time calculations.\n2.  **Calculate Start Time:** We get the current UTC time (`now_utc`) and subtract one hour (`timedelta(hours=1)`) to find the start of our desired time window.\n3.  **Format Timestamp:** We format the start time into an ISO 8601 string using `.isoformat()`. This is the format required by the Google Cloud Logging API.\n4.  **Update the Filter:** The final `log_filter` is now a combination of your original `logName` filter and the new `timestamp` filter, joined by `AND`.\n\nNow, when you run this script, it will only fetch and save the logs that were generated in the 60 minutes prior to its execution.\n",
+  "userIamPrincipal": "l.mammana@nebuly.ai",
+  "response": {
+    "assistToken": "NMwKDAjjnJrSBhDOrcuEAhIkNmE0ZDc5YTMtMDAwMC0yMjA4LWE2YTktZmM0MTE2NmNkNGQ5",
+    "answer": {
+      "state": "SUCCEEDED",
+      "replies": [
+        {
+          "groundedContent": {
+            "textGroundingMetadata": {
+              "references": [
+                {
+                  "content": "Reference snippet 1",
+                  "documentMetadata": {
+                    "uri": "https://example.com/doc-1",
+                    "title": "Document 1",
+                    "domain": "example.com"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "projects/556023144431/locations/eu/collections/default_collection/engines/gemini-enterprise-17828149_1782814981868/sessions/8490740223094055586/assistAnswers/12575367934706438667"
+    }
+  },
+  "logMetadata": {
+    "methodName": "StreamAssist",
+    "timestamp": "2026-07-02T16:14:38.513765579Z",
+    "serviceName": "google.cloud.discoveryengine.v1main.AssistantService",
+    "name": "projects/556023144431/locations/eu/collections/default_collection/engines/gemini-enterprise-17828149_1782814981868/assistants/default_assistant",
+    "serviceLabel": "GEMINI_ENTERPRISE"
+  }
+}
