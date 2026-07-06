@@ -50,7 +50,6 @@ def build_tags(
     engine_id: str,
     session_id: str | None,
     answer_id: str | None,
-    trace: TraceData | None,
 ) -> dict[str, str]:
     payload = LogPayload.model_validate(record.payload)
     tags: dict[str, str] = {
@@ -66,8 +65,7 @@ def build_tags(
         )
         or "",
     }
-    if trace is not None:
-        tags["total_tokens"] = str(trace.input_tokens + trace.output_tokens)
+
     return tags
 
 
