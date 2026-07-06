@@ -95,7 +95,6 @@ def turn_to_payload(
                 engine_id=engine_id,
                 session_id=session_id,
                 answer_id=answer_id,
-                trace=trace_data,
             ),
         },
         "traces": user_defined.build_traces(record, trace_data),
