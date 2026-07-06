@@ -54,6 +54,39 @@ gcloud auth application-default login
 | `GCP_LOG_PAGE_SIZE` | no | `1000` | Cloud Logging page size for `entries.list` pagination |
 | `GCP_TRACE_CONCURRENCY` | no | `32` | Parallel async `get_trace` calls |
 | `ANONYMIZE` | no | `false` | Anonymize content in Nebuly payload |
+| `GCP_LOG_SOURCE` | no | `logging` | Log source: `logging` (live API) or `bigquery` |
+| `GCP_BIGQUERY_TABLE` | when `bigquery` | — | Fully-qualified table (`project.dataset.table` or `..._*` for date-sharded sinks) |
+| `GCP_BIGQUERY_LOCATION` | no | auto-detect | BigQuery dataset location |
+
+### Log source
+
+By default the sync reads logs from the **Cloud Logging** `entries.list` API. For faster fetches, you can export logs to BigQuery via a Cloud Logging sink and set `GCP_LOG_SOURCE=bigquery`.
+
+Switch via env var or CLI:
+
+```bash
+GCP_LOG_SOURCE=bigquery poetry run python -m gemini_enterprise_sync ...
+poetry run python -m gemini_enterprise_sync --log-source bigquery ...
+```
+
+**Create the sink** with this filter (required — only matching entries are exported):
+
+```
+logName="projects/{PROJECT_ID}/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity"
+AND (jsonPayload.serviceTextReply:* OR protoPayload.response.reply:*)
+```
+
+Example:
+
+```bash
+gcloud logging sinks create gemini-enterprise-logs \
+  bigquery.googleapis.com/projects/PROJECT_ID/datasets/gemini_enterprise_logs \
+  --log-filter='logName="projects/PROJECT_ID/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity" AND (jsonPayload.serviceTextReply:* OR protoPayload.response.reply:*)'
+```
+
+**`GCP_BIGQUERY_TABLE`**: for date-sharded sinks (the default), use the base table name with `_*` suffix, e.g. `my-project.gemini_enterprise_logs.discoveryengine_googleapis_com_gemini_enterprise_user_activity_*`. For partitioned-table sinks, use the plain table name.
+
+Cloud Trace token enrichment is unchanged — it runs per batch regardless of log source.
 
 ### CLI flags
 
@@ -65,14 +98,16 @@ gcloud auth application-default login
 | `--batch-size` | Override `GCP_LOG_BATCH_SIZE` |
 | `--trace-concurrency` | Override `GCP_TRACE_CONCURRENCY` |
 | `--trace-workers` | Alias for `--trace-concurrency` |
+| `--log-source` | Override `GCP_LOG_SOURCE` (`logging` or `bigquery`) |
 | `--yes` / `--force` | Confirm gap-creating runs without prompting |
 | `--dry-run` | Build payloads without POSTing or persisting coverage |
 | `--verbose` | Debug logging |
 
 ### IAM permissions
 
-- `logging.logEntries.list`
+- `logging.logEntries.list` (Cloud Logging source only)
 - `cloudtrace.traces.get`
+- `bigquery.jobs.create` + `bigquery.tables.getData` (BigQuery source only; `roles/bigquery.jobUser` + `roles/bigquery.dataViewer`)
 
 ## Running
 
@@ -83,7 +118,7 @@ poetry run python -m gemini_enterprise_sync --dry-run --verbose --from-date 2026
 
 Resume state is stored in `cache_dir/coverage.json` as a covered range `[coverage_from, coverage_until]`. Overlapping or adjacent backfills merge into that range; Nebuly dedup handles re-sends. A manually supplied `--from-date` that would create a **gap** (disjoint from existing coverage) prompts for confirmation; use `--yes` in non-interactive environments. First run without existing coverage **requires** `--from-date`.
 
-Log fetch uses a server-side reply predicate (`serviceTextReply` / `protoPayload.response.reply`) so only matching entries are returned. `entries.list` latency is dominated by the Cloud Logging API itself — expect multi-second fetches for modest windows; Log Analytics/BigQuery is not required.
+Log fetch uses a server-side reply predicate (`serviceTextReply` / `protoPayload.response.reply`) so only matching entries are returned. The Cloud Logging API path can take multiple seconds for modest windows; set `GCP_LOG_SOURCE=bigquery` with a sink export for sub-second fetches (see [Log source](#log-source)).
 
 Trace fetch uses async gRPC with a shared, pre-refreshed credential so high concurrency does not trigger per-RPC token refresh storms against `oauth2.googleapis.com`.
 

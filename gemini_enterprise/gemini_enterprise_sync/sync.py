@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import httpx
 from tqdm import tqdm
 
+from .bigquery_client import BigQueryLoggingClient
 from .converter import SkipReason, turn_to_payload
 from .coverage import Coverage, plan_run
 from .logging_client import LoggingClient, LogRecord
@@ -53,6 +54,16 @@ def _resolve_requested_from(config: Config, coverage: Coverage) -> datetime:
     raise FirstRunRequiresFromDateError(
         "First run requires --from-date when no sync coverage exists in the cache"
     )
+
+
+def _build_log_client(config: Config) -> LoggingClient | BigQueryLoggingClient:
+    if config.log_source == "bigquery":
+        return BigQueryLoggingClient(
+            config.gcp_project_id,
+            config.bigquery_table,  # type: ignore[arg-type]
+            location=config.bigquery_location,
+        )
+    return LoggingClient(config.gcp_project_id, page_size=config.log_page_size)
 
 
 def _confirm_gap(config: Config) -> bool:
@@ -144,10 +155,7 @@ def run_sync(config: Config) -> SyncSummary:
         logger.info("Requested range is already covered; nothing to sync.")
         return summary
 
-    logging_client = LoggingClient(
-        config.gcp_project_id,
-        page_size=config.log_page_size,
-    )
+    logging_client = _build_log_client(config)
     trace_client = TraceClient(
         config.gcp_project_id,
         concurrency=config.trace_concurrency,

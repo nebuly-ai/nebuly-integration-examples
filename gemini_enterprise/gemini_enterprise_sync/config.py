@@ -53,6 +53,9 @@ class Config:
     dry_run: bool
     verbose: bool
     force: bool
+    log_source: str
+    bigquery_table: str | None
+    bigquery_location: str | None
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -100,6 +103,12 @@ class Config:
             dest="force",
             help="Confirm gap-creating runs without prompting",
         )
+        parser.add_argument(
+            "--log-source",
+            choices=["logging", "bigquery"],
+            default=None,
+            help="Log source backend (overrides GCP_LOG_SOURCE)",
+        )
         args = parser.parse_args(argv)
 
         nebuly_api_key = os.environ.get("NEBULY_API_KEY")
@@ -131,6 +140,19 @@ class Config:
             or int(os.environ.get("GCP_TRACE_CONCURRENCY", "32"))
         )
 
+        log_source = args.log_source or os.environ.get("GCP_LOG_SOURCE", "logging")
+        bigquery_table = os.environ.get("GCP_BIGQUERY_TABLE") or None
+        bigquery_location = os.environ.get("GCP_BIGQUERY_LOCATION") or None
+
+        if log_source not in {"logging", "bigquery"}:
+            raise RuntimeError(
+                f"Invalid GCP_LOG_SOURCE: {log_source!r} (accepted: logging, bigquery)"
+            )
+        if log_source == "bigquery" and not bigquery_table:
+            raise RuntimeError(
+                "GCP_BIGQUERY_TABLE is required when GCP_LOG_SOURCE=bigquery"
+            )
+
         return cls(
             nebuly_api_key=cast(str, nebuly_api_key),
             nebuly_endpoint=os.environ.get(
@@ -153,6 +175,9 @@ class Config:
             dry_run=args.dry_run,
             verbose=args.verbose,
             force=args.force,
+            log_source=log_source,
+            bigquery_table=bigquery_table,
+            bigquery_location=bigquery_location,
         )
 
     def run_until(self) -> datetime:

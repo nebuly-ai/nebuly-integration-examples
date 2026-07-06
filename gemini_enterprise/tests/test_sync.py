@@ -45,6 +45,9 @@ def _config(
         dry_run=dry_run,
         verbose=False,
         force=force,
+        log_source="logging",
+        bigquery_table=None,
+        bigquery_location=None,
     )
 
 
@@ -262,3 +265,32 @@ def test_gap_with_force_invalidates_and_syncs(
     assert summary.totals.entries_sent == 1
     state = Coverage(tmp_path).load()
     assert state.coverage_until == datetime(2026, 7, 2, 16, 5, 0, tzinfo=UTC)
+
+
+@patch("gemini_enterprise_sync.sync.NebulyClient")
+@patch("gemini_enterprise_sync.sync.TraceClient")
+@patch("gemini_enterprise_sync.sync.BigQueryLoggingClient")
+@patch("gemini_enterprise_sync.sync.httpx.Client")
+def test_run_sync_uses_bigquery_client_when_configured(
+    http_cls: MagicMock,
+    bq_cls: MagicMock,
+    trace_cls: MagicMock,
+    nebuly_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    bq = MagicMock()
+    bq.fetch_batch.return_value = []
+    bq_cls.return_value = bq
+    trace_cls.return_value = MagicMock(fetch_traces=MagicMock(return_value={}))
+    nebuly_cls.return_value = MagicMock()
+
+    config = _config(
+        tmp_path,
+        from_date=datetime(2026, 7, 2, 0, 0, tzinfo=UTC),
+    )
+    object.__setattr__(config, "log_source", "bigquery")
+    object.__setattr__(config, "bigquery_table", "p.ds.table_*")
+
+    run_sync(config)
+
+    bq_cls.assert_called_once_with("p", "p.ds.table_*", location=None)
