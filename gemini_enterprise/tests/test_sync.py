@@ -5,16 +5,28 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from gemini_enterprise_sync.config import Config
-from gemini_enterprise_sync.cursor import Cursor
+from gemini_enterprise_sync.coverage import Coverage
 from gemini_enterprise_sync.logging_client import LogRecord
-from gemini_enterprise_sync.sync import run_sync
+from gemini_enterprise_sync.sync import (
+    FirstRunRequiresFromDateError,
+    GapAbortedError,
+    run_sync,
+)
 from gemini_enterprise_sync.trace_client import TraceData
 
 _ENGINE_ID = "gemini-enterprise-17828149_1782814981868"
 
 
-def _config(tmp_path: Path) -> Config:
+def _config(
+    tmp_path: Path,
+    *,
+    from_date: datetime | None = None,
+    to_date: datetime | None = datetime(2026, 7, 3, 0, 0, tzinfo=UTC),
+    dry_run: bool = False,
+    force: bool = False,
+) -> Config:
     return Config(
         nebuly_api_key="key",
         nebuly_endpoint="https://example.com/trace",
@@ -24,13 +36,15 @@ def _config(tmp_path: Path) -> Config:
         gcp_engine_id=_ENGINE_ID,
         settle_lag_seconds=60,
         log_batch_size=2,
-        trace_max_workers=4,
+        log_page_size=1000,
+        trace_concurrency=4,
         anonymize=False,
-        from_date=None,
-        to_date=datetime(2026, 7, 3, 0, 0, tzinfo=UTC),
+        from_date=from_date,
+        to_date=to_date,
         cache_dir=tmp_path,
-        dry_run=False,
+        dry_run=dry_run,
         verbose=False,
+        force=force,
     )
 
 
@@ -50,7 +64,7 @@ def _record(insert_id: str, minute: int) -> LogRecord:
 @patch("gemini_enterprise_sync.sync.TraceClient")
 @patch("gemini_enterprise_sync.sync.LoggingClient")
 @patch("gemini_enterprise_sync.sync.httpx.Client")
-def test_run_sync_drains_batches_and_persists_cursor(
+def test_run_sync_drains_batches_and_persists_coverage(
     http_cls: MagicMock,
     logging_cls: MagicMock,
     trace_cls: MagicMock,
@@ -64,7 +78,7 @@ def test_run_sync_drains_batches_and_persists_cursor(
     logging_cls.return_value = logging
 
     trace = MagicMock()
-    trace.fetch_tokens.return_value = {
+    trace.fetch_traces.return_value = {
         "trace-a": TraceData(10, 5),
         "trace-b": TraceData(20, 6),
         "trace-c": TraceData(30, 7),
@@ -74,15 +88,16 @@ def test_run_sync_drains_batches_and_persists_cursor(
     nebuly = MagicMock()
     nebuly_cls.return_value = nebuly
 
-    summary = run_sync(_config(tmp_path))
+    summary = run_sync(
+        _config(tmp_path, from_date=datetime(2026, 7, 2, 0, 0, tzinfo=UTC))
+    )
 
     assert summary.totals.entries_fetched == 3
     assert summary.totals.entries_sent == 3
     assert nebuly.send_interaction.call_count == 3
 
-    cursor = Cursor(tmp_path / "cursor.json").load()
-    assert cursor.last_insert_id == "c"
-    assert cursor.last_timestamp == datetime(2026, 7, 2, 16, 3, 0, tzinfo=UTC)
+    state = Coverage(tmp_path).load()
+    assert state.coverage_until == datetime(2026, 7, 2, 16, 3, 0, tzinfo=UTC)
 
 
 @patch("gemini_enterprise_sync.sync.NebulyClient")
@@ -100,24 +115,26 @@ def test_run_sync_send_failure_stops_without_advancing_failed_entry(
     logging = MagicMock()
     logging.fetch_batch.side_effect = [records, []]
     logging_cls.return_value = logging
-    trace_cls.return_value = MagicMock(fetch_tokens=MagicMock(return_value={}))
+    trace_cls.return_value = MagicMock(fetch_traces=MagicMock(return_value={}))
     nebuly = MagicMock()
     nebuly.send_interaction.side_effect = [None, RuntimeError("send failed")]
     nebuly_cls.return_value = nebuly
 
-    summary = run_sync(_config(tmp_path))
+    summary = run_sync(
+        _config(tmp_path, from_date=datetime(2026, 7, 2, 0, 0, tzinfo=UTC))
+    )
 
     assert summary.totals.entries_sent == 1
     assert summary.totals.entries_failed == 1
-    cursor = Cursor(tmp_path / "cursor.json").load()
-    assert cursor.last_insert_id == "a"
+    state = Coverage(tmp_path).load()
+    assert state.coverage_until == datetime(2026, 7, 2, 16, 1, 0, tzinfo=UTC)
 
 
 @patch("gemini_enterprise_sync.sync.NebulyClient")
 @patch("gemini_enterprise_sync.sync.TraceClient")
 @patch("gemini_enterprise_sync.sync.LoggingClient")
 @patch("gemini_enterprise_sync.sync.httpx.Client")
-def test_run_sync_skip_advances_cursor(
+def test_run_sync_skip_advances_coverage(
     http_cls: MagicMock,
     logging_cls: MagicMock,
     trace_cls: MagicMock,
@@ -130,13 +147,118 @@ def test_run_sync_skip_advances_cursor(
     logging = MagicMock()
     logging.fetch_batch.side_effect = [records, []]
     logging_cls.return_value = logging
-    trace_cls.return_value = MagicMock(fetch_tokens=MagicMock(return_value={}))
+    trace_cls.return_value = MagicMock(fetch_traces=MagicMock(return_value={}))
     nebuly = MagicMock()
     nebuly_cls.return_value = nebuly
 
-    summary = run_sync(_config(tmp_path))
+    summary = run_sync(
+        _config(tmp_path, from_date=datetime(2026, 7, 2, 0, 0, tzinfo=UTC))
+    )
 
     assert summary.totals.entries_skipped == 1
     assert summary.totals.entries_sent == 1
-    cursor = Cursor(tmp_path / "cursor.json").load()
-    assert cursor.last_insert_id == "ok"
+    state = Coverage(tmp_path).load()
+    assert state.coverage_until == datetime(2026, 7, 2, 16, 2, 0, tzinfo=UTC)
+
+
+def test_first_run_without_from_date_raises(tmp_path: Path) -> None:
+    with pytest.raises(FirstRunRequiresFromDateError):
+        run_sync(_config(tmp_path, from_date=None))
+
+
+@patch("gemini_enterprise_sync.sync.NebulyClient")
+@patch("gemini_enterprise_sync.sync.TraceClient")
+@patch("gemini_enterprise_sync.sync.LoggingClient")
+@patch("gemini_enterprise_sync.sync.httpx.Client")
+def test_backfill_with_existing_coverage_does_not_crash(
+    http_cls: MagicMock,
+    logging_cls: MagicMock,
+    trace_cls: MagicMock,
+    nebuly_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    Coverage(tmp_path).save(
+        coverage_from=datetime(2026, 7, 2, 8, 0, tzinfo=UTC),
+        coverage_until=datetime(2026, 7, 2, 16, 12, 0, tzinfo=UTC),
+    )
+
+    records = [_record("earlier", 1)]
+    logging = MagicMock()
+    logging.fetch_batch.side_effect = [records, []]
+    logging_cls.return_value = logging
+    trace_cls.return_value = MagicMock(fetch_traces=MagicMock(return_value={}))
+    nebuly_cls.return_value = MagicMock()
+
+    summary = run_sync(
+        _config(
+            tmp_path,
+            from_date=datetime(2026, 7, 2, 0, 0, tzinfo=UTC),
+            to_date=datetime(2026, 7, 2, 16, 8, 0, tzinfo=UTC),
+        )
+    )
+
+    assert summary.totals.entries_sent == 1
+
+
+@patch("gemini_enterprise_sync.sync.NebulyClient")
+@patch("gemini_enterprise_sync.sync.TraceClient")
+@patch("gemini_enterprise_sync.sync.LoggingClient")
+@patch("gemini_enterprise_sync.sync.httpx.Client")
+def test_gap_aborts_without_force(
+    http_cls: MagicMock,
+    logging_cls: MagicMock,
+    trace_cls: MagicMock,
+    nebuly_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    Coverage(tmp_path).save(
+        coverage_from=datetime(2026, 7, 2, 8, 0, tzinfo=UTC),
+        coverage_until=datetime(2026, 7, 2, 16, 12, 0, tzinfo=UTC),
+    )
+
+    with (
+        patch("gemini_enterprise_sync.sync.sys.stdin.isatty", return_value=False),
+        pytest.raises(GapAbortedError),
+    ):
+        run_sync(
+            _config(
+                tmp_path,
+                from_date=datetime(2026, 7, 3, 0, 0, tzinfo=UTC),
+            )
+        )
+
+
+@patch("gemini_enterprise_sync.sync.NebulyClient")
+@patch("gemini_enterprise_sync.sync.TraceClient")
+@patch("gemini_enterprise_sync.sync.LoggingClient")
+@patch("gemini_enterprise_sync.sync.httpx.Client")
+def test_gap_with_force_invalidates_and_syncs(
+    http_cls: MagicMock,
+    logging_cls: MagicMock,
+    trace_cls: MagicMock,
+    nebuly_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    Coverage(tmp_path).save(
+        coverage_from=datetime(2026, 7, 2, 8, 0, tzinfo=UTC),
+        coverage_until=datetime(2026, 7, 2, 16, 12, 0, tzinfo=UTC),
+    )
+
+    records = [_record("future", 5)]
+    logging = MagicMock()
+    logging.fetch_batch.side_effect = [records, []]
+    logging_cls.return_value = logging
+    trace_cls.return_value = MagicMock(fetch_traces=MagicMock(return_value={}))
+    nebuly_cls.return_value = MagicMock()
+
+    summary = run_sync(
+        _config(
+            tmp_path,
+            from_date=datetime(2026, 7, 3, 0, 0, tzinfo=UTC),
+            force=True,
+        )
+    )
+
+    assert summary.totals.entries_sent == 1
+    state = Coverage(tmp_path).load()
+    assert state.coverage_until == datetime(2026, 7, 2, 16, 5, 0, tzinfo=UTC)

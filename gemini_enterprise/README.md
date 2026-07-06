@@ -50,20 +50,23 @@ gcloud auth application-default login
 | `GCP_COLLECTION` | no | `default_collection` | Discovery Engine collection |
 | `NEBULY_ENDPOINT` | no | v3 `trace_interaction` URL | Nebuly ingestion endpoint |
 | `GCP_SETTLE_LAG_SECONDS` | no | `60` | Upper bound lag before ingesting recent logs |
-| `GCP_LOG_BATCH_SIZE` | no | `500` | Max log records per batch |
-| `GCP_TRACE_MAX_WORKERS` | no | `16` | Parallel `get_trace` workers per batch |
+| `GCP_LOG_BATCH_SIZE` | no | `500` | Max matching log records per batch |
+| `GCP_LOG_PAGE_SIZE` | no | `1000` | Cloud Logging page size for `entries.list` pagination |
+| `GCP_TRACE_CONCURRENCY` | no | `32` | Parallel async `get_trace` calls |
 | `ANONYMIZE` | no | `false` | Anonymize content in Nebuly payload |
 
 ### CLI flags
 
 | Flag | Description |
 | ---- | ----------- |
-| `--from-date` | ISO backfill start (overrides cursor on first run) |
+| `--from-date` | ISO backfill start (required on first run; overlaps merge, gaps prompt) |
 | `--to-date` | ISO end date upper bound |
-| `--cache-dir` | Cursor directory (default `./.cache`) |
+| `--cache-dir` | Coverage state directory (default `./.cache`) |
 | `--batch-size` | Override `GCP_LOG_BATCH_SIZE` |
-| `--trace-workers` | Override `GCP_TRACE_MAX_WORKERS` |
-| `--dry-run` | Build payloads without POSTing |
+| `--trace-concurrency` | Override `GCP_TRACE_CONCURRENCY` |
+| `--trace-workers` | Alias for `--trace-concurrency` |
+| `--yes` / `--force` | Confirm gap-creating runs without prompting |
+| `--dry-run` | Build payloads without POSTing or persisting coverage |
 | `--verbose` | Debug logging |
 
 ### IAM permissions
@@ -78,7 +81,11 @@ poetry run python -m gemini_enterprise_sync
 poetry run python -m gemini_enterprise_sync --dry-run --verbose --from-date 2026-07-02T00:00:00Z
 ```
 
-Resume state is stored in `cache_dir/cursor.json` (single global timestamp cursor). Nebuly ingestion is idempotent — re-sending the last entry after a crash is harmless.
+Resume state is stored in `cache_dir/coverage.json` as a covered range `[coverage_from, coverage_until]`. Overlapping or adjacent backfills merge into that range; Nebuly dedup handles re-sends. A manually supplied `--from-date` that would create a **gap** (disjoint from existing coverage) prompts for confirmation; use `--yes` in non-interactive environments. First run without existing coverage **requires** `--from-date`.
+
+Log fetch uses a server-side reply predicate (`serviceTextReply` / `protoPayload.response.reply`) so only matching entries are returned. `entries.list` latency is dominated by the Cloud Logging API itself — expect multi-second fetches for modest windows; Log Analytics/BigQuery is not required.
+
+Trace fetch uses async gRPC with a shared, pre-refreshed credential so high concurrency does not trigger per-RPC token refresh storms against `oauth2.googleapis.com`.
 
 ## Customizing payloads
 

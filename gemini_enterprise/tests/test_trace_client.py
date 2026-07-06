@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import asyncio as aio
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from gemini_enterprise_sync.trace_client import TraceClient, TraceData
 from google.api_core.exceptions import NotFound
@@ -27,13 +27,15 @@ def _trace(spans: list[MagicMock]) -> MagicMock:
     return trace
 
 
-def test_fetch_tokens_sums_labels_and_omits_not_found() -> None:
-    client = MagicMock()
-    trace_client = TraceClient("project", max_workers=2, client=client)
+def test_fetch_traces_sums_labels_and_omits_not_found() -> None:
+    client = AsyncMock()
+    transport = AsyncMock()
+    client.transport = transport
+    trace_client = TraceClient("project", concurrency=2, async_client=client)
     span_start = datetime(2026, 7, 2, 16, 14, 27, 554361, tzinfo=UTC)
     span_end = datetime(2026, 7, 2, 16, 14, 38, 513741, tzinfo=UTC)
 
-    def get_trace(*, project_id: str, trace_id: str) -> MagicMock:
+    async def get_trace(*, project_id: str, trace_id: str) -> MagicMock:
         if trace_id == "missing":
             raise NotFound("trace not found")  # type: ignore[no-untyped-call]
         if trace_id == "t1":
@@ -72,14 +74,68 @@ def test_fetch_tokens_sums_labels_and_omits_not_found() -> None:
     assert "missing" not in result
 
 
-def test_fetch_tokens_uses_thread_pool_width() -> None:
-    client = MagicMock()
+def test_fetch_traces_uses_asyncio_run() -> None:
+    client = AsyncMock()
+    transport = AsyncMock()
+    client.transport = transport
     client.get_trace.return_value = _trace([])
-    trace_client = TraceClient("project", max_workers=3, client=client)
+    trace_client = TraceClient("project", concurrency=3, async_client=client)
 
     with patch(
-        "gemini_enterprise_sync.trace_client.ThreadPoolExecutor",
-        wraps=ThreadPoolExecutor,
-    ) as pool_cls:
+        "gemini_enterprise_sync.trace_client.asyncio.run",
+        wraps=aio.run,
+    ) as run_mock:
         trace_client.fetch_traces({f"id{i}" for i in range(5)})
-        pool_cls.assert_called_once_with(max_workers=3)
+        run_mock.assert_called_once()
+
+
+def test_fetch_traces_refreshes_credentials_once_before_gather() -> None:
+    creds = MagicMock()
+    creds.valid = False
+    client = AsyncMock()
+    client.transport = AsyncMock()
+    client.get_trace.return_value = _trace([])
+
+    with (
+        patch(
+            "gemini_enterprise_sync.trace_client.google.auth.default",
+            return_value=(creds, None),
+        ),
+        patch(
+            "gemini_enterprise_sync.trace_client.TraceServiceAsyncClient",
+            return_value=client,
+        ) as client_cls,
+        patch(
+            "gemini_enterprise_sync.trace_client.google.auth.transport.requests.Request"
+        ),
+        patch.object(creds, "refresh") as refresh_mock,
+    ):
+        trace_client = TraceClient("project", concurrency=32)
+        trace_client.fetch_traces({f"id{i}" for i in range(10)})
+
+    refresh_mock.assert_called_once()
+    client_cls.assert_called_once_with(credentials=creds)
+
+
+def test_fetch_traces_skips_refresh_when_credentials_valid() -> None:
+    creds = MagicMock()
+    creds.valid = True
+    client = AsyncMock()
+    client.transport = AsyncMock()
+    client.get_trace.return_value = _trace([])
+
+    with (
+        patch(
+            "gemini_enterprise_sync.trace_client.google.auth.default",
+            return_value=(creds, None),
+        ),
+        patch(
+            "gemini_enterprise_sync.trace_client.TraceServiceAsyncClient",
+            return_value=client,
+        ),
+        patch.object(creds, "refresh") as refresh_mock,
+    ):
+        trace_client = TraceClient("project", concurrency=32)
+        trace_client.fetch_traces({"id1"})
+
+    refresh_mock.assert_not_called()

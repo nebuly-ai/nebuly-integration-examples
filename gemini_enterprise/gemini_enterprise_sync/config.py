@@ -44,13 +44,15 @@ class Config:
     gcp_engine_id: str
     settle_lag_seconds: int
     log_batch_size: int
-    trace_max_workers: int
+    log_page_size: int
+    trace_concurrency: int
     anonymize: bool
     from_date: datetime | None
     to_date: datetime | None
     cache_dir: Path
     dry_run: bool
     verbose: bool
+    force: bool
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -83,7 +85,20 @@ class Config:
             "--trace-workers",
             type=int,
             default=None,
-            help="Parallel get_trace workers (overrides GCP_TRACE_MAX_WORKERS)",
+            help="Parallel get_trace concurrency (overrides GCP_TRACE_CONCURRENCY)",
+        )
+        parser.add_argument(
+            "--trace-concurrency",
+            type=int,
+            default=None,
+            help="Parallel get_trace concurrency (overrides GCP_TRACE_CONCURRENCY)",
+        )
+        parser.add_argument(
+            "--yes",
+            "--force",
+            action="store_true",
+            dest="force",
+            help="Confirm gap-creating runs without prompting",
         )
         args = parser.parse_args(argv)
 
@@ -110,6 +125,12 @@ class Config:
         )
         to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
 
+        trace_concurrency = (
+            args.trace_concurrency
+            or args.trace_workers
+            or int(os.environ.get("GCP_TRACE_CONCURRENCY", "32"))
+        )
+
         return cls(
             nebuly_api_key=cast(str, nebuly_api_key),
             nebuly_endpoint=os.environ.get(
@@ -123,14 +144,15 @@ class Config:
             settle_lag_seconds=int(os.environ.get("GCP_SETTLE_LAG_SECONDS", "60")),
             log_batch_size=args.batch_size
             or int(os.environ.get("GCP_LOG_BATCH_SIZE", "500")),
-            trace_max_workers=args.trace_workers
-            or int(os.environ.get("GCP_TRACE_MAX_WORKERS", "16")),
+            log_page_size=int(os.environ.get("GCP_LOG_PAGE_SIZE", "1000")),
+            trace_concurrency=trace_concurrency,
             anonymize=_parse_bool(os.environ.get("ANONYMIZE", "false")),
             from_date=from_date,
             to_date=to_date,
             cache_dir=args.cache_dir,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            force=args.force,
         )
 
     def run_until(self) -> datetime:
