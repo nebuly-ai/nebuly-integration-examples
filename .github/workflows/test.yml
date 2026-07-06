@@ -15,6 +15,7 @@ jobs:
         project:
           - microsoft_copilot
           - claude_compliance
+          - gemini_enterprise
     steps:
       - uses: actions/checkout@v4
 
