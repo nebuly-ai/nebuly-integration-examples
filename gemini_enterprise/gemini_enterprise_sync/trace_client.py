@@ -23,8 +23,8 @@ _OUTPUT_TOKENS_KEY = "gen_ai.usage.output_tokens"
 
 @dataclass(frozen=True)
 class TraceData:
-    input_tokens: int
-    output_tokens: int
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     time_start: datetime | None = None
     time_end: datetime | None = None
 
@@ -47,7 +47,7 @@ class TraceClient:
         self._max_workers = max_workers
         self._client = client or TraceServiceClient()
 
-    def fetch_tokens(self, trace_ids: set[str]) -> dict[str, TraceData]:
+    def fetch_traces(self, trace_ids: set[str]) -> dict[str, TraceData]:
         if not trace_ids:
             return {}
 
@@ -96,13 +96,18 @@ class TraceClient:
         time_start = _to_utc(root.start_time) if root.start_time else None
         time_end = _to_utc(root.end_time) if root.end_time else None
 
-        input_tokens = 0
-        output_tokens = 0
+        input_tokens = None
+        output_tokens = None
+
         for span in trace.spans:
             labels = span.labels
             if _INPUT_TOKENS_KEY in labels:
+                if input_tokens is None:
+                    input_tokens = 0
                 input_tokens += int(labels[_INPUT_TOKENS_KEY])
             if _OUTPUT_TOKENS_KEY in labels:
+                if output_tokens is None:
+                    output_tokens = 0
                 output_tokens += int(labels[_OUTPUT_TOKENS_KEY])
 
         return TraceData(

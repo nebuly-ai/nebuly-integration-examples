@@ -58,7 +58,7 @@ def test_fetch_tokens_sums_labels_and_omits_not_found() -> None:
         return _trace([_span({"gen_ai.usage.input_tokens": "10"})])
 
     client.get_trace.side_effect = get_trace
-    result = trace_client.fetch_tokens({"t1", "t2", "missing"})
+    result = trace_client.fetch_traces({"t1", "t2", "missing"})
 
     assert result == {
         "t1": TraceData(
@@ -67,7 +67,7 @@ def test_fetch_tokens_sums_labels_and_omits_not_found() -> None:
             time_start=span_start,
             time_end=span_end,
         ),
-        "t2": TraceData(input_tokens=10, output_tokens=0),
+        "t2": TraceData(input_tokens=10, output_tokens=None),
     }
     assert "missing" not in result
 
@@ -81,5 +81,5 @@ def test_fetch_tokens_uses_thread_pool_width() -> None:
         "gemini_enterprise_sync.trace_client.ThreadPoolExecutor",
         wraps=ThreadPoolExecutor,
     ) as pool_cls:
-        trace_client.fetch_tokens({f"id{i}" for i in range(5)})
+        trace_client.fetch_traces({f"id{i}" for i in range(5)})
         pool_cls.assert_called_once_with(max_workers=3)

@@ -82,7 +82,7 @@ def run_sync(config: Config) -> SyncSummary:
 
             start_time = perf_counter()
             logger.info("Started fetching traces")
-            traces_data = trace_client.fetch_tokens(
+            traces_data = trace_client.fetch_traces(
                 {r.trace_id for r in records if r.trace_id}
             )
             end_time = perf_counter()
