@@ -64,7 +64,9 @@ def _parse_trace(trace: Trace, trace_id: str) -> TraceData | None:
     if not trace.spans:
         return None
 
-    root = trace.spans[0]
+    # Spans should already be sorted by start_time, but just in case.
+    spans = sorted(trace.spans, key=lambda x: x.start_time)
+    root = spans[0]
     time_start = _to_utc(root.start_time) if root.start_time else None
     time_end = _to_utc(root.end_time) if root.end_time else None
 
@@ -72,7 +74,7 @@ def _parse_trace(trace: Trace, trace_id: str) -> TraceData | None:
     output_tokens = None
     model_name = None
 
-    for span in trace.spans:
+    for span in spans:
         labels = span.labels
         if _INPUT_TOKENS_KEY in labels:
             parsed = _coerce_token_label(labels, _INPUT_TOKENS_KEY, trace_id)

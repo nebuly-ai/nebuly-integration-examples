@@ -78,11 +78,15 @@ def build_traces(record: LogRecord, trace: TraceData | None) -> list[dict[str, A
     if assistant_output:
         traces.append(
             {
-                "model": trace.model if trace else "gemini",
+                "model": trace.model if trace and trace.model else "gemini",
                 "messages": [{"role": "user", "content": user_input}],
                 "output": assistant_output,
-                "input_tokens": trace.input_tokens if trace else 0,
-                "output_tokens": trace.output_tokens if trace else 0,
+                "input_tokens": trace.input_tokens
+                if trace and trace.input_tokens
+                else 0,
+                "output_tokens": trace.output_tokens
+                if trace and trace.output_tokens
+                else 0,
             }
         )
 
