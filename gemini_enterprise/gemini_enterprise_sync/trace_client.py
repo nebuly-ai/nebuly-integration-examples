@@ -24,6 +24,7 @@ _CLOUD_PLATFORM_SCOPE = ("https://www.googleapis.com/auth/cloud-platform",)
 
 _INPUT_TOKENS_KEY = "gen_ai.usage.input_tokens"
 _OUTPUT_TOKENS_KEY = "gen_ai.usage.output_tokens"
+_MODEL_KEY = "gen_ai.request.model"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class TraceData:
     output_tokens: int | None = None
     time_start: datetime | None = None
     time_end: datetime | None = None
+    model: str | None = None
 
 
 def _to_utc(dt: datetime) -> datetime:
@@ -68,6 +70,7 @@ def _parse_trace(trace: Trace, trace_id: str) -> TraceData | None:
 
     input_tokens = None
     output_tokens = None
+    model_name = None
 
     for span in trace.spans:
         labels = span.labels
@@ -79,12 +82,15 @@ def _parse_trace(trace: Trace, trace_id: str) -> TraceData | None:
             parsed = _coerce_token_label(labels, _OUTPUT_TOKENS_KEY, trace_id)
             if parsed is not None:
                 output_tokens = (output_tokens or 0) + parsed
+        if _MODEL_KEY in labels:
+            model_name = labels[_MODEL_KEY]
 
     return TraceData(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         time_start=time_start,
         time_end=time_end,
+        model=model_name,
     )
 
 
