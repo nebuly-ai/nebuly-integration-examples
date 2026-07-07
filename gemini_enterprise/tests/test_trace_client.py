@@ -12,6 +12,9 @@ from google.api_core.exceptions import NotFound
 if TYPE_CHECKING:
     import pytest
 
+_DEFAULT_START = datetime(2026, 7, 2, 16, 14, 27, 554361, tzinfo=UTC)
+_DEFAULT_END = datetime(2026, 7, 2, 16, 14, 38, 513741, tzinfo=UTC)
+
 
 def _span(
     labels: dict[str, str],
@@ -21,8 +24,8 @@ def _span(
 ) -> MagicMock:
     span = MagicMock()
     span.labels = labels
-    span.start_time = start
-    span.end_time = end
+    span.start_time = start if start is not None else _DEFAULT_START
+    span.end_time = end if end is not None else _DEFAULT_END
     return span
 
 
@@ -74,7 +77,12 @@ def test_fetch_traces_sums_labels_and_omits_not_found() -> None:
             time_start=span_start,
             time_end=span_end,
         ),
-        "t2": TraceData(input_tokens=10, output_tokens=None),
+        "t2": TraceData(
+            input_tokens=10,
+            output_tokens=None,
+            time_start=_DEFAULT_START,
+            time_end=_DEFAULT_END,
+        ),
     }
     assert "missing" not in result
 
@@ -164,7 +172,12 @@ def test_parse_trace_sums_valid_labels_and_skips_malformed(
 
     result = _parse_trace(trace, "trace-bad-label")
 
-    assert result == TraceData(input_tokens=25, output_tokens=5)
+    assert result == TraceData(
+        input_tokens=25,
+        output_tokens=5,
+        time_start=_DEFAULT_START,
+        time_end=_DEFAULT_END,
+    )
     assert any(
         "gen_ai.usage.input_tokens" in record.message
         and "not-a-number" in record.message
@@ -184,8 +197,8 @@ def test_parse_trace_malformed_only_label_leaves_tokens_none(
     assert result == TraceData(
         input_tokens=None,
         output_tokens=None,
-        time_start=None,
-        time_end=None,
+        time_start=_DEFAULT_START,
+        time_end=_DEFAULT_END,
     )
     assert any("trace-only-bad" in record.message for record in caplog.records)
 
@@ -204,4 +217,11 @@ def test_fetch_traces_tolerates_malformed_token_labels() -> None:
 
     result = trace_client.fetch_traces({"t1"})
 
-    assert result == {"t1": TraceData(input_tokens=10, output_tokens=None)}
+    assert result == {
+        "t1": TraceData(
+            input_tokens=10,
+            output_tokens=None,
+            time_start=_DEFAULT_START,
+            time_end=_DEFAULT_END,
+        )
+    }
