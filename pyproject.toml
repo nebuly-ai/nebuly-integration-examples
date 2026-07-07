@@ -71,6 +71,7 @@ unfixable = []
     "S101",
     "INP001", # Add an `__init__.py`.
     "SLF001", # Private member accessed
+    "S105", # Possible hardcoded password assigned to argument
 ]
 
 [tool.ruff.lint.mccabe]

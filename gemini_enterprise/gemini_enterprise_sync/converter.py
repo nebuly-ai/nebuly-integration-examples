@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from . import user_defined
 from .config import datetime_to_timestamp_str
 from .models import LogPayload
+from .pseudonymize import pseudonymize_email
 
 if TYPE_CHECKING:
     from .logging_client import LogRecord
@@ -46,6 +47,8 @@ def turn_to_payload(
     *,
     engine_id: str,
     anonymize: bool,
+    send_plain_end_user: bool,
+    user_hash_secret: str,
 ) -> dict[str, Any] | SkipReason:
     payload = LogPayload.validate_from_logging_or_bigquery(record.payload)
 
@@ -81,6 +84,12 @@ def turn_to_payload(
         timestamp_str = datetime_to_timestamp_str(record.timestamp)
         time_start = time_end = timestamp_str
 
+    end_user = (
+        payload.user_iam_principal
+        if send_plain_end_user
+        else pseudonymize_email(payload.user_iam_principal, secret=user_hash_secret)
+    )
+
     return {
         "interaction": {
             "conversation_id": conversation_id,
@@ -88,7 +97,7 @@ def turn_to_payload(
             "output": assistant_output,
             "time_start": time_start,
             "time_end": time_end,
-            "end_user": payload.user_iam_principal,
+            "end_user": end_user,
             "hide_content": False,
             "tags": user_defined.build_tags(
                 record,

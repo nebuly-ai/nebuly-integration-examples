@@ -123,6 +123,8 @@ def _process_batch(
                 trace_data,
                 engine_id=config.gcp_engine_id,
                 anonymize=config.anonymize,
+                send_plain_end_user=config.send_plain_end_user,
+                user_hash_secret=config.user_hash_secret,
             )
         except Exception:
             logger.exception(

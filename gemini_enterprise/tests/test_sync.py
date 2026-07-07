@@ -40,6 +40,8 @@ def _config(
         log_page_size=1000,
         trace_concurrency=4,
         anonymize=False,
+        send_plain_end_user=False,
+        user_hash_secret="test-secret",
         from_date=from_date,
         to_date=to_date,
         cache_dir=tmp_path,

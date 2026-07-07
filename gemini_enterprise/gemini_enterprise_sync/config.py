@@ -47,6 +47,8 @@ class Config:
     log_page_size: int
     trace_concurrency: int
     anonymize: bool
+    send_plain_end_user: bool
+    user_hash_secret: str
     from_date: datetime | None
     to_date: datetime | None
     cache_dir: Path
@@ -153,6 +155,15 @@ class Config:
                 "GCP_BIGQUERY_TABLE is required when GCP_LOG_SOURCE=bigquery"
             )
 
+        send_plain_end_user = _parse_bool(
+            os.environ.get("SEND_PLAIN_END_USER", "false")
+        )
+        user_hash_secret = os.environ.get("USER_HASH_SECRET", "")
+        if not send_plain_end_user and not user_hash_secret:
+            raise RuntimeError(
+                "USER_HASH_SECRET is required when SEND_PLAIN_END_USER is false"
+            )
+
         return cls(
             nebuly_api_key=cast(str, nebuly_api_key),
             nebuly_endpoint=os.environ.get(
@@ -169,6 +180,8 @@ class Config:
             log_page_size=int(os.environ.get("GCP_LOG_PAGE_SIZE", "1000")),
             trace_concurrency=trace_concurrency,
             anonymize=_parse_bool(os.environ.get("ANONYMIZE", "false")),
+            send_plain_end_user=send_plain_end_user,
+            user_hash_secret=user_hash_secret,
             from_date=from_date,
             to_date=to_date,
             cache_dir=args.cache_dir,

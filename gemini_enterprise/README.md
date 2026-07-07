@@ -55,11 +55,24 @@ gcloud auth application-default login
 | `GCP_LOG_PAGE_SIZE`      | no              | `1000`                     | Cloud Logging page size for `entries.list` pagination                             |
 | `GCP_TRACE_CONCURRENCY`  | no              | `32`                       | Parallel async `get_trace` calls                                                  |
 | `ANONYMIZE`              | no              | `false`                    | Anonymize content in Nebuly payload                                               |
+| `USER_HASH_SECRET`       | when pseudonymizing | —                          | Secret key for deterministic `end_user` pseudonyms (HMAC-SHA256 → UUID)           |
+| `SEND_PLAIN_END_USER`    | no              | `false`                    | Send raw email as `end_user` instead of pseudonymizing                            |
 | `GCP_LOG_SOURCE`         | no              | `logging`                  | Log source: `logging` (live API) or `bigquery`                                    |
 | `GCP_BIGQUERY_TABLE`     | when `bigquery` | —                          | Fully-qualified table (`project.dataset.table` or `..._*` for date-sharded sinks) |
 | `GCP_BIGQUERY_LOCATION`  | no              | auto-detect                | BigQuery dataset location                                                         |
 
+By default, `end_user` is a deterministic UUID pseudonym derived from the user's email
+via keyed HMAC-SHA256 (`USER_HASH_SECRET`). No mapping file or cache is required — the
+same email always maps to the same UUID. To recover real identities, re-hash your org's
+user list with the same secret and match tokens. Set `SEND_PLAIN_END_USER=true` to send
+raw emails instead (no secret needed).
 
+Generate a secret once and store it securely (e.g. in your secrets manager or `.env`):
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+# or: openssl rand -hex 32
+```
 
 
 ### Log source
