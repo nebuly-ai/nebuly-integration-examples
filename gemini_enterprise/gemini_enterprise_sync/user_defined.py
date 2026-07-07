@@ -51,7 +51,7 @@ def build_tags(
     session_id: str | None,
     answer_id: str | None,
 ) -> dict[str, str]:
-    payload = LogPayload.model_validate(record.payload)
+    payload = LogPayload.validate_from_logging_or_bigquery(record.payload)
     tags: dict[str, str] = {
         "session_id": session_id or "",
         "engine_id": engine_id,
@@ -70,7 +70,7 @@ def build_tags(
 
 
 def build_traces(record: LogRecord, trace: TraceData | None) -> list[dict[str, Any]]:
-    payload = LogPayload.model_validate(record.payload)
+    payload = LogPayload.validate_from_logging_or_bigquery(record.payload)
     traces: list[dict[str, Any]] = []
     user_input = _user_input(payload)
     assistant_output = (payload.service_text_reply or "").strip()

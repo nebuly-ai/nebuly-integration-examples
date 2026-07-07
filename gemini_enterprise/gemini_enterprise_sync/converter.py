@@ -47,7 +47,7 @@ def turn_to_payload(
     engine_id: str,
     anonymize: bool,
 ) -> dict[str, Any] | SkipReason:
-    payload = LogPayload.model_validate(record.payload)
+    payload = LogPayload.validate_from_logging_or_bigquery(record.payload)
 
     user_input = ""
     if payload.request and payload.request.query and payload.request.query.parts:
