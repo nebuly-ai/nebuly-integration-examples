@@ -15,6 +15,8 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from . import grpc_init  # noqa: F401
 
 if TYPE_CHECKING:
+    from collections.abc import MutableMapping
+
     from google.auth.credentials import Credentials
     from google.cloud.trace_v1.types import Trace
 
@@ -40,7 +42,25 @@ def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(UTC)
 
 
-def _parse_trace(trace: Trace) -> TraceData | None:
+def _coerce_token_label(
+    labels: MutableMapping[str, str], key: str, trace_id: str
+) -> int | None:
+    raw = labels.get(key)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring malformed %s=%r on trace %s",
+            key,
+            raw,
+            trace_id,
+        )
+        return None
+
+
+def _parse_trace(trace: Trace, trace_id: str) -> TraceData | None:
     if not trace.spans:
         return None
 
@@ -54,13 +74,13 @@ def _parse_trace(trace: Trace) -> TraceData | None:
     for span in trace.spans:
         labels = span.labels
         if _INPUT_TOKENS_KEY in labels:
-            if input_tokens is None:
-                input_tokens = 0
-            input_tokens += int(labels[_INPUT_TOKENS_KEY])
+            parsed = _coerce_token_label(labels, _INPUT_TOKENS_KEY, trace_id)
+            if parsed is not None:
+                input_tokens = (input_tokens or 0) + parsed
         if _OUTPUT_TOKENS_KEY in labels:
-            if output_tokens is None:
-                output_tokens = 0
-            output_tokens += int(labels[_OUTPUT_TOKENS_KEY])
+            parsed = _coerce_token_label(labels, _OUTPUT_TOKENS_KEY, trace_id)
+            if parsed is not None:
+                output_tokens = (output_tokens or 0) + parsed
 
     return TraceData(
         input_tokens=input_tokens,
@@ -112,7 +132,7 @@ class TraceClient:
                 except GoogleAPICallError:
                     logger.exception("Failed to fetch trace %s", trace_id)
                     return trace_id, None
-                return trace_id, _parse_trace(trace)
+                return trace_id, _parse_trace(trace, trace_id)
 
         try:
             pairs = await asyncio.gather(*(fetch_one(tid) for tid in trace_ids))

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from gemini_enterprise_sync.config import Config
 
 
-def test_bigquery_source_without_table_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+@patch("gemini_enterprise_sync.config.load_dotenv")
+def test_bigquery_source_without_table_raises(
+    load_dotenv: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("NEBULY_API_KEY", "key")
     monkeypatch.setenv("GCP_PROJECT_ID", "p")
     monkeypatch.setenv("GCP_LOCATION", "eu")

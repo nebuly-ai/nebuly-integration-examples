@@ -38,12 +38,31 @@ class Counts:
     entries_sent: int = 0
     entries_skipped: int = 0
     entries_failed: int = 0
+    entries_conversion_errors: int = 0
     traces_missing_tokens: int = 0
+    entries_deduplicated: int = 0
 
 
 @dataclass
 class SyncSummary:
     totals: Counts = field(default_factory=Counts)
+
+
+def _log_summary(totals: Counts, *, stopped: bool) -> None:
+    prefix = "Sync stopped" if stopped else "Sync complete"
+    logger.info(
+        "%s: entries_fetched=%s entries_sent=%s entries_skipped=%s "
+        "entries_failed=%s entries_conversion_errors=%s traces_missing_tokens=%s "
+        "entries_deduplicated=%s",
+        prefix,
+        totals.entries_fetched,
+        totals.entries_sent,
+        totals.entries_skipped,
+        totals.entries_failed,
+        totals.entries_conversion_errors,
+        totals.traces_missing_tokens,
+        totals.entries_deduplicated,
+    )
 
 
 def _resolve_requested_from(config: Config, coverage: Coverage) -> datetime:
@@ -98,21 +117,35 @@ def _process_batch(
         if record.trace_id and trace_data is None:
             summary.totals.traces_missing_tokens += 1
 
-        result = turn_to_payload(
-            record,
-            trace_data,
-            engine_id=config.gcp_engine_id,
-            anonymize=config.anonymize,
-        )
+        try:
+            result = turn_to_payload(
+                record,
+                trace_data,
+                engine_id=config.gcp_engine_id,
+                anonymize=config.anonymize,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to convert entry insert_id=%s trace_id=%s",
+                record.insert_id,
+                record.trace_id,
+            )
+            summary.totals.entries_conversion_errors += 1
+            coverage.advance_until(record.timestamp, record.insert_id)
+            continue
+
         if isinstance(result, SkipReason):
+            logger.debug(
+                "Skipping entry insert_id=%s reason=%s",
+                record.insert_id,
+                result.name,
+            )
             summary.totals.entries_skipped += 1
-            coverage.advance_until(record.timestamp)
+            coverage.advance_until(record.timestamp, record.insert_id)
             continue
 
         try:
             nebuly.send_interaction(result)
-            summary.totals.entries_sent += 1
-            coverage.advance_until(record.timestamp)
         except Exception:
             logger.exception(
                 "Failed to send entry insert_id=%s trace_id=%s",
@@ -121,10 +154,32 @@ def _process_batch(
             )
             summary.totals.entries_failed += 1
             return False
+        summary.totals.entries_sent += 1
+        coverage.advance_until(record.timestamp, record.insert_id)
     return True
 
 
-def run_sync(config: Config) -> SyncSummary:
+def _generate_intervals(
+    coverage: Coverage,
+    requested_from: datetime,
+    requested_until: datetime,
+    config: Config,
+) -> list[tuple[datetime, datetime]]:
+    intervals, gap_detected = plan_run(
+        coverage.state if coverage.has_coverage() else None,
+        requested_from,
+        requested_until,
+    )
+
+    if gap_detected:
+        _confirm_gap(config)
+        coverage.invalidate()
+        intervals = [(requested_from, requested_until)]
+
+    return intervals
+
+
+def run_sync(config: Config) -> SyncSummary:  # noqa: C901, PLR0915
     logging.basicConfig(
         level=logging.DEBUG if config.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -140,16 +195,7 @@ def run_sync(config: Config) -> SyncSummary:
     requested_until = config.run_until()
     requested_from = _resolve_requested_from(config, coverage)
 
-    intervals, gap_detected = plan_run(
-        coverage.state if coverage.has_coverage() else None,
-        requested_from,
-        requested_until,
-    )
-
-    if gap_detected:
-        _confirm_gap(config)
-        coverage.invalidate()
-        intervals = [(requested_from, requested_until)]
+    intervals = _generate_intervals(coverage, requested_from, requested_until, config)
 
     if not intervals:
         logger.info("Requested range is already covered; nothing to sync.")
@@ -171,6 +217,9 @@ def run_sync(config: Config) -> SyncSummary:
 
         for interval_from, interval_until in intervals:
             since = interval_from
+            seen_ids: set[str] = set()
+            if coverage.state.coverage_until == interval_from:
+                seen_ids = set(coverage.state.coverage_until_ids)
 
             while True:
                 start_time = perf_counter()
@@ -187,12 +236,28 @@ def run_sync(config: Config) -> SyncSummary:
                     end_time - start_time,
                 )
 
-                summary.totals.entries_fetched += len(records)
+                last_ts = records[-1].timestamp
+                new_records = [r for r in records if r.insert_id not in seen_ids]
+                deduped = len(records) - len(new_records)
+                if deduped:
+                    summary.totals.entries_deduplicated += deduped
+                if not new_records:
+                    if len(records) >= config.log_batch_size and last_ts == since:
+                        logger.warning(
+                            "Batch of %d records all share timestamp %s; "
+                            "some may be skipped. Increase --batch-size / "
+                            "GCP_LOG_BATCH_SIZE.",
+                            len(records),
+                            last_ts,
+                        )
+                    break
+
+                summary.totals.entries_fetched += len(new_records)
 
                 start_time = perf_counter()
                 logger.info("Started fetching traces")
                 traces_data = trace_client.fetch_traces(
-                    {r.trace_id for r in records if r.trace_id}
+                    {r.trace_id for r in new_records if r.trace_id}
                 )
                 end_time = perf_counter()
                 logger.info(
@@ -202,40 +267,27 @@ def run_sync(config: Config) -> SyncSummary:
                 )
 
                 if not _process_batch(
-                    records=records,
+                    records=new_records,
                     traces_data=traces_data,
                     config=config,
                     nebuly=nebuly,
                     coverage=coverage,
                     summary=summary,
                 ):
-                    totals = summary.totals
-                    logger.info(
-                        "Sync stopped: entries_fetched=%s entries_sent=%s "
-                        "entries_skipped=%s entries_failed=%s "
-                        "traces_missing_tokens=%s",
-                        totals.entries_fetched,
-                        totals.entries_sent,
-                        totals.entries_skipped,
-                        totals.entries_failed,
-                        totals.traces_missing_tokens,
-                    )
+                    _log_summary(summary.totals, stopped=True)
                     return summary
 
-                since = records[-1].timestamp
+                seen_ids = (
+                    {r.insert_id for r in records if r.timestamp == last_ts}
+                    if last_ts != since
+                    else seen_ids
+                    | {r.insert_id for r in records if r.timestamp == last_ts}
+                )
+                since = last_ts
                 if len(records) < config.log_batch_size:
                     break
 
             coverage.save(coverage_from=interval_from)
 
-    totals = summary.totals
-    logger.info(
-        "Sync complete: entries_fetched=%s entries_sent=%s entries_skipped=%s "
-        "entries_failed=%s traces_missing_tokens=%s",
-        totals.entries_fetched,
-        totals.entries_sent,
-        totals.entries_skipped,
-        totals.entries_failed,
-        totals.traces_missing_tokens,
-    )
+    _log_summary(summary.totals, stopped=False)
     return summary

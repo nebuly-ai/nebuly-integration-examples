@@ -92,6 +92,7 @@ def test_migrates_legacy_cursor_json(tmp_path: Path) -> None:
     loaded = Coverage(tmp_path).load()
     assert loaded.coverage_from is None
     assert loaded.coverage_until == _ts(12)
+    assert loaded.coverage_until_ids == frozenset({"abc"})
 
 
 def test_invalidate_clears_state_and_files(tmp_path: Path) -> None:
@@ -100,3 +101,31 @@ def test_invalidate_clears_state_and_files(tmp_path: Path) -> None:
     coverage.invalidate()
     assert not coverage.has_coverage()
     assert not (tmp_path / "coverage.json").exists()
+
+
+def test_coverage_until_ids_round_trip(tmp_path: Path) -> None:
+    coverage = Coverage(tmp_path)
+    coverage.save(
+        coverage_from=_ts(8),
+        coverage_until=_ts(12),
+        coverage_until_ids=["a", "b"],
+    )
+    loaded = Coverage(tmp_path).load()
+    assert loaded.coverage_until_ids == frozenset({"a", "b"})
+
+
+def test_advance_until_unions_ids_at_equal_timestamp(tmp_path: Path) -> None:
+    coverage = Coverage(tmp_path)
+    coverage.advance_until(_ts(12), "a")
+    coverage.advance_until(_ts(12), "b")
+    assert coverage.state.coverage_until == _ts(12)
+    assert coverage.state.coverage_until_ids == frozenset({"a", "b"})
+
+
+def test_advance_until_resets_ids_at_greater_timestamp(tmp_path: Path) -> None:
+    coverage = Coverage(tmp_path)
+    coverage.advance_until(_ts(12), "a")
+    coverage.advance_until(_ts(12), "b")
+    coverage.advance_until(_ts(13), "c")
+    assert coverage.state.coverage_until == _ts(13)
+    assert coverage.state.coverage_until_ids == frozenset({"c"})

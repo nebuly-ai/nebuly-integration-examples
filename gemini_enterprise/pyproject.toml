@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "gemini-enterprise-traces"
+name = "gemini_enterprise"
 version = "0.1.0"
-description = "Gemini Enterprise trace-based integration (Cloud Logging + Cloud Trace)"
+description = "Gemini Enterprise integration"
 authors = ["The Nebuly Team"]
 package-mode = false
 

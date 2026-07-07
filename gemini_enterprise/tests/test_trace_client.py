@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio as aio
+import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from gemini_enterprise_sync.trace_client import TraceClient, TraceData
+from gemini_enterprise_sync.trace_client import TraceClient, TraceData, _parse_trace
 from google.api_core.exceptions import NotFound
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _span(
@@ -139,3 +144,64 @@ def test_fetch_traces_skips_refresh_when_credentials_valid() -> None:
         trace_client.fetch_traces({"id1"})
 
     refresh_mock.assert_not_called()
+
+
+def test_parse_trace_sums_valid_labels_and_skips_malformed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    trace = _trace(
+        [
+            _span({"gen_ai.usage.input_tokens": "not-a-number"}),
+            _span(
+                {
+                    "gen_ai.usage.input_tokens": "25",
+                    "gen_ai.usage.output_tokens": "5",
+                }
+            ),
+        ]
+    )
+
+    result = _parse_trace(trace, "trace-bad-label")
+
+    assert result == TraceData(input_tokens=25, output_tokens=5)
+    assert any(
+        "gen_ai.usage.input_tokens" in record.message
+        and "not-a-number" in record.message
+        and "trace-bad-label" in record.message
+        for record in caplog.records
+    )
+
+
+def test_parse_trace_malformed_only_label_leaves_tokens_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    trace = _trace([_span({"gen_ai.usage.input_tokens": "bad"})])
+
+    result = _parse_trace(trace, "trace-only-bad")
+
+    assert result == TraceData(
+        input_tokens=None,
+        output_tokens=None,
+        time_start=None,
+        time_end=None,
+    )
+    assert any("trace-only-bad" in record.message for record in caplog.records)
+
+
+def test_fetch_traces_tolerates_malformed_token_labels() -> None:
+    client = AsyncMock()
+    transport = AsyncMock()
+    client.transport = transport
+    trace_client = TraceClient("project", concurrency=2, async_client=client)
+    client.get_trace.return_value = _trace(
+        [
+            _span({"gen_ai.usage.input_tokens": "oops"}),
+            _span({"gen_ai.usage.input_tokens": "10"}),
+        ]
+    )
+
+    result = trace_client.fetch_traces({"t1"})
+
+    assert result == {"t1": TraceData(input_tokens=10, output_tokens=None)}

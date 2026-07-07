@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING
 from .config import datetime_to_timestamp_str, timestamp_str_to_datetime
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
-_COVERAGE_VERSION = 2
+_COVERAGE_VERSION = 3
 _CURSOR_FILENAME = "cursor.json"
 
 
@@ -19,6 +20,7 @@ _CURSOR_FILENAME = "cursor.json"
 class CoverageState:
     coverage_from: datetime | None
     coverage_until: datetime | None
+    coverage_until_ids: frozenset[str] = frozenset()
 
 
 def _merge_coverage(
@@ -73,7 +75,11 @@ class Coverage:
         self._path = cache_dir / "coverage.json"
         self._cursor_path = cache_dir / _CURSOR_FILENAME
         self._dry_run = dry_run
-        self._state = CoverageState(coverage_from=None, coverage_until=None)
+        self._state = CoverageState(
+            coverage_from=None,
+            coverage_until=None,
+            coverage_until_ids=frozenset(),
+        )
 
     @property
     def state(self) -> CoverageState:
@@ -90,6 +96,7 @@ class Coverage:
             data = json.loads(self._path.read_text(encoding="utf-8"))
             cov_from = data.get("coverage_from")
             cov_until = data.get("coverage_until")
+            raw_ids = data.get("coverage_until_ids", [])
             self._state = CoverageState(
                 coverage_from=(
                     timestamp_str_to_datetime(cov_from) if cov_from else None
@@ -97,25 +104,38 @@ class Coverage:
                 coverage_until=(
                     timestamp_str_to_datetime(cov_until) if cov_until else None
                 ),
+                coverage_until_ids=(frozenset(raw_ids) if raw_ids else frozenset()),
             )
             return self._state
 
         if self._cursor_path.exists():
             data = json.loads(self._cursor_path.read_text(encoding="utf-8"))
             last_ts = data.get("last_timestamp")
+            last_insert_id = data.get("last_insert_id")
             self._state = CoverageState(
                 coverage_from=None,
                 coverage_until=(
                     timestamp_str_to_datetime(last_ts) if last_ts else None
                 ),
+                coverage_until_ids=(
+                    frozenset({last_insert_id}) if last_insert_id else frozenset()
+                ),
             )
             return self._state
 
-        self._state = CoverageState(coverage_from=None, coverage_until=None)
+        self._state = CoverageState(
+            coverage_from=None,
+            coverage_until=None,
+            coverage_until_ids=frozenset(),
+        )
         return self._state
 
     def invalidate(self) -> None:
-        self._state = CoverageState(coverage_from=None, coverage_until=None)
+        self._state = CoverageState(
+            coverage_from=None,
+            coverage_until=None,
+            coverage_until_ids=frozenset(),
+        )
         if self._dry_run:
             return
         if self._path.exists():
@@ -128,6 +148,7 @@ class Coverage:
         *,
         coverage_from: datetime | None = None,
         coverage_until: datetime | None = None,
+        coverage_until_ids: Iterable[str] | None = None,
     ) -> None:
         merged_from, merged_until = _merge_coverage(
             self._state.coverage_from,
@@ -135,20 +156,42 @@ class Coverage:
             coverage_from,
             coverage_until,
         )
+        ids = (
+            frozenset(coverage_until_ids)
+            if coverage_until_ids is not None
+            else self._state.coverage_until_ids
+        )
         self._state = CoverageState(
             coverage_from=merged_from,
             coverage_until=merged_until,
+            coverage_until_ids=ids,
         )
         if self._dry_run:
             return
         self._write()
 
-    def advance_until(self, until: datetime) -> None:
+    def advance_until(self, until: datetime, insert_id: str) -> None:
         if until.tzinfo is None:
             until = until.replace(tzinfo=UTC)
         else:
             until = until.astimezone(UTC)
-        self.save(coverage_until=until)
+
+        current_until = self._state.coverage_until
+        if current_until is not None:
+            if current_until.tzinfo is None:
+                current_until = current_until.replace(tzinfo=UTC)
+            else:
+                current_until = current_until.astimezone(UTC)
+
+        if current_until is not None and until < current_until:
+            return
+
+        if current_until is not None and until == current_until:
+            new_ids = self._state.coverage_until_ids | {insert_id}
+        else:
+            new_ids = frozenset({insert_id})
+
+        self.save(coverage_until=until, coverage_until_ids=new_ids)
 
     def _write(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +207,7 @@ class Coverage:
                 if self._state.coverage_until is not None
                 else None
             ),
+            "coverage_until_ids": sorted(self._state.coverage_until_ids),
             "updated_at": datetime_to_timestamp_str(datetime.now(UTC)),
         }
         tmp_path = self._path.with_suffix(".json.tmp")

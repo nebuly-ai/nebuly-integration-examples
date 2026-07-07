@@ -17,8 +17,6 @@ Parallel Cloud Trace get_trace (per batch)
         Nebuly trace_interaction
 ```
 
-Unlike the sibling `gemini_enterprise/` integration (Discovery Engine sessions API), this project uses real IAM principals instead of rotating `userPseudoId` values and includes token counts from trace span labels.
-
 ## Prerequisites
 
 - Python ≥ 3.12
@@ -28,7 +26,7 @@ Unlike the sibling `gemini_enterprise/` integration (Discovery Engine sessions A
 ## Setup
 
 ```bash
-cd gemini_enterprise_traces
+cd gemini_enterprise
 poetry install
 cp .env.example .env
 ```
@@ -39,24 +37,30 @@ Authenticate with GCP:
 gcloud auth application-default login
 ```
 
+
+
 ## Configuration
 
-| Variable | Required | Default | Description |
-| -------- | -------- | ------- | ----------- |
-| `NEBULY_API_KEY` | yes | — | Nebuly secret key |
-| `GCP_PROJECT_ID` | yes | — | GCP project ID |
-| `GCP_LOCATION` | yes | — | Discovery Engine region |
-| `GCP_ENGINE_ID` | yes | — | Gemini Enterprise engine ID |
-| `GCP_COLLECTION` | no | `default_collection` | Discovery Engine collection |
-| `NEBULY_ENDPOINT` | no | v3 `trace_interaction` URL | Nebuly ingestion endpoint |
-| `GCP_SETTLE_LAG_SECONDS` | no | `60` | Upper bound lag before ingesting recent logs |
-| `GCP_LOG_BATCH_SIZE` | no | `500` | Max matching log records per batch |
-| `GCP_LOG_PAGE_SIZE` | no | `1000` | Cloud Logging page size for `entries.list` pagination |
-| `GCP_TRACE_CONCURRENCY` | no | `32` | Parallel async `get_trace` calls |
-| `ANONYMIZE` | no | `false` | Anonymize content in Nebuly payload |
-| `GCP_LOG_SOURCE` | no | `logging` | Log source: `logging` (live API) or `bigquery` |
-| `GCP_BIGQUERY_TABLE` | when `bigquery` | — | Fully-qualified table (`project.dataset.table` or `..._*` for date-sharded sinks) |
-| `GCP_BIGQUERY_LOCATION` | no | auto-detect | BigQuery dataset location |
+
+| Variable                 | Required        | Default                    | Description                                                                       |
+| ------------------------ | --------------- | -------------------------- | --------------------------------------------------------------------------------- |
+| `NEBULY_API_KEY`         | yes             | —                          | Nebuly secret key                                                                 |
+| `GCP_PROJECT_ID`         | yes             | —                          | GCP project ID                                                                    |
+| `GCP_LOCATION`           | yes             | —                          | Discovery Engine region                                                           |
+| `GCP_ENGINE_ID`          | yes             | —                          | Gemini Enterprise engine ID                                                       |
+| `GCP_COLLECTION`         | no              | `default_collection`       | Discovery Engine collection                                                       |
+| `NEBULY_ENDPOINT`        | no              | v3 `trace_interaction` URL | Nebuly ingestion endpoint                                                         |
+| `GCP_SETTLE_LAG_SECONDS` | no              | `60`                       | Upper bound lag before ingesting recent logs                                      |
+| `GCP_LOG_BATCH_SIZE`     | no              | `500`                      | Max matching log records per batch                                                |
+| `GCP_LOG_PAGE_SIZE`      | no              | `1000`                     | Cloud Logging page size for `entries.list` pagination                             |
+| `GCP_TRACE_CONCURRENCY`  | no              | `32`                       | Parallel async `get_trace` calls                                                  |
+| `ANONYMIZE`              | no              | `false`                    | Anonymize content in Nebuly payload                                               |
+| `GCP_LOG_SOURCE`         | no              | `logging`                  | Log source: `logging` (live API) or `bigquery`                                    |
+| `GCP_BIGQUERY_TABLE`     | when `bigquery` | —                          | Fully-qualified table (`project.dataset.table` or `..._*` for date-sharded sinks) |
+| `GCP_BIGQUERY_LOCATION`  | no              | auto-detect                | BigQuery dataset location                                                         |
+
+
+
 
 ### Log source
 
@@ -84,24 +88,24 @@ gcloud logging sinks create gemini-enterprise-logs \
   --log-filter='logName="projects/PROJECT_ID/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity" AND (jsonPayload.serviceTextReply:* OR protoPayload.response.reply:*)'
 ```
 
-**`GCP_BIGQUERY_TABLE`**: for date-sharded sinks (the default), use the base table name with `_*` suffix, e.g. `my-project.gemini_enterprise_logs.discoveryengine_googleapis_com_gemini_enterprise_user_activity_*`. For partitioned-table sinks, use the plain table name.
+`GCP_BIGQUERY_TABLE`: for date-sharded sinks (the default), use the base table name with `_*` suffix, e.g. `my-project.gemini_enterprise_logs.discoveryengine_googleapis_com_gemini_enterprise_user_activity_*`. For partitioned-table sinks, use the plain table name.
 
 Cloud Trace token enrichment is unchanged — it runs per batch regardless of log source.
 
 ### CLI flags
 
-| Flag | Description |
-| ---- | ----------- |
-| `--from-date` | ISO backfill start (required on first run; overlaps merge, gaps prompt) |
-| `--to-date` | ISO end date upper bound |
-| `--cache-dir` | Coverage state directory (default `./.cache`) |
-| `--batch-size` | Override `GCP_LOG_BATCH_SIZE` |
-| `--trace-concurrency` | Override `GCP_TRACE_CONCURRENCY` |
-| `--trace-workers` | Alias for `--trace-concurrency` |
-| `--log-source` | Override `GCP_LOG_SOURCE` (`logging` or `bigquery`) |
-| `--yes` / `--force` | Confirm gap-creating runs without prompting |
-| `--dry-run` | Build payloads without POSTing or persisting coverage |
-| `--verbose` | Debug logging |
+| Flag                  | Description                                                             |
+| --------------------- | ----------------------------------------------------------------------- |
+| `--from-date`         | ISO backfill start (required on first run; overlaps merge, gaps prompt) |
+| `--to-date`           | ISO end date upper bound                                                |
+| `--cache-dir`         | Coverage state directory (default `./.cache`)                           |
+| `--batch-size`        | Override `GCP_LOG_BATCH_SIZE`                                           |
+| `--trace-concurrency` | Override `GCP_TRACE_CONCURRENCY`                                        |
+| `--trace-workers`     | Alias for `--trace-concurrency`                                         |
+| `--log-source`        | Override `GCP_LOG_SOURCE` (`logging` or `bigquery`)                     |
+| `--yes` / `--force`   | Confirm gap-creating runs without prompting                             |
+| `--dry-run`           | Build payloads without POSTing or persisting coverage                   |
+| `--verbose`           | Debug logging                                                           |
 
 ### IAM permissions
 
@@ -118,10 +122,6 @@ poetry run python -m gemini_enterprise_sync --dry-run --verbose --from-date 2026
 
 Resume state is stored in `cache_dir/coverage.json` as a covered range `[coverage_from, coverage_until]`. Overlapping or adjacent backfills merge into that range; Nebuly dedup handles re-sends. A manually supplied `--from-date` that would create a **gap** (disjoint from existing coverage) prompts for confirmation; use `--yes` in non-interactive environments. First run without existing coverage **requires** `--from-date`.
 
-Log fetch uses a server-side reply predicate (`serviceTextReply` / `protoPayload.response.reply`) so only matching entries are returned. The Cloud Logging API path can take multiple seconds for modest windows; set `GCP_LOG_SOURCE=bigquery` with a sink export for sub-second fetches (see [Log source](#log-source)).
-
-Trace fetch uses async gRPC with a shared, pre-refreshed credential so high concurrency does not trigger per-RPC token refresh storms against `oauth2.googleapis.com`.
-
 ## Customizing payloads
 
 Edit `gemini_enterprise_sync/user_defined.py` for tags, traces (LLMTrace + RetrievalTrace), and user feedback.
@@ -131,3 +131,4 @@ Edit `gemini_enterprise_sync/user_defined.py` for tags, traces (LLMTrace + Retri
 ```bash
 poetry run pytest
 ```
+

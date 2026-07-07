@@ -46,13 +46,12 @@ class LoggingClient:
     def fetch_batch(
         self, *, since: datetime | None, until: datetime, limit: int
     ) -> list[LogRecord]:
-        entries = list(
-            self._client.list_entries(  # type: ignore[no-untyped-call]
-                resource_names=[f"projects/{self._project_id}"],
-                filter_=self._build_filter(since=since, until=until),
-                order_by="timestamp asc",
-                page_size=self._page_size,
-            )
+        entries = self._client.list_entries(  # type: ignore[no-untyped-call]
+            resource_names=[f"projects/{self._project_id}"],
+            filter_=self._build_filter(since=since, until=until),
+            order_by="timestamp asc",
+            page_size=min(self._page_size, limit),
+            max_results=limit,
         )
 
         records: list[LogRecord] = []
