@@ -12,8 +12,6 @@ from google.api_core.exceptions import GoogleAPICallError, NotFound
 from google.cloud.trace_v1 import TraceServiceAsyncClient
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from . import grpc_init  # noqa: F401
-
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
 
