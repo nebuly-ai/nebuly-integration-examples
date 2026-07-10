@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import argparse
+import os
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import cast
+
+from dotenv import load_dotenv
+
+
+def timestamp_str_to_datetime(timestamp: str) -> datetime:
+    if not timestamp:
+        raise ValueError("timestamp is required")
+    ts = timestamp.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    else:
+        dt = dt.astimezone(UTC)
+    return dt
+
+
+def datetime_to_timestamp_str(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    else:
+        dt = dt.astimezone(UTC)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class Config:
+    nebuly_api_key: str
+    nebuly_endpoint: str
+    gcp_project_id: str
+    gcp_location: str
+    gcp_collection: str
+    gcp_engine_id: str
+    settle_lag_seconds: int
+    log_batch_size: int
+    log_page_size: int
+    trace_concurrency: int
+    anonymize: bool
+    send_plain_end_user: bool
+    user_hash_secret: str
+    from_date: datetime | None
+    to_date: datetime | None
+    cache_dir: Path
+    dry_run: bool
+    verbose: bool
+    force: bool
+    log_source: str
+    bigquery_table: str | None
+    bigquery_location: str | None
+
+    @classmethod
+    def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
+        load_dotenv()
+        parser = argparse.ArgumentParser(
+            description="Sync Gemini Enterprise logs and traces to Nebuly"
+        )
+        parser.add_argument(
+            "--from-date", type=str, default=None, help="ISO backfill start date"
+        )
+        parser.add_argument(
+            "--to-date", type=str, default=None, help="ISO end date filter"
+        )
+        parser.add_argument("--cache-dir", type=Path, default=Path("./.cache"))
+        parser.add_argument(
+            "--dry-run", action="store_true", help="Build payloads without POSTing"
+        )
+        parser.add_argument(
+            "--verbose",
+            action="store_true",
+            help="Enable debug logging (includes HTTP request traces)",
+        )
+        parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=None,
+            help="Max log records per batch (overrides GCP_LOG_BATCH_SIZE)",
+        )
+        parser.add_argument(
+            "--trace-workers",
+            type=int,
+            default=None,
+            help="Parallel get_trace concurrency (overrides GCP_TRACE_CONCURRENCY)",
+        )
+        parser.add_argument(
+            "--trace-concurrency",
+            type=int,
+            default=None,
+            help="Parallel get_trace concurrency (overrides GCP_TRACE_CONCURRENCY)",
+        )
+        parser.add_argument(
+            "--yes",
+            "--force",
+            action="store_true",
+            dest="force",
+            help="Confirm gap-creating runs without prompting",
+        )
+        parser.add_argument(
+            "--log-source",
+            choices=["logging", "bigquery"],
+            default=None,
+            help="Log source backend (overrides GCP_LOG_SOURCE)",
+        )
+        args = parser.parse_args(argv)
+
+        nebuly_api_key = os.environ.get("NEBULY_API_KEY")
+        gcp_project_id = os.environ.get("GCP_PROJECT_ID")
+        gcp_location = os.environ.get("GCP_LOCATION")
+        gcp_engine_id = os.environ.get("GCP_ENGINE_ID")
+
+        missing = [
+            name
+            for name, val in [
+                ("NEBULY_API_KEY", nebuly_api_key),
+                ("GCP_PROJECT_ID", gcp_project_id),
+                ("GCP_LOCATION", gcp_location),
+                ("GCP_ENGINE_ID", gcp_engine_id),
+            ]
+            if not val
+        ]
+        if missing:
+            raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
+
+        from_date = (
+            timestamp_str_to_datetime(args.from_date) if args.from_date else None
+        )
+        to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
+
+        trace_concurrency = (
+            args.trace_concurrency
+            or args.trace_workers
+            or int(os.environ.get("GCP_TRACE_CONCURRENCY", "32"))
+        )
+
+        log_source = args.log_source or os.environ.get("GCP_LOG_SOURCE", "logging")
+        bigquery_table = os.environ.get("GCP_BIGQUERY_TABLE") or None
+        bigquery_location = os.environ.get("GCP_BIGQUERY_LOCATION") or None
+
+        if log_source not in {"logging", "bigquery"}:
+            raise RuntimeError(
+                f"Invalid GCP_LOG_SOURCE: {log_source!r} (accepted: logging, bigquery)"
+            )
+        if log_source == "bigquery" and not bigquery_table:
+            raise RuntimeError(
+                "GCP_BIGQUERY_TABLE is required when GCP_LOG_SOURCE=bigquery"
+            )
+
+        send_plain_end_user = _parse_bool(
+            os.environ.get("SEND_PLAIN_END_USER", "false")
+        )
+        user_hash_secret = os.environ.get("USER_HASH_SECRET", "")
+        if not send_plain_end_user and not user_hash_secret:
+            raise RuntimeError(
+                "USER_HASH_SECRET is required when SEND_PLAIN_END_USER is false"
+            )
+
+        return cls(
+            nebuly_api_key=cast(str, nebuly_api_key),
+            nebuly_endpoint=os.environ.get(
+                "NEBULY_ENDPOINT",
+                "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction",
+            ).rstrip("/"),
+            gcp_project_id=cast(str, gcp_project_id),
+            gcp_location=cast(str, gcp_location),
+            gcp_collection=os.environ.get("GCP_COLLECTION", "default_collection"),
+            gcp_engine_id=cast(str, gcp_engine_id),
+            settle_lag_seconds=int(os.environ.get("GCP_SETTLE_LAG_SECONDS", "60")),
+            log_batch_size=args.batch_size
+            or int(os.environ.get("GCP_LOG_BATCH_SIZE", "500")),
+            log_page_size=int(os.environ.get("GCP_LOG_PAGE_SIZE", "1000")),
+            trace_concurrency=trace_concurrency,
+            anonymize=_parse_bool(os.environ.get("ANONYMIZE", "false")),
+            send_plain_end_user=send_plain_end_user,
+            user_hash_secret=user_hash_secret,
+            from_date=from_date,
+            to_date=to_date,
+            cache_dir=args.cache_dir,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            force=args.force,
+            log_source=log_source,
+            bigquery_table=bigquery_table,
+            bigquery_location=bigquery_location,
+        )
+
+    def run_until(self) -> datetime:
+        if self.to_date is not None:
+            return self.to_date
+        return datetime.now(UTC) - timedelta(seconds=self.settle_lag_seconds)

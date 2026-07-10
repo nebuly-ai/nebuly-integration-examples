@@ -57,6 +57,8 @@ ignore = [
     "TC006",   # Add quotes to type expression in `typing.cast()`
     "W291",    # Trailing whitespace
     "ERA001",  # Found commented-out code
+    "PTH123",  # `open()` should be replaced by `Path.open()`
+    "PTH105",  # `Path.replace()` should be used instead of `os.replace()`
 ]
 
 fixable = ["ALL"]
@@ -69,6 +71,7 @@ unfixable = []
     "S101",
     "INP001", # Add an `__init__.py`.
     "SLF001", # Private member accessed
+    "S105", # Possible hardcoded password assigned to argument
 ]
 
 [tool.ruff.lint.mccabe]
