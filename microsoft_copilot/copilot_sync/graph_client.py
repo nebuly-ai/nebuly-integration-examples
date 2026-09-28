@@ -102,7 +102,19 @@ class GraphClient:
         users: list[CopilotUser] = []
         sku_filter = f"assignedLicenses/any(u:u/skuId eq {self._copilot_sku})"
         query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
-            select=["id", "displayName", "mail", "userPrincipalName"],
+            select=[
+                "id",
+                "displayName",
+                "mail",
+                "userPrincipalName",
+                "department",
+                "jobTitle",
+                "officeLocation",
+                "city",
+                "country",
+                "usageLocation",
+                "companyName",
+            ],
             filter=sku_filter,
             top=BATCH_TOP,
         )
@@ -129,6 +141,13 @@ class GraphClient:
                                 id=user.id,
                                 mail=user.mail,
                                 userPrincipalName=user.user_principal_name,
+                                department=user.department,
+                                jobTitle=user.job_title,
+                                officeLocation=user.office_location,
+                                city=user.city,
+                                country=user.country,
+                                usageLocation=user.usage_location,
+                                companyName=user.company_name,
                             )
                         )
 

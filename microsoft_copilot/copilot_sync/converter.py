@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 class SkipReason(Enum):
     EMPTY_INPUT = "empty_input"
     EMPTY_OUTPUT = "empty_output"
+    WARMUP_REQUEST = "warmup_request"
 
 
 @dataclass(frozen=True)
@@ -186,6 +187,21 @@ def group_interactions(
     return turns, dangling
 
 
+def _assistant_output_for_turn(turn: InteractionTurn) -> tuple[str, SkipReason | None]:
+    saw_warmup = False
+    for response in reversed(turn.responses):
+        text = parser.parse_interaction_text(response)
+        if not text:
+            continue
+        if parser.is_warmup_response_text(text):
+            saw_warmup = True
+            continue
+        return text, None
+    if saw_warmup:
+        return "", SkipReason.WARMUP_REQUEST
+    return "", SkipReason.EMPTY_OUTPUT
+
+
 def turn_to_payload(
     turn: InteractionTurn, *, user: CopilotUser, anonymize: bool
 ) -> dict[str, Any] | SkipReason:
@@ -196,7 +212,9 @@ def turn_to_payload(
     final = turn.final_response
     if final is None:
         return SkipReason.EMPTY_OUTPUT
-    assistant_output = parser.parse_interaction_text(final)
+    assistant_output, skip = _assistant_output_for_turn(turn)
+    if skip is not None:
+        return skip
     if not assistant_output:
         return SkipReason.EMPTY_OUTPUT
 
@@ -208,7 +226,7 @@ def turn_to_payload(
         "time_end": datetime_to_timestamp_str(turn.time_end),
         "end_user": user.id,
         "hide_content": False,
-        "tags": user_defined.build_tags(turn),
+        "tags": user_defined.build_tags(turn, user),
     }
 
     return {

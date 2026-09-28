@@ -64,6 +64,28 @@ def extract_adaptive_card_text(card_content: str) -> str:
     return "\n".join(parts)
 
 
+def is_warmup_response_text(text: str) -> bool:
+    """Return True when text is Copilot's internal warmup payload,
+    not user-facing content."""
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        payload = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return False
+    value = payload.get("IsWarmupRequest")
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return False
+
+
 def parse_interaction_text(interaction: AiInteraction) -> str:
     """Resolve the readable text of an interaction.
 

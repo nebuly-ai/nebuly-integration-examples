@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from copilot_sync.config import timestamp_str_to_datetime
 from copilot_sync.graph_client import _FILTER_EPSILON, GraphClient, _interactions_filter
+from copilot_sync.models import CopilotUser
 
 
 def test_interactions_filter_maps_inclusive_bounds_to_strict_operators() -> None:
@@ -38,6 +39,84 @@ def test_interactions_filter_preserves_boundary_inclusivity() -> None:
 
     assert lower_bound < gte < upper_bound
     assert lower_bound < lte < upper_bound
+
+
+def test_list_copilot_users_selects_and_maps_org_fields() -> None:
+    class FakeGraphUser:
+        id = "user-abc"
+        mail = "alice@contoso.com"
+        user_principal_name = "alice@contoso.com"
+        department = "Sales"
+        job_title = "Account Executive"
+        office_location = "HQ"
+        city = "Seattle"
+        country = None
+        usage_location = "US"
+        company_name = "Contoso Ltd"
+
+    class FakePage:
+        odata_next_link = None
+
+        def __init__(self) -> None:
+            self.value = [FakeGraphUser()]
+
+    captured_select: list[str] = []
+
+    async def fake_get(*, request_configuration: object) -> FakePage:
+        query_params = request_configuration.query_parameters  # type: ignore[attr-defined]
+        captured_select.extend(query_params.select)
+        return FakePage()
+
+    mock_graph = AsyncMock()
+    mock_graph.users.get = fake_get
+    mock_graph_cred = AsyncMock()
+
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku="639dec6b-bb19-468b-871c-c5c441c4b0cb",
+    )
+
+    with (
+        patch(
+            "copilot_sync.graph_client.ClientSecretCredential",
+            return_value=mock_graph_cred,
+        ),
+        patch(
+            "copilot_sync.graph_client.GraphServiceClient",
+            return_value=mock_graph,
+        ),
+    ):
+        users = asyncio.run(client.list_copilot_users())
+
+    assert captured_select == [
+        "id",
+        "displayName",
+        "mail",
+        "userPrincipalName",
+        "department",
+        "jobTitle",
+        "officeLocation",
+        "city",
+        "country",
+        "usageLocation",
+        "companyName",
+    ]
+    assert len(users) == 1
+    assert users[0] == CopilotUser(
+        id="user-abc",
+        mail="alice@contoso.com",
+        userPrincipalName="alice@contoso.com",
+        department="Sales",
+        jobTitle="Account Executive",
+        officeLocation="HQ",
+        city="Seattle",
+        country=None,
+        usageLocation="US",
+        companyName="Contoso Ltd",
+    )
+    mock_graph_cred.close.assert_awaited_once()
 
 
 def test_pagination_refreshes_token_before_each_page() -> None:

@@ -21,8 +21,27 @@ from copilot_sync.models import (
 )
 
 
-def _user() -> CopilotUser:
-    return CopilotUser(id="user_1", mail="alice@example.com")
+def _user(
+    *,
+    department: str | None = None,
+    job_title: str | None = None,
+    office_location: str | None = None,
+    city: str | None = None,
+    country: str | None = None,
+    usage_location: str | None = None,
+    company_name: str | None = None,
+) -> CopilotUser:
+    return CopilotUser(
+        id="user_1",
+        mail="alice@example.com",
+        department=department,
+        jobTitle=job_title,
+        officeLocation=office_location,
+        city=city,
+        country=country,
+        usageLocation=usage_location,
+        companyName=company_name,
+    )
 
 
 def _prompt(
@@ -232,18 +251,77 @@ def test_empty_output_returns_skip_reason() -> None:
     assert result is SkipReason.EMPTY_OUTPUT
 
 
+def test_warmup_output_returns_skip_reason() -> None:
+    turn = InteractionTurn(
+        "req_1",
+        _prompt(),
+        (_response(content='{"IsWarmupRequest":"true"}'),),
+    )
+    result = turn_to_payload(turn, user=_user(), anonymize=False)
+    assert result is SkipReason.WARMUP_REQUEST
+
+
+def test_warmup_final_response_uses_earlier_real_output() -> None:
+    turn = InteractionTurn(
+        "req_1",
+        _prompt(),
+        (
+            _response(content="real answer", minute=1),
+            _response(content='{"IsWarmupRequest":"true"}', minute=2),
+        ),
+    )
+    payload = turn_to_payload(turn, user=_user(), anonymize=False)
+    assert not isinstance(payload, SkipReason)
+    assert payload["interaction"]["output"] == "real answer"
+
+
 def test_build_tags() -> None:
     turn = InteractionTurn(
         "req_1",
         _prompt(),
         (_response(content="step"), _response(content="final", minute=2)),
     )
-    tags = user_defined.build_tags(turn)
+    user = _user(
+        department="Engineering",
+        job_title="Senior Engineer",
+        office_location="Building 1",
+        city="Milan",
+        country="IT",
+        company_name="Contoso",
+    )
+    tags = user_defined.build_tags(turn, user)
 
     assert tags["app_class"] == "IPM.SkypeTeams.Message.Copilot.Word"
     assert tags["session_id"] == "sess_1"
     assert tags["request_id"] == "req_1"
     assert tags["final_model"] == "Microsoft 365 Chat"
+    assert tags["department"] == "Engineering"
+    assert tags["job_title"] == "Senior Engineer"
+    assert tags["office_location"] == "Building 1"
+    assert tags["city"] == "Milan"
+    assert tags["country"] == "IT"
+    assert tags["company_name"] == "Contoso"
+
+
+def test_build_tags_country_falls_back_to_usage_location() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    user = _user(country=None, usage_location="US")
+    tags = user_defined.build_tags(turn, user)
+    assert tags["country"] == "US"
+
+
+def test_build_tags_org_fields_none_when_missing() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    tags = user_defined.build_tags(turn, _user())
+    for key in (
+        "department",
+        "job_title",
+        "office_location",
+        "city",
+        "country",
+        "company_name",
+    ):
+        assert key not in tags
 
 
 def test_build_traces_retrieval_only() -> None:
