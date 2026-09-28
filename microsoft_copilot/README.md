@@ -78,10 +78,27 @@ poetry run python -m copilot_sync
 
 Edit `copilot_sync/user_defined.py` for customer-specific tags, traces, and user feedback.
 
+## Tags
+
+Each interaction includes Entra ID directory metadata on the licensed user (no extra Graph permission beyond `User.Read.All`):
+
+| Tag key | Source (Graph user property) |
+| ------- | ---------------------------- |
+| `department` | `department` |
+| `job_title` | `jobTitle` |
+| `office_location` | `officeLocation` |
+| `city` | `city` |
+| `country` | `country`, or `usageLocation` when `country` is empty |
+| `company_name` | `companyName` |
+
+These tags reflect directory profile fields, not message content; they are not affected by `ANONYMIZE`. Org tags are omitted when the Entra profile field is empty (Nebuly requires string tag values).
+
 ## Known limitations
 
 - **Excel & PowerPoint conversation grouping:** Graph returns unstable `sessionId`/`requestId` for these apps that change between turns of the same user session, so their multi-turn conversations can't be grouped — each turn lands as a separate conversation in Nebuly.
-- **No per-trace token/cost metrics:** Graph doesn't expose input/output tokens, so only retrieval (grounding) traces are sent; LLM-level token/cost traces are intentionally omitted.
+- **Copilot Studio agents:** The enterprise interaction export API does not return interactions from agents created in Copilot Studio. But interactions for agents invoked in a Copilot Studio chat are returned.
+- **No per-trace token/cost metrics:** Licensed Microsoft 365 Copilot has no per-interaction usage or cost data in Graph (or elsewhere at trace level). Copilot credits for metered experiences (for example Copilot Studio, PAYG chat) are available only as daily per-user or per-agent aggregates in the admin center or platform APIs, not per interaction. This sync sends retrieval (grounding) traces only; LLM token/cost traces are omitted.
+- **Graph throttling:** Microsoft documents a limit of 30 requests per second per app per tenant. The default `GRAPH_MAX_REQUESTS_PER_MINUTE=1800` matches that ceiling; parallel sync jobs against the same tenant may receive HTTP 429 responses.
 
 ## References
 

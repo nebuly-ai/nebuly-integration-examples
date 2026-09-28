@@ -4,22 +4,29 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .converter import InteractionTurn
-    from .models import AiInteraction
+    from .models import AiInteraction, CopilotUser
 
 _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
 
 
-def build_tags(turn: InteractionTurn) -> dict[str, str | None]:
+def build_tags(turn: InteractionTurn, user: CopilotUser) -> dict[str, str]:
     prompt = turn.prompt
     final = turn.final_response
-    return {
+    raw: dict[str, str | None] = {
         "app_class": prompt.app_class,
         "conversation_type": prompt.conversation_type,
         "locale": prompt.locale,
         "session_id": prompt.session_id,
         "request_id": prompt.request_id,
         "final_model": final.sender_model_name if final else None,
+        "department": user.department,
+        "job_title": user.job_title,
+        "office_location": user.office_location,
+        "city": user.city,
+        "country": user.country or user.usage_location,
+        "company_name": user.company_name,
     }
+    return {key: value for key, value in raw.items() if value is not None}
 
 
 def build_traces(turn: InteractionTurn) -> list[dict[str, Any]]:

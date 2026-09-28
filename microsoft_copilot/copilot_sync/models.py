@@ -8,6 +8,13 @@ class CopilotUser(BaseModel):
     id: str
     mail: str | None = None
     user_principal_name: str | None = Field(None, alias="userPrincipalName")
+    department: str | None = None
+    job_title: str | None = Field(None, alias="jobTitle")
+    office_location: str | None = Field(None, alias="officeLocation")
+    city: str | None = None
+    country: str | None = None
+    usage_location: str | None = Field(None, alias="usageLocation")
+    company_name: str | None = Field(None, alias="companyName")
 
     model_config = ConfigDict(validate_by_name=True, extra="allow")
 

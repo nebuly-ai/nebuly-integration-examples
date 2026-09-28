@@ -7,6 +7,7 @@ from typing import Any
 from copilot_sync.models import AiInteraction, Attachment, InteractionBody
 from copilot_sync.parser import (
     extract_adaptive_card_text,
+    is_warmup_response_text,
     parse_interaction_text,
     strip_attachment_tags,
 )
@@ -111,6 +112,14 @@ def test_extract_malformed_json_returns_empty() -> None:
 
 def test_extract_non_dict_json_returns_empty() -> None:
     assert extract_adaptive_card_text("[1, 2, 3]") == ""
+
+
+def test_is_warmup_response_text() -> None:
+    assert is_warmup_response_text('{"IsWarmupRequest":"true"}')
+    assert is_warmup_response_text('  {"IsWarmupRequest": "true"}  ')
+    assert not is_warmup_response_text("hello")
+    assert not is_warmup_response_text('{"IsWarmupRequest":"false"}')
+    assert not is_warmup_response_text('{"thoughts":"x","finalResponse":"y"}')
 
 
 def test_parse_text_body_strips_embedded_tag() -> None:
