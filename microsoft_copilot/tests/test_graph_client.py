@@ -5,8 +5,14 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from copilot_sync.config import timestamp_str_to_datetime
-from copilot_sync.graph_client import _FILTER_EPSILON, GraphClient, _interactions_filter
+from copilot_sync.graph_client import (
+    _FILTER_EPSILON,
+    AuditQueryError,
+    GraphClient,
+    _interactions_filter,
+)
 from copilot_sync.models import CopilotUser
 
 
@@ -87,6 +93,12 @@ def test_list_copilot_users_selects_and_maps_org_fields() -> None:
             "copilot_sync.graph_client.GraphServiceClient",
             return_value=mock_graph,
         ),
+        patch.object(
+            client,
+            "_user_has_usable_copilot_license",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
     ):
         users = asyncio.run(client.list_copilot_users())
 
@@ -162,3 +174,221 @@ def test_pagination_refreshes_token_before_each_page() -> None:
     assert len(items) == 2
     assert get_token.call_count == 2
     assert auth_headers == ["Bearer token_page_1", "Bearer token_page_2"]
+
+
+def test_wait_for_audit_query_succeeds_on_status_succeeded() -> None:
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku="639dec6b-bb19-468b-871c-c5c441c4b0cb",
+    )
+
+    with (
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            side_effect=[
+                {"status": "running"},
+                {"status": "succeeded"},
+            ],
+        ),
+        patch("copilot_sync.graph_client.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        asyncio.run(
+            client.wait_for_audit_query(
+                "query-1",
+                poll_interval=1.0,
+                query_timeout_seconds=60.0,
+            )
+        )
+
+
+def test_wait_for_audit_query_raises_on_failed_status() -> None:
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku="639dec6b-bb19-468b-871c-c5c441c4b0cb",
+    )
+
+    with (
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            return_value={"status": "failed"},
+        ),
+        pytest.raises(AuditQueryError),
+    ):
+        asyncio.run(
+            client.wait_for_audit_query(
+                "query-1",
+                poll_interval=1.0,
+                query_timeout_seconds=60.0,
+            )
+        )
+
+
+def test_fetch_copilot_audit_records_create_wait_and_page() -> None:
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku="639dec6b-bb19-468b-871c-c5c441c4b0cb",
+    )
+    gte = datetime(2025, 6, 15, 8, 0, tzinfo=UTC)
+    lte = datetime(2025, 6, 15, 12, 0, tzinfo=UTC)
+    page1 = {
+        "value": [
+            {
+                "id": "audit-1",
+                "createdDateTime": "2025-06-15T09:00:00Z",
+                "auditData": {
+                    "CopilotEventData": {
+                        "ThreadId": "19:thread@thread.v2",
+                        "Messages": [{"Id": "111", "isPrompt": True}],
+                    }
+                },
+            }
+        ],
+        "@odata.nextLink": "https://graph.microsoft.com/next-records",
+    }
+    page2: dict[str, Any] = {"value": []}
+
+    with (
+        patch.object(
+            client,
+            "create_audit_query",
+            new_callable=AsyncMock,
+            return_value="query-abc",
+        ) as create_query,
+        patch.object(
+            client, "wait_for_audit_query", new_callable=AsyncMock
+        ) as wait_query,
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            side_effect=[page1, page2],
+        ),
+    ):
+        records = asyncio.run(client.fetch_copilot_audit_records(gte, lte))
+
+    create_query.assert_awaited_once_with(gte, lte)
+    wait_query.assert_awaited_once()
+    assert len(records) == 1
+    assert records[0].thread_id == "19:thread@thread.v2"
+    assert records[0].message_ids == ["111"]
+
+
+def test_user_has_usable_copilot_license_requires_success_service_plan() -> None:
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku="639dec6b-bb19-468b-871c-c5f441c4b0cb",
+    )
+    sku = "639dec6b-bb19-468b-871c-c5f441c4b0cb"
+    plan_id = "11111111-1111-1111-1111-111111111111"
+
+    def assigned(disabled: list[str]) -> dict[str, Any]:
+        return {
+            "assignedLicenses": [
+                {"skuId": sku, "disabledPlans": disabled},
+            ],
+        }
+
+    def details(status: str) -> dict[str, Any]:
+        return {
+            "value": [
+                {
+                    "skuId": sku,
+                    "servicePlans": [
+                        {
+                            "servicePlanId": plan_id,
+                            "servicePlanName": "M365_COPILOT_BUSINESS_CHAT",
+                            "provisioningStatus": status,
+                        },
+                    ],
+                }
+            ],
+        }
+
+    with (
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            side_effect=[assigned([]), details("Disabled")],
+        ),
+    ):
+        assert asyncio.run(client._user_has_usable_copilot_license("user-1")) is False
+
+    with (
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            side_effect=[assigned([]), details("Success")],
+        ),
+    ):
+        assert asyncio.run(client._user_has_usable_copilot_license("user-1")) is True
+
+    with (
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            side_effect=[assigned([plan_id]), details("Success")],
+        ),
+    ):
+        assert asyncio.run(client._user_has_usable_copilot_license("user-1")) is False
+
+    def analytics_only() -> dict[str, Any]:
+        return {
+            "value": [
+                {
+                    "skuId": sku,
+                    "servicePlans": [
+                        {
+                            "servicePlanId": plan_id,
+                            "servicePlanName": "WORKPLACE_ANALYTICS_INSIGHTS_BACKEND",
+                            "provisioningStatus": "Success",
+                        },
+                    ],
+                }
+            ],
+        }
+
+    with (
+        patch.object(
+            client, "_get_token", new_callable=AsyncMock, return_value="token"
+        ),
+        patch.object(
+            client,
+            "_fetch_page",
+            new_callable=AsyncMock,
+            side_effect=[assigned([]), analytics_only()],
+        ),
+    ):
+        assert asyncio.run(client._user_has_usable_copilot_license("user-1")) is False

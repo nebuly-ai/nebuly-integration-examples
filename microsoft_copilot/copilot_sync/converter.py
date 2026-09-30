@@ -13,7 +13,7 @@ from .config import datetime_to_timestamp_str
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from .models import AiInteraction, CopilotUser
+    from .models import AiInteraction, CopilotAuditRecord, CopilotUser
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +35,24 @@ class InteractionTurn:
         return self.responses[-1] if self.responses else None
 
     @property
+    def effective_response(self) -> AiInteraction | None:
+        for response in reversed(self.responses):
+            text = parser.parse_interaction_text(response)
+            if not text:
+                continue
+            if parser.is_warmup_response_text(text):
+                continue
+            return response
+        return None
+
+    @property
     def time_start(self) -> datetime:
         return self.prompt.created_datetime
 
     @property
     def time_end(self) -> datetime:
-        final = self.final_response
-        return final.created_datetime if final else self.prompt.created_datetime
+        effective = self.effective_response
+        return effective.created_datetime if effective else self.prompt.created_datetime
 
 
 _TYPE_RANK = {"userPrompt": 0, "aiResponse": 1}
@@ -134,12 +145,12 @@ def _drop_near_duplicates(turns: list[InteractionTurn]) -> list[InteractionTurn]
     first_kept_time: dict[tuple[str, str, str], datetime] = {}
 
     for turn in sorted_turns:
-        final = turn.final_response
-        if final is None:
+        effective = turn.effective_response
+        if effective is None:
             kept.append(turn)
             continue
 
-        output_text = parser.parse_interaction_text(final)
+        output_text = parser.parse_interaction_text(effective)
         if not output_text:
             kept.append(turn)
             continue
@@ -188,29 +199,28 @@ def group_interactions(
 
 
 def _assistant_output_for_turn(turn: InteractionTurn) -> tuple[str, SkipReason | None]:
-    saw_warmup = False
-    for response in reversed(turn.responses):
+    effective = turn.effective_response
+    if effective is not None:
+        return parser.parse_interaction_text(effective), None
+    for response in turn.responses:
         text = parser.parse_interaction_text(response)
-        if not text:
-            continue
-        if parser.is_warmup_response_text(text):
-            saw_warmup = True
-            continue
-        return text, None
-    if saw_warmup:
-        return "", SkipReason.WARMUP_REQUEST
+        if text and parser.is_warmup_response_text(text):
+            return "", SkipReason.WARMUP_REQUEST
     return "", SkipReason.EMPTY_OUTPUT
 
 
 def turn_to_payload(
-    turn: InteractionTurn, *, user: CopilotUser, anonymize: bool
+    turn: InteractionTurn,
+    *,
+    user: CopilotUser,
+    anonymize: bool,
+    audit: CopilotAuditRecord | None = None,
 ) -> dict[str, Any] | SkipReason:
     user_input = parser.parse_interaction_text(turn.prompt)
     if not user_input:
         return SkipReason.EMPTY_INPUT
 
-    final = turn.final_response
-    if final is None:
+    if not turn.responses:
         return SkipReason.EMPTY_OUTPUT
     assistant_output, skip = _assistant_output_for_turn(turn)
     if skip is not None:
@@ -226,12 +236,17 @@ def turn_to_payload(
         "time_end": datetime_to_timestamp_str(turn.time_end),
         "end_user": user.id,
         "hide_content": False,
-        "tags": user_defined.build_tags(turn, user),
+        "tags": user_defined.build_tags(turn, user, audit=audit),
     }
 
     return {
         "interaction": interaction,
-        "traces": user_defined.build_traces(turn),
+        "traces": user_defined.build_traces(
+            turn,
+            audit=audit,
+            user_input=user_input,
+            assistant_output=assistant_output,
+        ),
         "user_feedback": user_defined.build_user_feedback(turn),
         "anonymize": anonymize,
     }
