@@ -13,7 +13,7 @@ from msgraph.graph_service_client import GraphServiceClient
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt
 
 from .config import datetime_to_timestamp_str
-from .models import CopilotUser
+from .models import CopilotAuditRecord, CopilotUser
 from .utils import should_retry
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,58 @@ INTERACTIONS_PATH = (
     "https://graph.microsoft.com/v1.0/copilot/users/{user_id}"
     "/interactionHistory/getAllEnterpriseInteractions"
 )
+AUDIT_QUERIES_PATH = "https://graph.microsoft.com/v1.0/security/auditLog/queries"
+AUDIT_RECORDS_TOP = 999
 BATCH_TOP = 100
+# Plans that gate enterprise Copilot (excludes e.g. WORKPLACE_ANALYTICS_* stubs).
+_COPILOT_ENTERPRISE_SERVICE_PLAN_PREFIX = "M365_COPILOT_"
+
+
+class AuditQueryError(RuntimeError):
+    """Raised when a Graph audit log query fails or times out."""
+
+
+class AuditFetchProgress:
+    """Cross-query progress for async audit polling (shared across parallel chunks)."""
+
+    _LOG_EVERY_N_POLLS = 10
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self.started_at = 0.0
+        self.polls = 0
+        self.active_queries = 0
+        self.total_rows = 0
+
+    def mark_started(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.started_at = loop.time()
+
+    async def query_started(self) -> None:
+        async with self._lock:
+            self.active_queries += 1
+
+    async def query_finished(self, row_count: int) -> None:
+        async with self._lock:
+            self.active_queries -= 1
+            self.total_rows += row_count
+
+    async def query_failed(self) -> None:
+        async with self._lock:
+            self.active_queries -= 1
+
+    async def register_poll(self, loop: asyncio.AbstractEventLoop) -> None:
+        async with self._lock:
+            self.polls += 1
+            if self.polls % self._LOG_EVERY_N_POLLS != 0:
+                return
+            elapsed = loop.time() - self.started_at
+            logger.info(
+                "Audit queries polling: %d in flight, %d record(s) loaded, "
+                "%.0fs elapsed",
+                self.active_queries,
+                self.total_rows,
+                elapsed,
+            )
 
 
 def _interactions_filter(gte: datetime, lte: datetime) -> str:
@@ -98,6 +149,48 @@ class GraphClient:
         token = await self._cred.get_token(GRAPH_SCOPE)
         return token.token
 
+    async def _user_has_usable_copilot_license(self, user_id: str) -> bool:
+        """True when the Copilot SKU has at least one enabled, provisioned service plan.
+
+        Requires at least one M365 Copilot feature plan (name prefix M365_COPILOT_) that
+        has provisioningStatus Success and is not in assignedLicenses.disabledPlans.
+        """
+        token = await self._get_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
+        sku = self._copilot_sku.lower()
+        user_url = (
+            f"https://graph.microsoft.com/v1.0/users/{user_id}?$select=assignedLicenses"
+        )
+        user_data = await self._fetch_page(url=user_url, headers=headers)
+        disabled_plan_ids: set[str] = set()
+        for assignment in cast(
+            list[dict[str, Any]],
+            user_data.get("assignedLicenses") or [],
+        ):
+            if str(assignment.get("skuId", "")).lower() != sku:
+                continue
+            for plan_id in assignment.get("disabledPlans") or []:
+                disabled_plan_ids.add(str(plan_id).lower())
+
+        details_url = f"https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails"
+        data = await self._fetch_page(url=details_url, headers=headers)
+        for detail in cast(list[dict[str, Any]], data.get("value") or []):
+            if str(detail.get("skuId", "")).lower() != sku:
+                continue
+            for plan in cast(list[dict[str, Any]], detail.get("servicePlans") or []):
+                plan_id = str(plan.get("servicePlanId", "")).lower()
+                if plan_id in disabled_plan_ids:
+                    continue
+                plan_name = str(plan.get("servicePlanName", ""))
+                if not plan_name.startswith(_COPILOT_ENTERPRISE_SERVICE_PLAN_PREFIX):
+                    continue
+                if str(plan.get("provisioningStatus", "")).lower() == "success":
+                    return True
+        return False
+
     async def list_copilot_users(self) -> list[CopilotUser]:
         users: list[CopilotUser] = []
         sku_filter = f"assignedLicenses/any(u:u/skuId eq {self._copilot_sku})"
@@ -133,6 +226,13 @@ class GraphClient:
                         if user.id is None:
                             logger.warning(
                                 "User %s has no ID, skipping",
+                                user.user_principal_name,
+                            )
+                            continue
+                        if not await self._user_has_usable_copilot_license(user.id):
+                            logger.warning(
+                                "User %s has Copilot SKU but no provisioned service "
+                                "plans — skipping",
                                 user.user_principal_name,
                             )
                             continue
@@ -177,6 +277,142 @@ class GraphClient:
         if response.is_error:
             response.raise_for_status()
         return cast(dict[str, Any], response.json())
+
+    @retry(
+        retry=retry_if_exception(should_retry),
+        stop=stop_after_attempt(10),
+        wait=_retry_after_seconds,
+        reraise=True,
+    )
+    async def _post_json(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        json_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        await self._rate_limiter.wait()
+        response = await self._http.post(url, headers=headers, json=json_body)
+        if response.is_error:
+            response.raise_for_status()
+        return cast(dict[str, Any], response.json())
+
+    async def create_audit_query(self, gte: datetime, lte: datetime) -> str:
+        if gte > lte:
+            raise ValueError(
+                f"Audit query start ({datetime_to_timestamp_str(gte)}) "
+                f"cannot be after end ({datetime_to_timestamp_str(lte)})"
+            )
+        token = await self._get_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "displayName": (
+                f"nebuly-copilot-audit-{datetime_to_timestamp_str(gte)}-"
+                f"{datetime_to_timestamp_str(lte)}"
+            ),
+            "filterStartDateTime": datetime_to_timestamp_str(gte),
+            "filterEndDateTime": datetime_to_timestamp_str(lte),
+            "operationFilters": ["CopilotInteraction"],
+        }
+        data = await self._post_json(
+            url=AUDIT_QUERIES_PATH, headers=headers, json_body=body
+        )
+        query_id = data.get("id")
+        if not query_id:
+            raise AuditQueryError("Audit query creation response missing id")
+        return cast(str, query_id)
+
+    async def wait_for_audit_query(
+        self,
+        query_id: str,
+        *,
+        poll_interval: float = 30.0,
+        query_timeout_seconds: float = 3600.0,
+        progress: AuditFetchProgress | None = None,
+    ) -> None:
+        url = f"{AUDIT_QUERIES_PATH}/{query_id}"
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + query_timeout_seconds
+        while True:
+            token = await self._get_token()
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+            }
+            data = await self._fetch_page(url=url, headers=headers)
+            status = (data.get("status") or "").lower()
+            if status == "succeeded":
+                return
+            if status in {"failed", "cancelled"}:
+                raise AuditQueryError(
+                    f"Audit query {query_id} ended with status {status}"
+                )
+            if loop.time() >= deadline:
+                raise AuditQueryError(
+                    f"Audit query {query_id} timed out after {query_timeout_seconds}s"
+                )
+            if progress is not None:
+                await progress.register_poll(loop)
+            await asyncio.sleep(poll_interval)
+
+    async def fetch_audit_records(self, query_id: str) -> list[dict[str, Any]]:
+        token = await self._get_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
+        params: dict[str, Any] = {"$top": AUDIT_RECORDS_TOP}
+        url = f"{AUDIT_QUERIES_PATH}/{query_id}/records"
+        items: list[dict[str, Any]] = []
+
+        data = await self._fetch_page(url=url, headers=headers, params=params)
+        if data.get("value"):
+            items.extend(cast(list[dict[str, Any]], data["value"]))
+
+        while next_link := data.get("@odata.nextLink"):
+            token = await self._get_token()
+            headers["Authorization"] = f"Bearer {token}"
+            data = await self._fetch_page(url=next_link, headers=headers)
+            if data.get("value"):
+                items.extend(cast(list[dict[str, Any]], data["value"]))
+
+        return items
+
+    async def fetch_copilot_audit_records(
+        self,
+        gte: datetime,
+        lte: datetime,
+        *,
+        poll_interval: float = 30.0,
+        query_timeout_seconds: float = 3600.0,
+        progress: AuditFetchProgress | None = None,
+    ) -> list[CopilotAuditRecord]:
+        if progress is not None:
+            await progress.query_started()
+        try:
+            query_id = await self.create_audit_query(gte, lte)
+            await self.wait_for_audit_query(
+                query_id,
+                poll_interval=poll_interval,
+                query_timeout_seconds=query_timeout_seconds,
+                progress=progress,
+            )
+            raw_records = await self.fetch_audit_records(query_id)
+            records = [
+                CopilotAuditRecord.model_validate(record) for record in raw_records
+            ]
+        except Exception:
+            if progress is not None:
+                await progress.query_failed()
+            raise
+        else:
+            if progress is not None:
+                await progress.query_finished(len(records))
+            return records
 
     async def fetch_interactions(
         self,

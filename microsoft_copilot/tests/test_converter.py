@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 from copilot_sync import user_defined
+from copilot_sync.config import datetime_to_timestamp_str
 from copilot_sync.converter import (
     InteractionTurn,
     SkipReason,
@@ -13,6 +14,7 @@ from copilot_sync.converter import (
 from copilot_sync.models import (
     AiInteraction,
     Attachment,
+    CopilotAuditRecord,
     CopilotUser,
     FromIdentitySet,
     InteractionBody,
@@ -262,17 +264,35 @@ def test_warmup_output_returns_skip_reason() -> None:
 
 
 def test_warmup_final_response_uses_earlier_real_output() -> None:
+    real = _response(
+        content="real answer",
+        minute=1,
+        model="Microsoft 365 Chat",
+        links=[
+            Link(displayName="Example", linkType="web", linkUrl="https://example.com")
+        ],
+    )
     turn = InteractionTurn(
         "req_1",
         _prompt(),
         (
-            _response(content="real answer", minute=1),
-            _response(content='{"IsWarmupRequest":"true"}', minute=2),
+            real,
+            _response(
+                content='{"IsWarmupRequest":"true"}',
+                minute=2,
+                model="Wrong Model",
+            ),
         ),
     )
     payload = turn_to_payload(turn, user=_user(), anonymize=False)
     assert not isinstance(payload, SkipReason)
     assert payload["interaction"]["output"] == "real answer"
+    assert payload["interaction"]["time_end"] == datetime_to_timestamp_str(
+        real.created_datetime
+    )
+    assert payload["interaction"]["tags"]["copilot_app"] == "Microsoft 365 Chat"
+    assert len(payload["traces"]) == 1
+    assert payload["traces"][0]["source"] == "https://example.com"
 
 
 def test_build_tags() -> None:
@@ -294,7 +314,7 @@ def test_build_tags() -> None:
     assert tags["app_class"] == "IPM.SkypeTeams.Message.Copilot.Word"
     assert tags["session_id"] == "sess_1"
     assert tags["request_id"] == "req_1"
-    assert tags["final_model"] == "Microsoft 365 Chat"
+    assert tags["copilot_app"] == "Microsoft 365 Chat"
     assert tags["department"] == "Engineering"
     assert tags["job_title"] == "Senior Engineer"
     assert tags["office_location"] == "Building 1"
@@ -406,6 +426,25 @@ def test_near_duplicate_turn_dropped() -> None:
     assert turns[0].prompt.request_id == "req_a"
 
 
+def test_near_duplicate_dropped_when_trailing_response_is_warmup() -> None:
+    turns, dangling = group_interactions(
+        [
+            _prompt("req_a", minute=0, second=0),
+            _response("req_a", minute=0, second=1),
+            _prompt("req_b", minute=0, second=2),
+            _response("req_b", minute=0, second=3),
+            _response(
+                "req_b",
+                content='{"IsWarmupRequest":"true"}',
+                minute=0,
+                second=4,
+            ),
+        ]
+    )
+    assert len(turns) == 1
+    assert dangling == []
+
+
 def test_outside_duplicate_window_kept() -> None:
     turns, dangling = group_interactions(
         [
@@ -443,3 +482,83 @@ def test_near_duplicate_different_output_kept() -> None:
     )
     assert len(turns) == 2
     assert dangling == []
+
+
+def _audit_record_for_turn(turn: InteractionTurn) -> CopilotAuditRecord:
+    final = turn.final_response
+    assert final is not None
+    return CopilotAuditRecord.model_validate(
+        {
+            "id": "audit-1",
+            "createdDateTime": "2025-06-15T10:01:00Z",
+            "auditData": {
+                "CopilotEventData": {
+                    "AppHost": "Teams",
+                    "Messages": [
+                        {"Id": turn.prompt.id, "isPrompt": True},
+                        {"Id": final.id, "isPrompt": False},
+                    ],
+                    "ModelTransparencyDetails": [
+                        {"ModelProviderName": "OpenAI", "ModelName": "gpt-test"},
+                    ],
+                    "AISystemPlugin": [{"Id": "BingWebSearch", "Name": "BuiltIn"}],
+                    "AccessedResources": [
+                        {
+                            "Name": "Doc.docx",
+                            "SiteUrl": "https://contoso.sharepoint.com/doc",
+                        },
+                    ],
+                },
+            },
+        },
+    )
+
+
+def test_turn_to_payload_with_audit_adds_model_tags_and_llm_trace() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    audit = _audit_record_for_turn(turn)
+    payload = turn_to_payload(turn, user=_user(), anonymize=False, audit=audit)
+    assert not isinstance(payload, SkipReason)
+    tags = payload["interaction"]["tags"]
+    assert tags["model_name"] == "gpt-test"
+    assert tags["model_provider"] == "OpenAI"
+    assert tags["app_host"] == "Teams"
+    assert tags["web_search"] == "true"
+    traces = payload["traces"]
+    assert any(t.get("model") == "gpt-test" for t in traces)
+    assert any(t.get("source") == "Doc.docx" for t in traces)
+
+
+def test_turn_to_payload_without_audit_unchanged_except_copilot_app_tag() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    payload = turn_to_payload(turn, user=_user(), anonymize=False)
+    assert not isinstance(payload, SkipReason)
+    tags = payload["interaction"]["tags"]
+    assert "model_name" not in tags
+    assert tags["copilot_app"] == "Microsoft 365 Chat"
+    assert not any("model" in t for t in payload["traces"])
+
+
+def test_audit_retrieval_dedupes_graph_link() -> None:
+    link = Link(displayName="Example", linkType="web", linkUrl="https://example.com")
+    final = _response(content="answer", links=[link])
+    turn = InteractionTurn("req_1", _prompt(), (final,))
+    audit = CopilotAuditRecord.model_validate(
+        {
+            "id": "audit-dedupe",
+            "createdDateTime": "2025-06-15T10:01:00Z",
+            "auditData": {
+                "AccessedResources": [
+                    {"Name": "Example", "SiteUrl": "https://example.com"},
+                ],
+            },
+        },
+    )
+    traces = user_defined.build_traces(
+        turn,
+        audit=audit,
+        user_input="hello",
+        assistant_output="answer",
+    )
+    link_traces = [t for t in traces if t.get("input") == "https://example.com"]
+    assert len(link_traces) == 1

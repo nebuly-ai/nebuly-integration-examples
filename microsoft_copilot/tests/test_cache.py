@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from copilot_sync.cache import SyncCache
+from copilot_sync.models import CopilotAuditRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -158,3 +159,76 @@ def test_save_with_hold_back_advances_from_when_hold_back_after_existing_from(
     assert coverage is not None
     assert coverage.coverage_from == _ts(6)
     assert coverage.coverage_until == _ts(13) - timedelta(microseconds=1)
+
+
+def _audit_record(
+    *,
+    message_ids: tuple[str, ...],
+    thread_id: str = "19:thread@thread.v2",
+) -> CopilotAuditRecord:
+    return CopilotAuditRecord.model_validate(
+        {
+            "id": "audit-cache-1",
+            "createdDateTime": "2025-06-15T10:00:00Z",
+            "auditData": {
+                "ThreadId": thread_id,
+                "Messages": [
+                    {"Id": mid, "isPrompt": i == 0} for i, mid in enumerate(message_ids)
+                ],
+            },
+        },
+    )
+
+
+def test_upsert_audit_record_lookup_by_response_and_prompt_id(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    record = _audit_record(message_ids=("prompt-id", "response-id"))
+    cache.upsert_audit_records([record])
+    cache.commit()
+
+    by_response = cache.find_audit_record(["response-id"])
+    assert cache.find_audit_record(["prompt-id"]) is not None
+    assert by_response is not None
+    assert by_response.thread_id == "19:thread@thread.v2"
+
+
+def test_audit_record_tenant_isolation(tmp_path: Path) -> None:
+    cache_a = _cache(tmp_path, tenant="tenant_a")
+    cache_b = _cache(tmp_path, tenant="tenant_b")
+    record = _audit_record(message_ids=("msg-1",))
+    cache_a.upsert_audit_records([record])
+    cache_a.commit()
+    cache_b.commit()
+
+    assert cache_a.find_audit_record(["msg-1"]) is not None
+    assert cache_b.find_audit_record(["msg-1"]) is None
+    cache_a.close()
+    cache_b.close()
+
+
+def test_upsert_audit_record_idempotent(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    record = _audit_record(message_ids=("msg-1",))
+    cache.upsert_audit_records([record])
+    cache.upsert_audit_records([record])
+    cache.commit()
+
+    assert cache.find_audit_record(["msg-1"]) is not None
+
+
+def test_audit_day_chunk_tracking(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    start = datetime(2025, 6, 15, 8, 0, tzinfo=UTC)
+    end = datetime(2025, 6, 15, 12, 0, tzinfo=UTC)
+    assert cache.has_audit_day_chunk(start) is False
+    cache.mark_audit_day_chunk(start, end)
+    cache.commit()
+    assert cache.has_audit_day_chunk(start) is True
+
+
+def test_interaction_denied_persists(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    assert cache.is_interaction_denied("user-x") is False
+    cache.mark_interaction_denied("user-x", reason="interaction_403")
+    cache.commit()
+    assert cache.is_interaction_denied("user-x") is True

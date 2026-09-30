@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from .config import datetime_to_timestamp_str, timestamp_str_to_datetime
+from .models import CopilotAuditRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,6 +48,27 @@ CREATE TABLE IF NOT EXISTS sync_user_coverage (
   coverage_until         TEXT,
   last_successful_run_at TEXT,
   updated_at             TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS copilot_audit_messages (
+  tenant_id    TEXT NOT NULL,
+  message_id   TEXT NOT NULL,
+  thread_id    TEXT,
+  created_at   TEXT NOT NULL,
+  record_json  TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, message_id)
+);
+CREATE TABLE IF NOT EXISTS sync_audit_day_chunks (
+  tenant_id    TEXT NOT NULL,
+  chunk_start  TEXT NOT NULL,
+  chunk_end    TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, chunk_start)
+);
+CREATE TABLE IF NOT EXISTS sync_user_interaction_denied (
+  tenant_id   TEXT NOT NULL,
+  user_id     TEXT NOT NULL,
+  reason      TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
   PRIMARY KEY (tenant_id, user_id)
 );
 """
@@ -198,8 +221,97 @@ class SyncCache:
             ),
         )
 
+    def is_interaction_denied(self, user_id: str) -> bool:
+        row = self._conn.execute(
+            """
+            SELECT 1 FROM sync_user_interaction_denied
+            WHERE tenant_id = ? AND user_id = ?
+            """,
+            (self._tenant_id, user_id),
+        ).fetchone()
+        return row is not None
+
+    def mark_interaction_denied(self, user_id: str, *, reason: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO sync_user_interaction_denied (
+              tenant_id, user_id, reason, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+              reason = excluded.reason,
+              updated_at = excluded.updated_at
+            """,
+            (self._tenant_id, user_id, reason, _now_ts()),
+        )
+
     def commit(self) -> None:
         self._conn.commit()
+
+    def has_audit_day_chunk(self, chunk_start: datetime) -> bool:
+        row = self._conn.execute(
+            """
+            SELECT 1 FROM sync_audit_day_chunks
+            WHERE tenant_id = ? AND chunk_start = ?
+            """,
+            (self._tenant_id, datetime_to_timestamp_str(chunk_start)),
+        ).fetchone()
+        return row is not None
+
+    def mark_audit_day_chunk(self, chunk_start: datetime, chunk_end: datetime) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO sync_audit_day_chunks (tenant_id, chunk_start, chunk_end)
+            VALUES (?, ?, ?)
+            ON CONFLICT (tenant_id, chunk_start) DO UPDATE SET
+              chunk_end = excluded.chunk_end
+            """,
+            (
+                self._tenant_id,
+                datetime_to_timestamp_str(chunk_start),
+                datetime_to_timestamp_str(chunk_end),
+            ),
+        )
+
+    def upsert_audit_records(self, records: list[CopilotAuditRecord]) -> None:
+        for record in records:
+            record_json = json.dumps(record.model_dump(mode="json"))
+            created_at = datetime_to_timestamp_str(record.created_datetime)
+            thread_id = record.thread_id
+            for message_id in record.message_ids:
+                self._conn.execute(
+                    """
+                    INSERT INTO copilot_audit_messages (
+                      tenant_id, message_id, thread_id, created_at, record_json
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (tenant_id, message_id) DO UPDATE SET
+                      thread_id = excluded.thread_id,
+                      created_at = excluded.created_at,
+                      record_json = excluded.record_json
+                    """,
+                    (
+                        self._tenant_id,
+                        message_id,
+                        thread_id,
+                        created_at,
+                        record_json,
+                    ),
+                )
+
+    def find_audit_record(self, message_ids: list[str]) -> CopilotAuditRecord | None:
+        for message_id in message_ids:
+            if not message_id:
+                continue
+            row = self._conn.execute(
+                """
+                SELECT record_json FROM copilot_audit_messages
+                WHERE tenant_id = ? AND message_id = ?
+                """,
+                (self._tenant_id, message_id),
+            ).fetchone()
+            if row is None:
+                continue
+            return CopilotAuditRecord.model_validate(json.loads(row[0]))
+        return None
 
     def close(self) -> None:
         self._conn.close()

@@ -9,8 +9,15 @@ import httpx
 import pytest
 from copilot_sync.cache import SyncCache
 from copilot_sync.config import Config
-from copilot_sync.models import CopilotUser
-from copilot_sync.sync import FirstRunRequiresFromDateError, run_sync
+from copilot_sync.graph_client import AuditQueryError
+from copilot_sync.models import CopilotAuditRecord, CopilotUser
+from copilot_sync.sync import (
+    FirstRunRequiresFromDateError,
+    _audit_chunks_to_fetch,
+    _audit_day_chunks,
+    _plan_audit_window,
+    run_sync,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,6 +33,9 @@ def _config(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     dry_run: bool = False,
+    audit_enrichment: bool = False,
+    audit_settle_lag_seconds: int = 7200,
+    settle_lag_seconds: int = 60,
 ) -> Config:
     return Config(
         azure_tenant_id="tenant_1",
@@ -41,6 +51,9 @@ def _config(
         cache_dir=tmp_path,
         dry_run=dry_run,
         verbose=False,
+        settle_lag_seconds=settle_lag_seconds,
+        audit_enrichment=audit_enrichment,
+        audit_settle_lag_seconds=audit_settle_lag_seconds,
     )
 
 
@@ -660,3 +673,158 @@ def test_tail_hold_back_with_clean_backfill(tmp_path: Path) -> None:
         assert coverage.coverage_until == _ts(13, 59, 30) - timedelta(microseconds=1)
     finally:
         cache.close()
+
+
+def test_audit_enrichment_disabled_skips_audit_fetch(tmp_path: Path) -> None:
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=_users()[:1])
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[_interaction_dict(), _response_dict()],
+    )
+    mock_graph.fetch_copilot_audit_records = AsyncMock()
+    mock_graph.close = AsyncMock()
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly_cls.return_value.send_interaction = AsyncMock()
+        asyncio.run(run_sync(config))
+
+    mock_graph.fetch_copilot_audit_records.assert_not_called()
+
+
+def test_audit_fetch_failure_still_sends_turns(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        from_date=_ts(8),
+        to_date=_ts(12),
+        audit_enrichment=True,
+        audit_settle_lag_seconds=60,
+    )
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=_users()[:1])
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[_interaction_dict(), _response_dict()],
+    )
+    mock_graph.fetch_copilot_audit_records = AsyncMock(
+        side_effect=AuditQueryError("failed"),
+    )
+    mock_graph.close = AsyncMock()
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        summary = asyncio.run(run_sync(config))
+
+    nebuly.send_interaction.assert_called_once()
+    assert summary.totals.sent == 1
+
+
+def test_audit_enrichment_adds_model_tag_to_payload(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        from_date=_ts(8),
+        to_date=_ts(12),
+        dry_run=True,
+        audit_enrichment=True,
+        audit_settle_lag_seconds=60,
+    )
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=_users()[:1])
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[_interaction_dict(), _response_dict()],
+    )
+    audit = CopilotAuditRecord.model_validate(
+        {
+            "id": "audit-sync",
+            "createdDateTime": "2025-06-15T10:01:00Z",
+            "auditData": {
+                "Messages": [
+                    {"Id": "prompt_req_1", "isPrompt": True},
+                    {"Id": "response_req_1", "isPrompt": False},
+                ],
+                "ModelTransparencyDetails": [
+                    {"ModelProviderName": "OpenAI", "ModelName": "gpt-sync"},
+                ],
+            },
+        },
+    )
+    mock_graph.fetch_copilot_audit_records = AsyncMock(return_value=[audit])
+    mock_graph.close = AsyncMock()
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly_cls.return_value.send_interaction = AsyncMock()
+        summary = asyncio.run(run_sync(config))
+
+    assert summary.totals.enriched == 1
+    assert summary.totals.sent == 1
+
+
+def test_audit_settle_lag_holds_back_recent_tail_turn(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        from_date=_ts(8),
+        to_date=_ts(12),
+        audit_enrichment=True,
+        audit_settle_lag_seconds=7200,
+        settle_lag_seconds=60,
+    )
+    user = [CopilotUser(id="user_a", mail="a@example.com")]
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=user)
+    mock_graph.fetch_copilot_audit_records = AsyncMock(return_value=[])
+    mock_graph.close = AsyncMock()
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[
+            _interaction_dict_at("req_recent", hour=11, minute=59),
+            _response_dict_at("req_recent", hour=11, minute=59, second=30),
+        ],
+    )
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        summary = asyncio.run(run_sync(config))
+
+    nebuly.send_interaction.assert_not_called()
+    assert summary.totals.fetched == 0
+
+
+def test_audit_skips_cached_settled_chunks(tmp_path: Path) -> None:
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    gte = _ts(8)
+    lte = _ts(12)
+    for chunk_gte, chunk_lte in _audit_day_chunks(gte, lte):
+        cache.mark_audit_day_chunk(chunk_gte, chunk_lte)
+    cache.commit()
+    settle_edge = _ts(14)
+    pending = _audit_chunks_to_fetch(
+        _audit_day_chunks(gte, lte),
+        cache=cache,
+        settle_edge=settle_edge,
+    )
+    cache.close()
+    assert pending == []
+
+
+def test_plan_audit_window_ignores_denied_user(tmp_path: Path) -> None:
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
+    users = _users()
+    cache.mark_interaction_denied("user_b", reason="interaction_403")
+    cache.save_user_coverage("user_a", _ts(8), _ts(12))
+    cache.commit()
+    window = _plan_audit_window(users, config, cache, run_until=_ts(12))
+    cache.close()
+    assert window is None

@@ -50,6 +50,10 @@ class Config:
     dry_run: bool
     verbose: bool
     settle_lag_seconds: int = 60
+    audit_enrichment: bool = False
+    audit_settle_lag_seconds: int = 7200
+    audit_poll_interval_seconds: int = 30
+    audit_query_timeout_seconds: int = 3600
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -134,6 +138,16 @@ class Config:
             dry_run=args.dry_run,
             verbose=args.verbose,
             settle_lag_seconds=int(os.environ.get("COPILOT_SETTLE_LAG_SECONDS", "60")),
+            audit_enrichment=_parse_bool(os.environ.get("AUDIT_ENRICHMENT", "false")),
+            audit_settle_lag_seconds=int(
+                os.environ.get("AUDIT_SETTLE_LAG_SECONDS", "7200"),
+            ),
+            audit_poll_interval_seconds=int(
+                os.environ.get("AUDIT_POLL_INTERVAL_SECONDS", "30"),
+            ),
+            audit_query_timeout_seconds=int(
+                os.environ.get("AUDIT_QUERY_TIMEOUT_SECONDS", "3600"),
+            ),
         )
 
     def run_until(self) -> datetime:
