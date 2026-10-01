@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from copilot_sync import user_defined
@@ -566,14 +565,14 @@ def test_audit_retrieval_dedupes_graph_link() -> None:
     assert len(link_traces) == 1
 
 
-_COWORK_FIXTURE = Path(__file__).resolve().parent.parent / "cowork_chats.json"
 _COWORK_APP_CLASS = "IPM.SkypeTeams.Message.Copilot.CoworkChat"
 
 
-def test_cowork_chats_validate_and_become_nebuly_payloads() -> None:
-    raw = json.loads(_COWORK_FIXTURE.read_text())
+def test_cowork_chats_validate_and_become_nebuly_payloads(
+    synthetic_cowork_interactions: list[dict[str, Any]],
+) -> None:
     interactions = sorted(
-        [AiInteraction.model_validate(item) for item in raw],
+        [AiInteraction.model_validate(item) for item in synthetic_cowork_interactions],
         key=lambda item: item.created_datetime,
     )
     assert all(item.request_id is None for item in interactions)
@@ -596,11 +595,11 @@ def test_cowork_chats_validate_and_become_nebuly_payloads() -> None:
     assert len(sent) == 5
 
     expected = (
-        ("Ciao", "Ciao Lorenzo! \U0001f44b"),
-        ("Cosa puoi fare?", "Posso aiutarti a lavorare con Microsoft 365"),
-        ("Help me organize my week.", "I\u2019ll review September 28"),
-        ("How do I add an mcp to copilot cowork?", "You add an MCP server"),
-        ("```\n{", "Created **Nebuly-MCP-Cowork-connector.zip**"),
+        ("Hello", "Hello back from Cowork."),
+        ("What can you do?", "I can help with calendars"),
+        ("Help me organize my week.", "I'll review your calendar"),
+        ("How do I add an MCP to Copilot Cowork?", "You add an MCP server"),
+        ("```", "Created **example-connector.zip**"),
     )
     for input_prefix, output_prefix in expected:
         matches = [
