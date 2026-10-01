@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     )
 
 _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
+_PLACEHOLDER_ATTACHMENT_NAME = "unknown-file-name"
+_PLACEHOLDER_ATTACHMENT_URL = "file:///unknown-url"
 
 
 def _non_empty_tags(fields: dict[str, str | None]) -> dict[str, str]:
@@ -168,11 +170,21 @@ def _audit_retrieval_traces(
     return traces
 
 
+def _is_placeholder_attachment(name: str | None, content_url: str | None) -> bool:
+    """Cowork exports unresolved file refs as a fixed name and URL."""
+    return (
+        name == _PLACEHOLDER_ATTACHMENT_NAME
+        or content_url == _PLACEHOLDER_ATTACHMENT_URL
+    )
+
+
 def _build_retrieval_traces(final: AiInteraction) -> list[dict[str, Any]]:
     traces: list[dict[str, Any]] = []
 
     for att in final.attachments:
         if att.content_type == _ADAPTIVE_CARD_CONTENT_TYPE:
+            continue
+        if _is_placeholder_attachment(att.name, att.content_url):
             continue
         source = att.name or att.content_url or "attachment"
         traces.append(

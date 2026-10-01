@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import patch
 
 from copilot_sync import user_defined
@@ -562,3 +563,70 @@ def test_audit_retrieval_dedupes_graph_link() -> None:
     )
     link_traces = [t for t in traces if t.get("input") == "https://example.com"]
     assert len(link_traces) == 1
+
+
+_COWORK_APP_CLASS = "IPM.SkypeTeams.Message.Copilot.CoworkChat"
+
+
+def test_cowork_chats_validate_and_become_nebuly_payloads(
+    synthetic_cowork_interactions: list[dict[str, Any]],
+) -> None:
+    interactions = sorted(
+        [AiInteraction.model_validate(item) for item in synthetic_cowork_interactions],
+        key=lambda item: item.created_datetime,
+    )
+    assert all(item.request_id is None for item in interactions)
+
+    turns, dangling = group_interactions(interactions)
+    assert dangling == []
+    assert len(turns) == 6
+
+    user = _user()
+    sent: list[dict[str, object]] = []
+    skipped: list[SkipReason] = []
+    for turn in turns:
+        result = turn_to_payload(turn, user=user, anonymize=False)
+        if isinstance(result, SkipReason):
+            skipped.append(result)
+            continue
+        sent.append(result)
+
+    assert skipped == [SkipReason.EMPTY_OUTPUT]
+    assert len(sent) == 5
+
+    expected = (
+        ("Hello", "Hello back from Cowork."),
+        ("What can you do?", "I can help with calendars"),
+        ("Help me organize my week.", "I'll review your calendar"),
+        ("How do I add an MCP to Copilot Cowork?", "You add an MCP server"),
+        ("```", "Created **example-connector.zip**"),
+    )
+    for input_prefix, output_prefix in expected:
+        matches = [
+            payload
+            for payload in sent
+            if _interaction_text(payload, "input").startswith(input_prefix)
+        ]
+        assert len(matches) == 1
+        payload = matches[0]
+        output = _interaction_text(payload, "output")
+        assert output.startswith(output_prefix)
+        assert "Finding an efficient solution" not in output
+        assert "Addressing schema issues" not in output
+        interaction = payload["interaction"]
+        assert isinstance(interaction, dict)
+        assert str(interaction["conversation_id"]).endswith("@thread.v2")
+        tags = interaction["tags"]
+        assert isinstance(tags, dict)
+        assert tags["conversation_type"] == "coworkchat"
+        assert tags["app_class"] == _COWORK_APP_CLASS
+        assert "request_id" not in tags
+        assert payload["traces"] == []
+
+
+def _interaction_text(payload: dict[str, object], field: str) -> str:
+    interaction = payload["interaction"]
+    assert isinstance(interaction, dict)
+    text = interaction[field]
+    assert isinstance(text, str)
+    return text
