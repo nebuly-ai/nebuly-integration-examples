@@ -76,7 +76,7 @@ class AiInteraction(BaseModel):
     # for the user.
     session_id: str = Field(..., alias="sessionId")
     # The identifier that groups a user prompt with its Copilot response.
-    request_id: str = Field(..., alias="requestId")
+    request_id: str | None = Field(None, alias="requestId")
     interaction_type: Literal["userPrompt", "aiResponse", "unknownFutureValue"] = Field(
         ..., alias="interactionType"
     )

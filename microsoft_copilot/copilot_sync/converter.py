@@ -26,7 +26,7 @@ class SkipReason(Enum):
 
 @dataclass(frozen=True)
 class InteractionTurn:
-    request_id: str
+    request_id: str | None
     prompt: AiInteraction
     responses: tuple[AiInteraction, ...]
 
