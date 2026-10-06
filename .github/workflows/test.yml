@@ -30,5 +30,5 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.project }}
         run: |
-          poetry install --no-interaction
+          poetry install --with dev --no-interaction
           poetry run pytest
