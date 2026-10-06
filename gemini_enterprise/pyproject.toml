@@ -17,6 +17,9 @@ tenacity = "^9.0.0"
 tqdm = "^4.68.3"
 google-cloud-bigquery = "^3.42.1"
 
+[tool.poetry.group.dev]
+optional = true
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
 pre-commit = "^4.6.0"

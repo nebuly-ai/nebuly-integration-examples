@@ -11,15 +11,15 @@ httpx = "^0.28.0"
 python-dotenv = "^1.0.0"
 tenacity = "^9.0.0"
 
+[tool.poetry.group.dev]
+optional = true
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
 pre-commit = "^4.6.0"
 ruff = "^0.15.0"
 mypy = "^1.20.0"
 pydantic = "^2.0"
-
-[tool.poetry.group.dev]
-optional = true
 
 [build-system]
 requires = ["poetry-core"]
