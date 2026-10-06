@@ -49,6 +49,7 @@ class Config:
     dry_run: bool
     verbose: bool
     force: bool
+    max_concurrency: int = 5
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -78,6 +79,12 @@ class Config:
             dest="force",
             help="Confirm gap-creating runs without prompting",
         )
+        parser.add_argument(
+            "--concurrency",
+            type=int,
+            default=None,
+            help="Max in-flight requests per service (env MAX_CONCURRENCY, default 5)",
+        )
         args = parser.parse_args(argv)
 
         public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
@@ -101,6 +108,14 @@ class Config:
         )
         to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
 
+        max_concurrency = (
+            args.concurrency
+            if args.concurrency is not None
+            else int(os.environ.get("MAX_CONCURRENCY", "5"))
+        )
+        if max_concurrency < 1:
+            raise RuntimeError("MAX_CONCURRENCY / --concurrency must be at least 1")
+
         return cls(
             langfuse_public_key=cast(str, public_key),
             langfuse_secret_key=cast(str, secret_key),
@@ -122,6 +137,7 @@ class Config:
             dry_run=args.dry_run,
             verbose=args.verbose,
             force=args.force,
+            max_concurrency=max_concurrency,
         )
 
     def run_until(self) -> datetime:

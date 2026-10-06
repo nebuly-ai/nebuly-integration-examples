@@ -26,7 +26,7 @@ def test_run_until_applies_settle_lag() -> None:
     )
     with patch("langfuse_sync.config.datetime") as dt_mod:
         dt_mod.now.return_value = fixed_now
-        dt_mod.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+        dt_mod.side_effect = datetime
         dt_mod.UTC = UTC
         dt_mod.timedelta = timedelta
         assert config.run_until() == fixed_now - timedelta(seconds=900)

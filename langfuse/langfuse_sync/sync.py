@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Literal
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
+
 from langfuse_sync.config import (
     Config,
     datetime_to_timestamp_str,
@@ -14,6 +17,7 @@ from langfuse_sync.config import (
 )
 from langfuse_sync.converter import interaction_from_langfuse_trace
 from langfuse_sync.coverage import Coverage, CoverageState, plan_run
+from langfuse_sync.http_retry import RateLimiter
 from langfuse_sync.langfuse_client import LangfuseClient
 from langfuse_sync.nebuly_client import NebulyClient, SendResult
 
@@ -43,6 +47,26 @@ class Counts:
 @dataclass
 class SyncSummary:
     totals: Counts = field(default_factory=Counts)
+
+
+class _Outcome(Enum):
+    SENT = "sent"
+    TOO_LARGE = "too_large"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+_COMMITTABLE = frozenset({_Outcome.SENT, _Outcome.TOO_LARGE, _Outcome.SKIPPED})
+
+
+@dataclass(frozen=True)
+class _PendingTrace:
+    """A deduplicated trace; `payload` is None when the converter skipped it."""
+
+    trace_id: str
+    timestamp: datetime
+    timestamp_raw: str
+    payload: dict[str, Any] | None
 
 
 def _log_summary(totals: Counts, *, stopped: bool) -> None:
@@ -195,7 +219,85 @@ def _finalize_interval(
     )
 
 
-def _process_chunk(
+def _init_outcomes(
+    items: list[_PendingTrace], summary: SyncSummary
+) -> tuple[list[_Outcome | None], list[tuple[int, dict[str, Any]]]]:
+    """Pre-fill converter-skipped items and list the (index, payload) to send."""
+    outcomes: list[_Outcome | None] = []
+    to_send: list[tuple[int, dict[str, Any]]] = []
+    for index, item in enumerate(items):
+        if item.payload is None:
+            summary.totals.traces_skipped += 1
+            outcomes.append(_Outcome.SKIPPED)
+        else:
+            outcomes.append(None)
+            to_send.append((index, item.payload))
+    return outcomes, to_send
+
+
+async def _send_chunk(
+    items: list[_PendingTrace],
+    *,
+    nebuly: NebulyClient,
+    coverage: Coverage,
+    summary: SyncSummary,
+    concurrency: int,
+) -> bool:
+    """Send items concurrently while keeping the watermark strictly ordered.
+
+    Coverage only advances through the contiguous prefix of items that are
+    already done, so a failure never leaves an unsent trace behind the
+    watermark. Traces that were in flight when a worker failed may be re-sent
+    by the next run.
+    """
+    outcomes, to_send = _init_outcomes(items, summary)
+    next_commit = 0
+
+    def commit_prefix() -> None:
+        nonlocal next_commit
+        while next_commit < len(items) and outcomes[next_commit] in _COMMITTABLE:
+            item = items[next_commit]
+            coverage.advance_until(item.timestamp, item.trace_id)
+            next_commit += 1
+
+    commit_prefix()
+
+    pending = iter(to_send)
+    stop = asyncio.Event()
+
+    async def worker() -> None:
+        for index, payload in pending:
+            if stop.is_set():
+                return
+            item = items[index]
+            try:
+                result = await nebuly.send_interaction(payload)
+            except Exception:
+                logger.exception(
+                    "Failed to send trace id=%s timestamp=%s",
+                    item.trace_id,
+                    item.timestamp_raw,
+                )
+                summary.totals.traces_failed += 1
+                outcomes[index] = _Outcome.FAILED
+                stop.set()
+                return
+            if result == SendResult.SENT:
+                summary.totals.traces_sent += 1
+                outcomes[index] = _Outcome.SENT
+            else:
+                summary.totals.traces_skipped += 1
+                outcomes[index] = _Outcome.TOO_LARGE
+            commit_prefix()
+
+    async with asyncio.TaskGroup() as group:
+        for _ in range(min(concurrency, len(to_send))):
+            group.create_task(worker())
+
+    return _Outcome.FAILED not in outcomes
+
+
+async def _process_chunk(
     *,
     chunk_start: datetime,
     chunk_end: datetime,
@@ -219,9 +321,11 @@ def _process_chunk(
         datetime_to_timestamp_str(chunk_start),
         datetime_to_timestamp_str(chunk_end),
     )
-    traces = langfuse.get_traces(chunk_start, chunk_end)
-    logger.info("Fetched %d traces, loading observations…", len(traces))
-    observations_by_trace = langfuse.get_observations_by_trace_id(obs_start, obs_end)
+    traces, observations_by_trace = await asyncio.gather(
+        langfuse.get_traces(chunk_start, chunk_end),
+        langfuse.get_observations_by_trace_id(obs_start, obs_end),
+    )
+    logger.info("Fetched %d traces", len(traces))
     traces_to_send, deduped = _dedupe_traces(
         traces,
         boundary_until=boundary_until,
@@ -241,6 +345,7 @@ def _process_chunk(
         deduped,
     )
 
+    items: list[_PendingTrace] = []
     for trace in traces_to_send:
         trace_id = trace.get("id")
         if not trace_id:
@@ -248,41 +353,36 @@ def _process_chunk(
         trace_ts_raw = trace.get("timestamp")
         if not trace_ts_raw:
             continue
-        trace_ts = timestamp_str_to_datetime(trace_ts_raw)
 
         observations = observations_by_trace.get(trace_id, [])
         interaction = interaction_from_langfuse_trace(trace, observations)
-        if interaction is None:
-            summary.totals.traces_skipped += 1
-            coverage.advance_until(trace_ts, trace_id)
-            continue
-
-        payload = {
-            "interaction": interaction.to_interaction_dict(),
-            "traces": [item.to_dict() for item in interaction.traces],
-            "user_feedback": [],
-            "anonymize": config.anonymize,
-        }
-        try:
-            result = nebuly.send_interaction(payload)
-        except Exception:
-            logger.exception(
-                "Failed to send trace id=%s timestamp=%s",
-                trace_id,
-                trace_ts_raw,
+        payload = (
+            None
+            if interaction is None
+            else {
+                "interaction": interaction.to_interaction_dict(),
+                "traces": [item.to_dict() for item in interaction.traces],
+                "user_feedback": [],
+                "anonymize": config.anonymize,
+            }
+        )
+        items.append(
+            _PendingTrace(
+                trace_id=trace_id,
+                timestamp=timestamp_str_to_datetime(trace_ts_raw),
+                timestamp_raw=trace_ts_raw,
+                payload=payload,
             )
-            summary.totals.traces_failed += 1
-            return False
+        )
 
-        if result in {SendResult.SENT, SendResult.TOO_LARGE}:
-            if result == SendResult.SENT:
-                summary.totals.traces_sent += 1
-            else:
-                summary.totals.traces_skipped += 1
-            coverage.advance_until(trace_ts, trace_id)
-            continue
-
-        summary.totals.traces_failed += 1
+    ok = await _send_chunk(
+        items,
+        nebuly=nebuly,
+        coverage=coverage,
+        summary=summary,
+        concurrency=config.max_concurrency,
+    )
+    if not ok:
         return False
 
     logger.info(
@@ -292,6 +392,84 @@ def _process_chunk(
         summary.totals.traces_failed,
     )
     return True
+
+
+async def _run_intervals(
+    config: Config,
+    coverage: Coverage,
+    prior_state: CoverageState,
+    intervals: list[tuple[datetime, datetime]],
+    summary: SyncSummary,
+) -> int:
+    async with httpx.AsyncClient(timeout=60.0) as http_client:
+        langfuse = LangfuseClient(
+            http_client, config, RateLimiter(config.max_concurrency)
+        )
+        nebuly = NebulyClient(
+            http_client,
+            config.nebuly_api_key,
+            config.nebuly_endpoint,
+            RateLimiter(config.max_concurrency),
+            dry_run=config.dry_run,
+        )
+
+        for interval_from, interval_until in intervals:
+            kind = _interval_kind(prior_state, interval_from, interval_until)
+            boundary_until = (
+                coverage.state.coverage_until
+                if coverage.state.coverage_until == interval_from
+                else None
+            )
+            boundary_ids = (
+                coverage.state.coverage_until_ids
+                if boundary_until is not None
+                else frozenset()
+            )
+            processed_any = False
+            day_chunks = _iter_day_chunks(interval_from, interval_until)
+            logger.info(
+                "Interval %s → %s (%d day chunk(s), kind=%s)",
+                datetime_to_timestamp_str(interval_from),
+                datetime_to_timestamp_str(interval_until),
+                len(day_chunks),
+                kind,
+            )
+
+            for chunk_index, (chunk_start, chunk_end) in enumerate(day_chunks, start=1):
+                logger.info(
+                    "Day chunk %d/%d",
+                    chunk_index,
+                    len(day_chunks),
+                )
+                ok = await _process_chunk(
+                    chunk_start=chunk_start,
+                    chunk_end=chunk_end,
+                    config=config,
+                    langfuse=langfuse,
+                    nebuly=nebuly,
+                    coverage=coverage,
+                    summary=summary,
+                    boundary_until=boundary_until,
+                    boundary_ids=boundary_ids,
+                )
+                if not ok:
+                    _log_summary(summary.totals, stopped=True)
+                    return 1
+                if summary.totals.traces_sent > 0 or summary.totals.traces_skipped > 0:
+                    processed_any = True
+                boundary_until = coverage.state.coverage_until
+                boundary_ids = coverage.state.coverage_until_ids
+
+            _finalize_interval(
+                coverage,
+                kind=kind,
+                interval_from=interval_from,
+                interval_until=interval_until,
+                processed_any=processed_any,
+            )
+
+    _log_summary(summary.totals, stopped=False)
+    return 0
 
 
 def run_sync(config: Config) -> int:
@@ -332,69 +510,6 @@ def run_sync(config: Config) -> int:
         len(intervals),
     )
 
-    with httpx.Client(timeout=60.0) as http_client:
-        langfuse = LangfuseClient(http_client, config)
-        nebuly = NebulyClient(
-            http_client,
-            config.nebuly_api_key,
-            config.nebuly_endpoint,
-            dry_run=config.dry_run,
-        )
-
-        for interval_from, interval_until in intervals:
-            kind = _interval_kind(prior_state, interval_from, interval_until)
-            boundary_until = (
-                coverage.state.coverage_until
-                if coverage.state.coverage_until == interval_from
-                else None
-            )
-            boundary_ids = (
-                coverage.state.coverage_until_ids
-                if boundary_until is not None
-                else frozenset()
-            )
-            processed_any = False
-            day_chunks = _iter_day_chunks(interval_from, interval_until)
-            logger.info(
-                "Interval %s → %s (%d day chunk(s), kind=%s)",
-                datetime_to_timestamp_str(interval_from),
-                datetime_to_timestamp_str(interval_until),
-                len(day_chunks),
-                kind,
-            )
-
-            for chunk_index, (chunk_start, chunk_end) in enumerate(day_chunks, start=1):
-                logger.info(
-                    "Day chunk %d/%d",
-                    chunk_index,
-                    len(day_chunks),
-                )
-                ok = _process_chunk(
-                    chunk_start=chunk_start,
-                    chunk_end=chunk_end,
-                    config=config,
-                    langfuse=langfuse,
-                    nebuly=nebuly,
-                    coverage=coverage,
-                    summary=summary,
-                    boundary_until=boundary_until,
-                    boundary_ids=boundary_ids,
-                )
-                if not ok:
-                    _log_summary(summary.totals, stopped=True)
-                    return 1
-                if summary.totals.traces_sent > 0 or summary.totals.traces_skipped > 0:
-                    processed_any = True
-                boundary_until = coverage.state.coverage_until
-                boundary_ids = coverage.state.coverage_until_ids
-
-            _finalize_interval(
-                coverage,
-                kind=kind,
-                interval_from=interval_from,
-                interval_until=interval_until,
-                processed_any=processed_any,
-            )
-
-    _log_summary(summary.totals, stopped=False)
-    return 0
+    return asyncio.run(
+        _run_intervals(config, coverage, prior_state, intervals, summary)
+    )

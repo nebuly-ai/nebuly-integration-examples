@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
-
 from langfuse_sync.converter import (
     convert_observations_to_traces,
     interaction_from_langfuse_trace,
 )
-from langfuse_sync.models import EmbeddingTrace, LLMTrace, RetrievalTrace
+from langfuse_sync.models import (
+    EmbeddingTrace,
+    LangfuseObservation,
+    LangfuseTrace,
+    LLMTrace,
+    RetrievalTrace,
+)
 
 
 def test_tag_key_value_parsing() -> None:
-    trace: dict[str, Any] = {
+    trace: LangfuseTrace = {
         "id": "t1",
         "timestamp": "2026-01-01T00:00:00Z",
         "input": "hi",
@@ -24,7 +28,7 @@ def test_tag_key_value_parsing() -> None:
 
 
 def test_nested_generation_emitted() -> None:
-    observations: list[dict[str, Any]] = [
+    observations: list[LangfuseObservation] = [
         {
             "id": "parent",
             "type": "SPAN",
@@ -52,7 +56,7 @@ def test_nested_generation_emitted() -> None:
 
 
 def test_wrapper_span_skipped_leaf_span_becomes_retrieval() -> None:
-    observations: list[dict[str, Any]] = [
+    observations: list[LangfuseObservation] = [
         {
             "id": "wrapper",
             "type": "SPAN",
@@ -88,7 +92,7 @@ def test_wrapper_span_skipped_leaf_span_becomes_retrieval() -> None:
 
 
 def test_embedding_trace_and_usage_fallback() -> None:
-    observations: list[dict[str, Any]] = [
+    observations: list[LangfuseObservation] = [
         {
             "id": "emb",
             "type": "EMBEDDING",

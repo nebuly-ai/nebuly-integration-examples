@@ -35,6 +35,7 @@ cp .env.example .env
 | `LANGFUSE_SETTLE_LAG_SECONDS` | no       | `900`                                                                        | Do not sync traces newer than `now - lag`                |
 | `NEBULY_ENDPOINT`             | no       | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint                                |
 | `ANONYMIZE`                   | no       | `false`                                                                      | Set to `true` to anonymize content in the Nebuly payload |
+| `MAX_CONCURRENCY`             | no       | `5`                                                                          | Max in-flight requests per service (Langfuse and Nebuly) |
 
 For self-hosted Langfuse, set `LANGFUSE_BASE_URL` to your instance origin (e.g. `https://langfuse.mycompany.com`) with no `/api/public` suffix.
 
@@ -48,6 +49,7 @@ For self-hosted Langfuse, set `LANGFUSE_BASE_URL` to your instance origin (e.g. 
 | `--dry-run`   | No POSTs or cache writes                              |
 | `--verbose`   | Debug logging                                         |
 | `--yes`       | Confirm gap-creating runs without prompting           |
+| `--concurrency` | Max in-flight requests per service (overrides `MAX_CONCURRENCY`, default 5) |
 
 **Migration:** replace `START_DATE` / `END_DATE` and `langfuse_to_nebuly.py` with `python -m langfuse_sync --from-date …`.
 
@@ -60,6 +62,15 @@ Coverage is stored in `.cache/coverage.json` (`coverage_from`, `coverage_until`,
 - **Backfill** (dates before the existing watermark): sends proceed, but `coverage_until` is not moved backward; `coverage_from` updates when that interval finishes.
 - `--dry-run` does not persist cache or POST.
 - Reset with `rm -rf .cache`.
+
+## Concurrency & retries
+
+Within each day chunk, Langfuse pages and Nebuly POSTs run concurrently, with at most `MAX_CONCURRENCY` requests in flight per service. Day chunks themselves are processed one after another.
+
+- **Retries:** transport errors, HTTP 429 and 5xx are retried up to 10 times with full-jitter exponential backoff (capped at 60s).
+- **Rate limits:** a `Retry-After` header (seconds or HTTP-date) is honored. On a 429 it also pauses every worker for that service, so the other workers do not keep hitting the limit.
+- **Ordered watermark:** `coverage_until` only advances through the contiguous prefix of traces that were already sent. If a send fails after all retries, the run stops and the traces that were in flight at that moment (at most `MAX_CONCURRENCY - 1`) may be sent again on the next run.
+- If Langfuse Cloud rate limits you, lower the value with `--concurrency`.
 
 ## Running
 
