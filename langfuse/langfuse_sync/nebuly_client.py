@@ -1,51 +1,73 @@
-"""Nebuly Interaction API client."""
-
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from enum import Enum
+from typing import Any
 
-import requests
-from langfuse_sync import config
-
-if TYPE_CHECKING:
-    from langfuse_sync.models import Interaction, NebulyRequestPayload
+import httpx
+from httpx import HTTPStatusError
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
 
-def send_interactions(interactions: list[Interaction]) -> None:
-    skipped_too_large = 0
-    for interaction in interactions:
-        payload: NebulyRequestPayload = {
-            "interaction": interaction.to_interaction_dict(),
-            "traces": [trace.to_dict() for trace in interaction.traces],
-            "user_feedback": [],
-            "anonymize": config.anonymize,
-        }
-        response = requests.post(
-            config.nebuly_url,
+class SendResult(Enum):
+    SENT = "sent"
+    TOO_LARGE = "too_large"
+
+
+def _should_retry(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if not isinstance(exc, HTTPStatusError):
+        return False
+    status = exc.response.status_code
+    return status == 429 or status >= 500
+
+
+class NebulyClient:
+    def __init__(
+        self,
+        client: httpx.Client,
+        api_key: str,
+        endpoint: str,
+        *,
+        dry_run: bool = False,
+    ) -> None:
+        self._client = client
+        self._api_key = api_key
+        self._endpoint = endpoint
+        self._dry_run = dry_run
+
+    @retry(
+        retry=retry_if_exception(_should_retry),
+        stop=stop_after_attempt(10),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
+    )
+    def send_interaction(self, payload: dict[str, Any]) -> SendResult:
+        if self._dry_run:
+            return SendResult.SENT
+
+        resp = self._client.post(
+            self._endpoint,
             headers={
-                "Authorization": f"Bearer {config.nebuly_api_key}",
+                "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=30,
         )
-        if response.status_code == 413:
-            skipped_too_large += 1
+        if resp.status_code == 413:
             logger.warning(
                 "Skipping interaction conversation_id=%s: payload too large (413)",
-                interaction.conversation_id,
+                payload.get("interaction", {}).get("conversation_id"),
             )
-            continue
-        if not response.ok:
-            raise RuntimeError(
-                f"Nebuly POST failed: status={response.status_code} "
-                f"body={response.text!r}"
-            ) from None
-    if skipped_too_large:
-        logger.warning(
-            "Skipped %s interactions due to 413 Request Entity Too Large",
-            skipped_too_large,
-        )
+            return SendResult.TOO_LARGE
+        if resp.is_error:
+            logger.error(
+                "Nebuly POST failed: status=%s body=%r",
+                resp.status_code,
+                resp.text[:500],
+            )
+            resp.raise_for_status()
+        return SendResult.SENT

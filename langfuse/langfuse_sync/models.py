@@ -14,6 +14,7 @@ class LangfuseObservation(TypedDict, total=False):
     id: str
     traceId: str
     parentObservationId: str | None
+    type: str
     model: str | None
     name: str | None
     input: JsonValue
@@ -21,6 +22,9 @@ class LangfuseObservation(TypedDict, total=False):
     startTime: str
     endTime: str
     usageDetails: dict[str, int]
+    usage: dict[str, int]
+    calculatedTotalCost: float
+    costDetails: dict[str, float]
 
 
 class LangfuseTrace(TypedDict, total=False):
@@ -64,6 +68,13 @@ class LLMTracePayload(TypedDict, total=False):
     output: str
     input_tokens: int
     output_tokens: int
+    cost: int
+
+
+class EmbeddingTracePayload(TypedDict, total=False):
+    model: str
+    input: str
+    input_tokens: int
 
 
 class RetrievalTracePayload(TypedDict):
@@ -74,7 +85,7 @@ class RetrievalTracePayload(TypedDict):
 
 class NebulyRequestPayload(TypedDict):
     interaction: InteractionPayload
-    traces: list[LLMTracePayload | RetrievalTracePayload]
+    traces: list[LLMTracePayload | EmbeddingTracePayload | RetrievalTracePayload]
     user_feedback: list[dict[str, str | int]]
     anonymize: bool
 
@@ -86,6 +97,7 @@ class LLMTrace:
     output: str
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cost: int | None = None
 
     def to_dict(self) -> LLMTracePayload:
         payload: LLMTracePayload = {
@@ -97,6 +109,21 @@ class LLMTrace:
             payload["input_tokens"] = self.input_tokens
         if self.output_tokens is not None:
             payload["output_tokens"] = self.output_tokens
+        if self.cost is not None:
+            payload["cost"] = self.cost
+        return payload
+
+
+@dataclass
+class EmbeddingTrace:
+    model: str
+    input: str
+    input_tokens: int | None = None
+
+    def to_dict(self) -> EmbeddingTracePayload:
+        payload: EmbeddingTracePayload = {"model": self.model, "input": self.input}
+        if self.input_tokens is not None:
+            payload["input_tokens"] = self.input_tokens
         return payload
 
 
@@ -119,7 +146,7 @@ class Interaction:
     time_end: str
     end_user: str
     tags: dict[str, str]
-    traces: list[RetrievalTrace | LLMTrace]
+    traces: list[RetrievalTrace | LLMTrace | EmbeddingTrace]
 
     def to_interaction_dict(self) -> InteractionPayload:
         return {

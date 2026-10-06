@@ -7,6 +7,7 @@ from typing import cast
 
 from langfuse_sync.models import (
     ChatMessage,
+    EmbeddingTrace,
     Interaction,
     JsonValue,
     LangfuseObservation,
@@ -205,41 +206,141 @@ def _extract_user_input(value: JsonValue | None) -> str:
     return _stringify(value)
 
 
+_SKIP_OBSERVATION_TYPES = frozenset(
+    {"EVENT", "AGENT", "CHAIN", "EVALUATOR", "GUARDRAIL"}
+)
+
+
 def _langfuse_tags_to_dict(tags: list[str] | dict[str, str] | None) -> dict[str, str]:
     if not tags:
         return {}
     if isinstance(tags, dict):
         return {str(k): str(v) for k, v in tags.items()}
-    return {str(tag): "true" for tag in tags if tag is not None}
+
+    grouped: dict[str, set[str]] = {}
+    for tag in tags:
+        if tag is None:
+            continue
+        text = str(tag)
+        if ":" in text:
+            key, value = text.split(":", 1)
+            key, value = key.strip(), value.strip()
+        else:
+            key, value = text.strip(), "true"
+        if not key:
+            continue
+        grouped.setdefault(key, set()).add(value)
+    return {key: ", ".join(sorted(values)) for key, values in grouped.items()}
+
+
+def _observation_cost_micro_dollars(observation: LangfuseObservation) -> int | None:
+    calculated = observation.get("calculatedTotalCost")
+    if calculated is not None:
+        return round(float(calculated) * 1_000_000)
+    cost_details = observation.get("costDetails") or {}
+    total = cost_details.get("total")
+    if total is not None:
+        return round(float(total) * 1_000_000)
+    return None
+
+
+def _observation_token_counts(
+    observation: LangfuseObservation,
+) -> tuple[int | None, int | None]:
+    usage = observation.get("usageDetails") or {}
+    fallback = observation.get("usage") or {}
+    input_tokens = usage.get("input")
+    if input_tokens is None:
+        input_tokens = fallback.get("input")
+    output_tokens = usage.get("output")
+    if output_tokens is None:
+        output_tokens = fallback.get("output")
+    return input_tokens, output_tokens
+
+
+def _child_observation_ids(observations: list[LangfuseObservation]) -> set[str]:
+    return {
+        parent_id
+        for observation in observations
+        if (parent_id := observation.get("parentObservationId"))
+    }
+
+
+def _sorted_observations(
+    observations: list[LangfuseObservation],
+) -> list[LangfuseObservation]:
+    return sorted(
+        observations,
+        key=lambda obs: (obs.get("startTime") or "", obs.get("id") or ""),
+    )
 
 
 def convert_observations_to_traces(
     observations: list[LangfuseObservation],
-) -> list[RetrievalTrace | LLMTrace]:
-    traces: list[RetrievalTrace | LLMTrace] = []
-    for observation in observations:
-        if observation.get("parentObservationId") is not None:
+) -> list[RetrievalTrace | LLMTrace | EmbeddingTrace]:
+    if not observations:
+        return []
+
+    parents_with_children = _child_observation_ids(observations)
+    traces: list[RetrievalTrace | LLMTrace | EmbeddingTrace] = []
+
+    for observation in _sorted_observations(observations):
+        obs_type = (observation.get("type") or "").upper()
+        obs_id = observation.get("id") or ""
+
+        if obs_type in _SKIP_OBSERVATION_TYPES:
             continue
-        usage = observation.get("usageDetails") or {}
-        if observation.get("model") is not None:
+
+        if obs_type == "SPAN" and obs_id in parents_with_children:
+            continue
+
+        if obs_type == "EMBEDDING":
+            model = str(
+                observation.get("model") or observation.get("name") or "embedding"
+            )
+            input_tokens, _ = _observation_token_counts(observation)
             traces.append(
-                LLMTrace(
-                    messages=_parse_messages(observation.get("input")),
-                    model=str(observation["model"]),
-                    output=_stringify(observation.get("output")),
-                    input_tokens=usage.get("input"),
-                    output_tokens=usage.get("output"),
+                EmbeddingTrace(
+                    model=model,
+                    input=_stringify(observation.get("input")),
+                    input_tokens=input_tokens,
                 )
             )
-        else:
+            continue
+
+        if obs_type in {"RETRIEVER", "TOOL"} or (
+            obs_type == "SPAN"
+            and obs_id not in parents_with_children
+            and _stringify(observation.get("output")).strip()
+        ):
             traces.append(
                 RetrievalTrace(
-                    source=str(observation.get("name") or "retrieval"),
+                    source=str(
+                        observation.get("name") or obs_type.lower() or "retrieval"
+                    ),
                     input=_extract_user_input(observation.get("input"))
                     or _stringify(observation.get("input")),
                     outputs=[_stringify(observation.get("output"))],
                 )
             )
+            continue
+
+        if obs_type == "GENERATION" or observation.get("model") is not None:
+            input_tokens, output_tokens = _observation_token_counts(observation)
+            model = str(
+                observation.get("model") or observation.get("name") or "unknown"
+            )
+            traces.append(
+                LLMTrace(
+                    messages=_parse_messages(observation.get("input")),
+                    model=model,
+                    output=_stringify(observation.get("output")),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=_observation_cost_micro_dollars(observation),
+                )
+            )
+
     return traces
 
 

@@ -16,6 +16,7 @@ jobs:
           - microsoft_copilot
           - claude_compliance
           - gemini_enterprise
+          - langfuse
     steps:
       - uses: actions/checkout@v4
 
