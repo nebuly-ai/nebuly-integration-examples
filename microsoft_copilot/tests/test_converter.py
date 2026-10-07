@@ -33,6 +33,7 @@ def _user(
     country: str | None = None,
     usage_location: str | None = None,
     company_name: str | None = None,
+    employee_hire_date: datetime | None = None,
 ) -> CopilotUser:
     return CopilotUser(
         id="user_1",
@@ -44,6 +45,7 @@ def _user(
         country=country,
         usageLocation=usage_location,
         companyName=company_name,
+        employeeHireDate=employee_hire_date,
     )
 
 
@@ -309,6 +311,7 @@ def test_build_tags() -> None:
         city="Milan",
         country="IT",
         company_name="Contoso",
+        employee_hire_date=datetime(2020, 3, 15, tzinfo=UTC),
     )
     tags = user_defined.build_tags(turn, user)
 
@@ -322,6 +325,7 @@ def test_build_tags() -> None:
     assert tags["city"] == "Milan"
     assert tags["country"] == "IT"
     assert tags["company_name"] == "Contoso"
+    assert tags["employee_hire_date"] == "2020-03-15"
 
 
 def test_build_tags_country_falls_back_to_usage_location() -> None:
@@ -341,6 +345,7 @@ def test_build_tags_org_fields_none_when_missing() -> None:
         "city",
         "country",
         "company_name",
+        "employee_hire_date",
     ):
         assert key not in tags
 

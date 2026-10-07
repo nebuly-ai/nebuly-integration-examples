@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -18,6 +19,14 @@ _PLACEHOLDER_ATTACHMENT_URL = "file:///unknown-url"
 
 def _non_empty_tags(fields: dict[str, str | None]) -> dict[str, str]:
     return {key: value for key, value in fields.items() if value}
+
+
+def _format_hire_date(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).date().isoformat()
 
 
 def _model_transparency_tags(
@@ -77,6 +86,7 @@ def build_tags(
         "city": user.city,
         "country": user.country or user.usage_location,
         "company_name": user.company_name,
+        "employee_hire_date": _format_hire_date(user.employee_hire_date),
     }
     if audit is not None:
         raw.update(_audit_tags(audit))

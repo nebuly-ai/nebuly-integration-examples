@@ -207,6 +207,7 @@ class GraphClient:
                 "country",
                 "usageLocation",
                 "companyName",
+                "employeeHireDate",
             ],
             filter=sku_filter,
             top=BATCH_TOP,
@@ -248,6 +249,7 @@ class GraphClient:
                                 country=user.country,
                                 usageLocation=user.usage_location,
                                 companyName=user.company_name,
+                                employeeHireDate=user.employee_hire_date,
                             )
                         )
 

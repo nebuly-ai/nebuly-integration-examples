@@ -119,6 +119,7 @@ Each interaction includes Entra ID directory metadata on the licensed user (no e
 | `city` | `city` |
 | `country` | `country`, or `usageLocation` when `country` is empty |
 | `company_name` | `companyName` |
+| `employee_hire_date` | `employeeHireDate` (ISO `YYYY-MM-DD` in UTC) |
 
 These tags reflect directory profile fields, not message content; they are not affected by `ANONYMIZE`. Org tags are omitted when the Entra profile field is empty (Nebuly requires non-null string tag values).
 

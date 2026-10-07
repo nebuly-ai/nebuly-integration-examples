@@ -59,6 +59,7 @@ def test_list_copilot_users_selects_and_maps_org_fields() -> None:
         country = None
         usage_location = "US"
         company_name = "Contoso Ltd"
+        employee_hire_date = None
 
     class FakePage:
         odata_next_link = None
@@ -114,6 +115,7 @@ def test_list_copilot_users_selects_and_maps_org_fields() -> None:
         "country",
         "usageLocation",
         "companyName",
+        "employeeHireDate",
     ]
     assert len(users) == 1
     assert users[0] == CopilotUser(
@@ -127,6 +129,7 @@ def test_list_copilot_users_selects_and_maps_org_fields() -> None:
         country=None,
         usageLocation="US",
         companyName="Contoso Ltd",
+        employeeHireDate=None,
     )
     mock_graph_cred.close.assert_awaited_once()
 
