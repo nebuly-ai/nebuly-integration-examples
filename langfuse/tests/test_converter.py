@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+
 from langfuse_sync.converter import (
     convert_observations_to_traces,
     interaction_from_langfuse_trace,
 )
 from langfuse_sync.models import (
     EmbeddingTrace,
+    JsonValue,
     LangfuseObservation,
     LangfuseTrace,
     LLMTrace,
@@ -25,6 +28,71 @@ def test_tag_key_value_parsing() -> None:
     assert interaction is not None
     assert interaction.tags["team"] == "Engineering, Ops"
     assert interaction.tags["beta"] == "true"
+
+
+def _minimal_trace(**overrides: object) -> LangfuseTrace:
+    base: LangfuseTrace = {
+        "id": "t1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "input": "hi",
+        "output": "bye",
+    }
+    base.update(overrides)  # type: ignore[typeddict-item]
+    return base
+
+
+def test_metadata_scalar_flattening() -> None:
+    trace = _minimal_trace(
+        metadata={"tenant": "nebuly", "temperature": 0, "stream": True},
+    )
+    interaction = interaction_from_langfuse_trace(trace, [])
+    assert interaction is not None
+    assert interaction.tags["tenant"] == "nebuly"
+    assert interaction.tags["temperature"] == "0"
+    assert interaction.tags["stream"] == "true"
+
+
+def test_metadata_nested_flattening() -> None:
+    trace = _minimal_trace(
+        metadata={"scope": {"attributes": {"public_key": "pk"}}},
+    )
+    interaction = interaction_from_langfuse_trace(trace, [])
+    assert interaction is not None
+    assert interaction.tags["scope.attributes.public_key"] == "pk"
+
+
+def test_metadata_list_handling() -> None:
+    trace = _minimal_trace(metadata={"labels": ["a", "b"]})
+    interaction = interaction_from_langfuse_trace(trace, [])
+    assert interaction is not None
+    assert interaction.tags["labels"] == "a, b"
+
+    trace_nested = _minimal_trace(metadata={"items": [{"x": 1}]})
+    interaction_nested = interaction_from_langfuse_trace(trace_nested, [])
+    assert interaction_nested is not None
+    assert interaction_nested.tags["items"] == json.dumps([{"x": 1}])
+
+    empty_cases: tuple[dict[str, JsonValue] | None, ...] = (
+        {"empty_list": []},
+        {"empty_dict": {}},
+        None,
+    )
+    for empty_meta in empty_cases:
+        trace_empty = _minimal_trace(metadata=empty_meta)
+        interaction_empty = interaction_from_langfuse_trace(trace_empty, [])
+        assert interaction_empty is not None
+        assert "empty_list" not in interaction_empty.tags
+        assert "empty_dict" not in interaction_empty.tags
+
+
+def test_metadata_tag_collision_langfuse_wins() -> None:
+    trace = _minimal_trace(
+        tags=["team:Ops"],
+        metadata={"team": "Eng"},
+    )
+    interaction = interaction_from_langfuse_trace(trace, [])
+    assert interaction is not None
+    assert interaction.tags["team"] == "Ops"
 
 
 def test_nested_generation_emitted() -> None:
