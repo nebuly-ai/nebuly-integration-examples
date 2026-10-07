@@ -16,6 +16,7 @@ jobs:
           - microsoft_copilot
           - claude_compliance
           - gemini_enterprise
+          - langfuse
     steps:
       - uses: actions/checkout@v4
 
@@ -29,5 +30,5 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.project }}
         run: |
-          poetry install --no-interaction
+          poetry install --with dev --no-interaction
           poetry run pytest
