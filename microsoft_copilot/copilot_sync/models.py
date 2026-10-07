@@ -20,6 +20,7 @@ class CopilotUser(BaseModel):
     country: str | None = None
     usage_location: str | None = Field(None, alias="usageLocation")
     company_name: str | None = Field(None, alias="companyName")
+    employee_hire_date: datetime | None = Field(None, alias="employeeHireDate")
 
     model_config = ConfigDict(validate_by_name=True, extra="allow")
 
