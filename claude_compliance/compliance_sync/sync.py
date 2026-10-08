@@ -2,38 +2,61 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 from httpx import HTTPStatusError
 
-from .cache import ChatState, ChatWorkPlan, SyncCache
-from .compliance_client import ComplianceClient
-from .config import Config, datetime_to_timestamp_str
-from .converter import Interaction, build_message_pairs, pair_to_payload
-from .nebuly_client import NebulyClient
+from .cache import ConversationState, SyncCache
+from .compliance_client import ComplianceClient, SourceUnavailableError
+from .config import Config, timestamp_str_to_datetime
+from .nebuly_client import NebulyClient, PermanentRejectionError
+from .sources import (
+    ChatSource,
+    ConversationRef,
+    FetchRequest,
+    LocalSessionSource,
+    RemoteSessionSource,
+    listed_user_missing,
+    remote_listing_status,
+)
 
 if TYPE_CHECKING:
-    from .models import ChatSummary
+    from .sources import ConversationResult
 
 logger = logging.getLogger(__name__)
 
+_LISTING_OVERLAP = timedelta(minutes=10)
+
+
+class SourceAdapter(Protocol):
+    name: str
+
+    def list_changed(
+        self,
+        listing_from: datetime | None,
+        to_date: datetime | None,
+    ) -> list[ConversationRef]: ...
+
+    def fetch(self, request: FetchRequest) -> ConversationResult: ...
+
 
 @dataclass
-class Counts:
-    fetched: int = 0
+class SourceCounts:
+    listed: int = 0
+    processed: int = 0
+    skipped_no_user: int = 0
+    skipped_deleted: int = 0
     sent: int = 0
-    skipped: int = 0
-    failed: int = 0
-    chats_processed: int = 0
-    chats_skipped: int = 0
+    rejected: int = 0
+    skipped_interactions: int = 0
+    fetch_failed: int = 0
 
 
 @dataclass
 class SyncSummary:
-    users_processed: int = 0
-    totals: Counts = field(default_factory=Counts)
+    sources: dict[str, SourceCounts] = field(default_factory=dict)
 
 
 def _configure_logging(*, verbose: bool) -> None:
@@ -45,17 +68,353 @@ def _configure_logging(*, verbose: bool) -> None:
     logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
 
 
-def _merge_coverage(
-    state_from: datetime | None,
-    state_until: datetime | None,
+def _adapters_for(
+    compliance: ComplianceClient,
+    organization_uuid: str,
+    source_names: tuple[str, ...],
+) -> list[SourceAdapter]:
+    registry: dict[str, SourceAdapter] = {
+        "chats": ChatSource(compliance, organization_uuid),
+        "local_sessions": LocalSessionSource(compliance, organization_uuid),
+        "remote_sessions": RemoteSessionSource(compliance, organization_uuid),
+    }
+    return [registry[name] for name in source_names]
+
+
+def _listing_from(
+    cache: SyncCache,
+    source: str,
+    from_date: datetime | None,
+) -> datetime | None:
+    if from_date is not None:
+        return from_date
+    watermark = cache.get_watermark(source)
+    if watermark is None:
+        return None
+    return watermark - _LISTING_OVERLAP
+
+
+def _ref_from_state(state: ConversationState) -> ConversationRef:
+    return ConversationRef(
+        source=state.source,
+        conversation_id=state.conversation_id,
+        updated_at=state.updated_at_seen,
+        metadata_json=state.metadata_json,
+    )
+
+
+def _interaction_time_end(payload: dict[str, Any]) -> datetime:
+    raw = payload.get("interaction", {}).get("time_end")
+    if isinstance(raw, str):
+        return timestamp_str_to_datetime(raw)
+    raise ValueError("interaction payload missing time_end")
+
+
+def _is_transient_http(exc: HTTPStatusError) -> bool:
+    status = exc.response.status_code
+    return status in {408, 429} or status >= 500
+
+
+def _collect_todo(
+    cache: SyncCache,
+    adapter: SourceAdapter,
+    refs: list[ConversationRef],
     requested_from: datetime | None,
+) -> list[ConversationRef]:
+    listed_ids = {ref.conversation_id for ref in refs}
+    todo = [
+        ref
+        for ref in refs
+        if cache.should_process(
+            adapter.name,
+            ref.conversation_id,
+            ref.updated_at,
+            requested_from,
+        )
+    ]
+    todo.extend(
+        _ref_from_state(state)
+        for state in cache.iter_unfinished(adapter.name)
+        if state.conversation_id not in listed_ids
+    )
+    return todo
+
+
+def _existing_coverage(
+    cache: SyncCache,
+    source: str,
+    conversation_id: str,
+) -> datetime | None:
+    state = cache.get_conversation(source, conversation_id)
+    if state is None:
+        return None
+    return state.coverage_from
+
+
+def _process_conversation(  # noqa: C901, PLR0912, PLR0915
+    *,
+    adapter: SourceAdapter,
+    ref: ConversationRef,
+    cache: SyncCache,
+    nebuly: NebulyClient,
+    config: Config,
     run_until: datetime,
-) -> tuple[datetime | None, datetime]:
-    from_candidates = [x for x in [state_from, requested_from] if x is not None]
-    new_from = min(from_candidates) if from_candidates else None
-    until_candidates = [x for x in [state_until, run_until] if x is not None]
-    new_until = max(until_candidates) if until_candidates else run_until
-    return new_from, new_until
+    now: datetime,
+    counts: SourceCounts,
+) -> bool:
+    """Returns True when a transient failure should stop the source run."""
+    if ref.deleted:
+        cache.mark_gone(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=ref.updated_at,
+            reason="deleted",
+        )
+        counts.skipped_deleted += 1
+        if not config.dry_run:
+            cache.commit()
+        return False
+
+    if listed_user_missing(ref):
+        cache.upsert_conversation(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=ref.updated_at,
+            coverage_from=_existing_coverage(cache, adapter.name, ref.conversation_id),
+            status="completed",
+            metadata_json=ref.metadata_json,
+        )
+        counts.skipped_no_user += 1
+        if not config.dry_run:
+            cache.commit()
+        return False
+
+    request = FetchRequest(
+        ref=ref,
+        from_date=config.from_date,
+        now=now,
+        idle_minutes=config.session_idle_minutes,
+        anonymize=config.anonymize,
+    )
+    try:
+        result = adapter.fetch(request)
+    except HTTPStatusError as exc:
+        status = exc.response.status_code
+        if (
+            status == 404
+            and adapter.name == "remote_sessions"
+            and remote_listing_status(ref) == "pending"
+        ):
+            cache.upsert_conversation(
+                adapter.name,
+                ref.conversation_id,
+                updated_at_seen=ref.updated_at,
+                coverage_from=None,
+                status="pending",
+                metadata_json=ref.metadata_json,
+            )
+            if not config.dry_run:
+                cache.commit()
+            counts.processed += 1
+            return False
+        if status == 404:
+            cache.mark_gone(
+                adapter.name,
+                ref.conversation_id,
+                updated_at_seen=ref.updated_at,
+                reason="not found (404)",
+            )
+            if not config.dry_run:
+                cache.commit()
+            counts.processed += 1
+            return False
+        if not _is_transient_http(exc):
+            cache.upsert_conversation(
+                adapter.name,
+                ref.conversation_id,
+                updated_at_seen=ref.updated_at,
+                coverage_from=config.from_date,
+                status="failed",
+                last_error=f"fetch HTTP {status}",
+                metadata_json=ref.metadata_json,
+                claim_coverage=False,
+            )
+            counts.fetch_failed += 1
+            if not config.dry_run:
+                cache.commit()
+            return False
+        cache.upsert_conversation(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=ref.updated_at,
+            coverage_from=config.from_date,
+            status="failed",
+            last_error=f"fetch HTTP {status}",
+            metadata_json=ref.metadata_json,
+            claim_coverage=False,
+        )
+        if not config.dry_run:
+            cache.commit()
+        return True
+    except httpx.TransportError as exc:
+        cache.upsert_conversation(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=ref.updated_at,
+            coverage_from=config.from_date,
+            status="failed",
+            last_error=str(exc),
+            metadata_json=ref.metadata_json,
+            claim_coverage=False,
+        )
+        if not config.dry_run:
+            cache.commit()
+        return True
+
+    if result.gone:
+        cache.mark_gone(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=result.updated_at,
+            reason=result.gone_reason or "gone",
+        )
+        if not config.dry_run:
+            cache.commit()
+        counts.processed += 1
+        return False
+
+    if result.user_id is None:
+        cache.upsert_conversation(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=result.updated_at,
+            coverage_from=config.from_date,
+            status="completed",
+            metadata_json=result.metadata_json or ref.metadata_json,
+        )
+        counts.skipped_no_user += 1
+        if not config.dry_run:
+            cache.commit()
+        return False
+
+    counts.processed += 1
+    has_open = False
+    held_by_to_date = False
+    coverage_from = config.from_date
+
+    for item in result.interactions:
+        if not item.closed:
+            has_open = True
+            continue
+        if item.payload is None:
+            counts.skipped_interactions += 1
+            continue
+        if config.from_date is not None and item.time_start < config.from_date:
+            counts.skipped_interactions += 1
+            continue
+        time_end = _interaction_time_end(item.payload)
+        if time_end > run_until:
+            held_by_to_date = True
+            continue
+        if cache.is_emitted(adapter.name, ref.conversation_id, item.key):
+            counts.skipped_interactions += 1
+            continue
+
+        try:
+            nebuly.send_interaction(item.payload)
+        except PermanentRejectionError:
+            cache.record_emitted(
+                adapter.name, ref.conversation_id, item.key, "rejected"
+            )
+            counts.rejected += 1
+            if not config.dry_run:
+                cache.commit()
+            continue
+        except (HTTPStatusError, httpx.TransportError):
+            cache.upsert_conversation(
+                adapter.name,
+                ref.conversation_id,
+                updated_at_seen=result.updated_at,
+                coverage_from=coverage_from,
+                status="failed",
+                last_error="send error",
+                metadata_json=result.metadata_json or ref.metadata_json,
+                claim_coverage=False,
+            )
+            if not config.dry_run:
+                cache.commit()
+            logger.exception(
+                "Failed to send interaction source=%s conversation=%s key=%s",
+                adapter.name,
+                ref.conversation_id,
+                item.key,
+            )
+            return True
+
+        cache.record_emitted(adapter.name, ref.conversation_id, item.key, "sent")
+        counts.sent += 1
+        if coverage_from is None or item.time_start < coverage_from:
+            coverage_from = item.time_start
+        if not config.dry_run:
+            cache.commit()
+
+    pending = has_open or held_by_to_date or result.remote_open
+    conversation_status = "pending" if pending else "completed"
+    cache.upsert_conversation(
+        adapter.name,
+        ref.conversation_id,
+        updated_at_seen=result.updated_at,
+        coverage_from=(
+            coverage_from if conversation_status == "completed" else config.from_date
+        ),
+        status=conversation_status,
+        metadata_json=result.metadata_json or ref.metadata_json,
+        claim_coverage=conversation_status == "completed",
+    )
+    if not config.dry_run:
+        cache.commit()
+    return False
+
+
+def _run_source(
+    *,
+    adapter: SourceAdapter,
+    cache: SyncCache,
+    nebuly: NebulyClient,
+    config: Config,
+    run_until: datetime,
+    run_started: datetime,
+) -> tuple[SourceCounts, bool]:
+    counts = SourceCounts()
+    listing_from = _listing_from(cache, adapter.name, config.from_date)
+    try:
+        refs = adapter.list_changed(listing_from, run_until)
+    except SourceUnavailableError as exc:
+        logger.info("Skipping source %s: %s", adapter.name, exc)
+        return counts, False
+
+    counts.listed = len(refs)
+    todo = _collect_todo(cache, adapter, refs, config.from_date)
+    now = datetime.now(UTC)
+    stopped = False
+    for ref in todo:
+        if _process_conversation(
+            adapter=adapter,
+            ref=ref,
+            cache=cache,
+            nebuly=nebuly,
+            config=config,
+            run_until=run_until,
+            now=now,
+            counts=counts,
+        ):
+            stopped = True
+            break
+
+    if not stopped and not config.dry_run:
+        cache.set_watermark(adapter.name, run_started)
+        cache.commit()
+    return counts, stopped
 
 
 def run_sync(config: Config) -> SyncSummary:
@@ -67,12 +426,13 @@ def run_sync(config: Config) -> SyncSummary:
         dry_run=config.dry_run,
     )
     run_until = config.run_until()
-
+    run_started = datetime.now(UTC)
     summary = SyncSummary()
 
     try:
+        timeout = 300.0
         with httpx.Client(
-            base_url=config.compliance_base_url, timeout=60.0
+            base_url=config.compliance_base_url, timeout=timeout
         ) as compliance_http:
             compliance = ComplianceClient(
                 compliance_http,
@@ -80,7 +440,7 @@ def run_sync(config: Config) -> SyncSummary:
                 max_requests_per_minute=config.compliance_max_requests_per_minute,
             )
 
-            with httpx.Client(timeout=60.0) as nebuly_http:
+            with httpx.Client(timeout=timeout) as nebuly_http:
                 nebuly = NebulyClient(
                     nebuly_http,
                     config.nebuly_api_key,
@@ -88,591 +448,40 @@ def run_sync(config: Config) -> SyncSummary:
                     dry_run=config.dry_run,
                 )
 
-                users = compliance.list_all_users(config.organization_uuid)
-                logger.info("Fetched %d users from Compliance API", len(users))
-
-                for user in sorted(users, key=lambda u: u.id):
-                    user_counts = _sync_user(
-                        user_id=user.id,
-                        config=config,
-                        compliance=compliance,
-                        nebuly=nebuly,
+                for adapter in _adapters_for(
+                    compliance,
+                    config.organization_uuid,
+                    config.sources,
+                ):
+                    counts, stopped = _run_source(
+                        adapter=adapter,
                         cache=cache,
+                        nebuly=nebuly,
+                        config=config,
                         run_until=run_until,
+                        run_started=run_started,
                     )
-                    summary.users_processed += 1
-                    summary.totals.fetched += user_counts.fetched
-                    summary.totals.sent += user_counts.sent
-                    summary.totals.skipped += user_counts.skipped
-                    summary.totals.failed += user_counts.failed
-                    summary.totals.chats_processed += user_counts.chats_processed
-                    summary.totals.chats_skipped += user_counts.chats_skipped
+                    summary.sources[adapter.name] = counts
+                    logger.info(
+                        "Source %s: listed=%d processed=%d sent=%d rejected=%d "
+                        "skipped_interactions=%d no_user=%d deleted=%d fetch_failed=%d",
+                        adapter.name,
+                        counts.listed,
+                        counts.processed,
+                        counts.sent,
+                        counts.rejected,
+                        counts.skipped_interactions,
+                        counts.skipped_no_user,
+                        counts.skipped_deleted,
+                        counts.fetch_failed,
+                    )
+                    if stopped:
+                        logger.error(
+                            "Stopping after transient failure on source %s",
+                            adapter.name,
+                        )
+                        break
     finally:
         cache.close()
 
-    logger.info(
-        "Sync complete: users=%d | chats processed=%d skipped=%d | "
-        "interactions fetched=%d sent=%d skipped=%d failed=%d",
-        summary.users_processed,
-        summary.totals.chats_processed,
-        summary.totals.chats_skipped,
-        summary.totals.fetched,
-        summary.totals.sent,
-        summary.totals.skipped,
-        summary.totals.failed,
-    )
     return summary
-
-
-@dataclass
-class ExportOutcome:
-    fetched: int = 0
-    sent: int = 0
-    skipped: int = 0
-    failed: int = 0
-    user_failed: bool = False
-    chat_failed: bool = False
-    exported_until: datetime | None = None
-    exported_until_msg_id: str | None = None
-
-
-def _at_or_before_watermark(
-    ts: datetime,
-    msg_id: str,
-    watermark_ts: datetime | None,
-    watermark_msg_id: str | None,
-) -> bool:
-    if watermark_ts is None:
-        return False
-    if ts < watermark_ts:
-        return True
-    if ts > watermark_ts:
-        return False
-    if watermark_msg_id is None:
-        return True
-    return msg_id <= watermark_msg_id
-
-
-def _at_or_after_watermark(
-    ts: datetime,
-    msg_id: str,
-    watermark_ts: datetime | None,
-    watermark_msg_id: str | None,
-) -> bool:
-    if watermark_ts is None:
-        return False
-    if ts > watermark_ts:
-        return True
-    if ts < watermark_ts:
-        return False
-    if watermark_msg_id is None:
-        return True
-    return msg_id >= watermark_msg_id
-
-
-def _paginate_chats_for_user(
-    compliance: ComplianceClient,
-    user_id: str,
-    updated_at_gte: str | None,
-    updated_at_lte: str,
-) -> dict[str, ChatSummary]:
-    chats_by_id: dict[str, ChatSummary] = {}
-    after_id: str | None = None
-    while True:
-        chats_page = compliance.list_chats(
-            [user_id],
-            updated_at_gte=updated_at_gte,
-            updated_at_lte=updated_at_lte,
-            after_id=after_id,
-        )
-        for chat in chats_page.data:
-            chats_by_id[chat.id] = chat
-        if not chats_page.has_more:
-            break
-        after_id = chats_page.last_id
-        if after_id is None:
-            break
-    return chats_by_id
-
-
-def _recover_missing_chats(
-    *,
-    compliance: ComplianceClient,
-    cache: SyncCache,
-    user_id: str,
-    chats_by_id: dict[str, ChatSummary],
-    dry_run: bool,
-) -> None:
-    unfinished = cache.iter_unfinished_chats(user_id)
-    missing = {cid for cid in unfinished if cid not in chats_by_id}
-    if not missing:
-        return
-    recovery_after_id: str | None = None
-    while missing:
-        extra_page = compliance.list_chats([user_id], after_id=recovery_after_id)
-        for chat in extra_page.data:
-            if chat.id in missing:
-                chats_by_id[chat.id] = chat
-                missing.discard(chat.id)
-        if not extra_page.has_more or extra_page.last_id is None:
-            break
-        recovery_after_id = extra_page.last_id
-    for cid in missing:
-        cache.mark_chat_deleted(cid, "Not found in chat listing")
-    if missing and not dry_run:
-        cache.commit()
-
-
-def _collect_chats_for_user(
-    *,
-    user_id: str,
-    compliance: ComplianceClient,
-    cache: SyncCache,
-    requested_from: datetime | None,
-    run_until: datetime,
-    dry_run: bool,
-) -> list[ChatSummary]:
-    updated_at_gte = (
-        datetime_to_timestamp_str(requested_from) if requested_from else None
-    )
-    updated_at_lte = datetime_to_timestamp_str(run_until)
-    # requested_from drives both the chat updated_at.gte listing window and
-    # message backfill start; coverage_from <= updated_at for cached chats, so
-    # backfill-eligible chats are always included in the listing.
-
-    chats_by_id = _paginate_chats_for_user(
-        compliance, user_id, updated_at_gte, updated_at_lte
-    )
-
-    _recover_missing_chats(
-        compliance=compliance,
-        cache=cache,
-        user_id=user_id,
-        chats_by_id=chats_by_id,
-        dry_run=dry_run,
-    )
-
-    return sorted(chats_by_id.values(), key=lambda c: (c.updated_at, c.id))
-
-
-def _highest_from_skipped_chat(
-    cache: SyncCache,
-    chat_id: str,
-    highest_completed: datetime | None,
-) -> datetime | None:
-    state = cache.get_chat_state(chat_id)
-    if (
-        state
-        and state.last_exported_chat_updated_at
-        and (
-            highest_completed is None
-            or state.last_exported_chat_updated_at > highest_completed
-        )
-    ):
-        return state.last_exported_chat_updated_at
-    return highest_completed
-
-
-def _pair_already_exported(
-    *,
-    is_backfill: bool,
-    assistant_ts: datetime,
-    assistant_id: str,
-    prior_coverage_from: datetime | None,
-    prior_coverage_from_msg_id: str | None,
-    prior_coverage_until: datetime | None,
-    prior_coverage_until_msg_id: str | None,
-) -> bool:
-    if is_backfill:
-        return _at_or_after_watermark(
-            assistant_ts,
-            assistant_id,
-            prior_coverage_from,
-            prior_coverage_from_msg_id,
-        )
-    return _at_or_before_watermark(
-        assistant_ts,
-        assistant_id,
-        prior_coverage_until,
-        prior_coverage_until_msg_id,
-    )
-
-
-def _handle_send_interaction_failure(
-    *,
-    chat: ChatSummary,
-    cache: SyncCache,
-    config: Config,
-    user_id: str,
-    outcome: ExportOutcome,
-    is_backfill: bool,
-) -> None:
-    outcome.failed += 1
-    outcome.user_failed = True
-    outcome.chat_failed = True
-    if is_backfill:
-        cache.mark_chat_failed(chat.id, "HTTP error sending interaction")
-    else:
-        cache.mark_chat_failed(
-            chat.id,
-            "HTTP error sending interaction",
-            new_coverage_until=outcome.exported_until,
-            new_coverage_until_msg_id=outcome.exported_until_msg_id,
-        )
-    if not config.dry_run:
-        cache.commit()
-    logger.error(
-        "Failed to send interaction for user=%s chat=%s; stopping user to allow resume",
-        user_id,
-        chat.id,
-    )
-
-
-def _checkpoint_after_send(
-    *,
-    chat_id: str,
-    cache: SyncCache,
-    outcome: ExportOutcome,
-    msg_ts: datetime,
-    msg_id: str,
-    is_backfill: bool,
-) -> None:
-    if is_backfill:
-        cache.checkpoint_chat_coverage_from(chat_id, msg_ts, msg_id)
-        return
-    if outcome.exported_until is None or msg_ts > outcome.exported_until:
-        outcome.exported_until = msg_ts
-        outcome.exported_until_msg_id = msg_id
-    elif msg_ts == outcome.exported_until and (
-        outcome.exported_until_msg_id is None or msg_id > outcome.exported_until_msg_id
-    ):
-        outcome.exported_until_msg_id = msg_id
-    cache.checkpoint_chat_coverage_until(
-        chat_id, outcome.exported_until, outcome.exported_until_msg_id or msg_id
-    )
-
-
-def _send_chat_pairs(
-    *,
-    chat: ChatSummary,
-    pairs: list[Interaction],
-    nebuly: NebulyClient,
-    cache: SyncCache,
-    config: Config,
-    user_id: str,
-    outcome: ExportOutcome,
-    prior_coverage_from: datetime | None = None,
-    prior_coverage_from_msg_id: str | None = None,
-    prior_coverage_until: datetime | None = None,
-    prior_coverage_until_msg_id: str | None = None,
-    is_backfill: bool = False,
-) -> bool:
-    """Send message pairs for one interval. Returns True if export should stop."""
-    ordered_pairs = reversed(pairs) if is_backfill else pairs
-    for pair in ordered_pairs:
-        assistant_ts = pair.assistant_message.created_at
-        assistant_id = pair.assistant_message.id
-        if _pair_already_exported(
-            is_backfill=is_backfill,
-            assistant_ts=assistant_ts,
-            assistant_id=assistant_id,
-            prior_coverage_from=prior_coverage_from,
-            prior_coverage_from_msg_id=prior_coverage_from_msg_id,
-            prior_coverage_until=prior_coverage_until,
-            prior_coverage_until_msg_id=prior_coverage_until_msg_id,
-        ):
-            outcome.skipped += 1
-            continue
-
-        payload = pair_to_payload(pair, anonymize=config.anonymize)
-        if payload is None:
-            outcome.skipped += 1
-            continue
-
-        outcome.fetched += 1
-
-        try:
-            nebuly.send_interaction(payload)
-        except (HTTPStatusError, httpx.RequestError):
-            _handle_send_interaction_failure(
-                chat=chat,
-                cache=cache,
-                config=config,
-                user_id=user_id,
-                outcome=outcome,
-                is_backfill=is_backfill,
-            )
-            return True
-
-        outcome.sent += 1
-        msg_ts = pair.assistant_message.created_at
-        msg_id = pair.assistant_message.id
-        _checkpoint_after_send(
-            chat_id=chat.id,
-            cache=cache,
-            outcome=outcome,
-            msg_ts=msg_ts,
-            msg_id=msg_id,
-            is_backfill=is_backfill,
-        )
-        if not config.dry_run:
-            cache.commit()
-    return False
-
-
-def _export_chat_intervals(
-    *,
-    chat: ChatSummary,
-    plan: ChatWorkPlan,
-    compliance: ComplianceClient,
-    nebuly: NebulyClient,
-    cache: SyncCache,
-    config: Config,
-    user_id: str,
-    prior_state: ChatState | None,
-) -> ExportOutcome:
-    outcome = ExportOutcome(
-        exported_until=(
-            prior_state.coverage_until
-            if prior_state and prior_state.status == "completed"
-            else None
-        ),
-        exported_until_msg_id=(
-            prior_state.coverage_until_msg_id
-            if prior_state and prior_state.status == "completed"
-            else None
-        ),
-    )
-    cache.mark_chat_in_progress(chat)
-
-    for interval in plan.intervals:
-        try:
-            chat_response = compliance.list_chat_messages(
-                chat.id,
-                created_at_gte=(
-                    datetime_to_timestamp_str(interval.created_at_gte)
-                    if interval.created_at_gte is not None
-                    else None
-                ),
-                created_at_lte=datetime_to_timestamp_str(interval.created_at_lte),
-            )
-        except HTTPStatusError as e:
-            if e.response.status_code == 404:
-                logger.warning("Chat %s not found at source, marking deleted", chat.id)
-                cache.mark_chat_deleted(chat.id, "Chat not found (404)")
-                if not config.dry_run:
-                    cache.commit()
-                outcome.chat_failed = True
-                break
-            raise
-        except httpx.RequestError:
-            outcome.chat_failed = True
-            outcome.user_failed = True
-            cache.mark_chat_failed(chat.id, "Network error fetching chat messages")
-            if not config.dry_run:
-                cache.commit()
-            logger.exception(
-                "Failed to fetch messages for user=%s chat=%s; "
-                "stopping user to allow resume",
-                user_id,
-                chat.id,
-            )
-            break
-
-        pairs = build_message_pairs(chat_response.chat_messages, chat)
-        is_backfill = (
-            prior_state is not None
-            and prior_state.coverage_from is not None
-            and interval.created_at_lte == prior_state.coverage_from
-        )
-        if _send_chat_pairs(
-            chat=chat,
-            pairs=pairs,
-            nebuly=nebuly,
-            cache=cache,
-            config=config,
-            user_id=user_id,
-            outcome=outcome,
-            prior_coverage_from=(prior_state.coverage_from if prior_state else None),
-            prior_coverage_from_msg_id=(
-                prior_state.coverage_from_msg_id if prior_state else None
-            ),
-            prior_coverage_until=(prior_state.coverage_until if prior_state else None),
-            prior_coverage_until_msg_id=(
-                prior_state.coverage_until_msg_id if prior_state else None
-            ),
-            is_backfill=is_backfill,
-        ):
-            break
-
-    return outcome
-
-
-def _finalize_successful_chat(
-    *,
-    chat: ChatSummary,
-    cache: SyncCache,
-    config: Config,
-    exported_until: datetime | None,
-    exported_until_msg_id: str | None,
-    requested_from: datetime | None,
-    run_until: datetime,
-    highest_completed: datetime | None,
-    user_coverage_from: datetime | None,
-    user_coverage_until: datetime | None,
-) -> tuple[datetime | None, datetime | None, datetime | None]:
-    # pair_to_payload returns None only when the user message has no text; such
-    # pairs are permanently non-exportable, so completing the chat is intentional.
-    prior = cache.get_chat_state(chat.id)
-    if exported_until is not None:
-        coverage_until = exported_until
-        coverage_until_msg_id = exported_until_msg_id
-    elif prior and prior.coverage_until is not None:
-        coverage_until = prior.coverage_until
-        coverage_until_msg_id = prior.coverage_until_msg_id
-    else:
-        coverage_until = run_until
-        coverage_until_msg_id = None
-    new_from, new_until = _merge_coverage(
-        prior.coverage_from if prior else None,
-        None,
-        requested_from,
-        coverage_until,
-    )
-    cache.mark_chat_completed(
-        chat,
-        new_coverage_from=new_from,
-        new_coverage_until=new_until,
-        new_coverage_until_msg_id=coverage_until_msg_id,
-    )
-    if not config.dry_run:
-        cache.commit()
-
-    if highest_completed is None or chat.updated_at > highest_completed:
-        highest_completed = chat.updated_at
-    user_coverage_from = (
-        new_from
-        if user_coverage_from is None
-        else min(user_coverage_from, new_from)
-        if new_from is not None
-        else user_coverage_from
-    )
-    user_coverage_until = (
-        new_until
-        if user_coverage_until is None
-        else max(user_coverage_until, new_until)
-    )
-    return highest_completed, user_coverage_from, user_coverage_until
-
-
-def _sync_user(
-    *,
-    user_id: str,
-    config: Config,
-    compliance: ComplianceClient,
-    nebuly: NebulyClient,
-    cache: SyncCache,
-    run_until: datetime,
-) -> Counts:
-    counts = Counts()
-    requested_from = config.from_date
-    user_failed = False
-    highest_completed: datetime | None = None
-    user_coverage_from: datetime | None = None
-    user_coverage_until: datetime | None = None
-
-    chats = _collect_chats_for_user(
-        user_id=user_id,
-        compliance=compliance,
-        cache=cache,
-        requested_from=requested_from,
-        run_until=run_until,
-        dry_run=config.dry_run,
-    )
-
-    for chat in chats:
-        if user_failed:
-            break
-
-        plan = cache.plan_chat_work(chat, requested_from, run_until)
-
-        if plan.skip:
-            cache.mark_chat_skipped_extend(chat, run_until)
-            if not config.dry_run:
-                cache.commit()
-            counts.chats_skipped += 1
-            highest_completed = _highest_from_skipped_chat(
-                cache, chat.id, highest_completed
-            )
-            continue
-
-        counts.chats_processed += 1
-        prior_state = cache.get_chat_state(chat.id)
-        outcome = _export_chat_intervals(
-            chat=chat,
-            plan=plan,
-            compliance=compliance,
-            nebuly=nebuly,
-            cache=cache,
-            config=config,
-            user_id=user_id,
-            prior_state=prior_state,
-        )
-        counts.fetched += outcome.fetched
-        counts.sent += outcome.sent
-        counts.skipped += outcome.skipped
-        counts.failed += outcome.failed
-
-        if outcome.user_failed:
-            user_failed = True
-            break
-
-        if outcome.chat_failed:
-            continue
-
-        highest_completed, user_coverage_from, user_coverage_until = (
-            _finalize_successful_chat(
-                chat=chat,
-                cache=cache,
-                config=config,
-                exported_until=outcome.exported_until,
-                exported_until_msg_id=outcome.exported_until_msg_id,
-                requested_from=requested_from,
-                run_until=run_until,
-                highest_completed=highest_completed,
-                user_coverage_from=user_coverage_from,
-                user_coverage_until=user_coverage_until,
-            )
-        )
-
-    if not user_failed:
-        cache.upsert_user_state(
-            user_id,
-            highest_completed_chat_updated_at=highest_completed,
-            coverage_from=user_coverage_from,
-            coverage_until=user_coverage_until,
-            last_successful_run_at=datetime.now(UTC),
-        )
-        if not config.dry_run:
-            cache.commit()
-
-    if (
-        counts.fetched > 0
-        or counts.sent > 0
-        or counts.skipped > 0
-        or counts.failed > 0
-        or counts.chats_processed > 0
-        or counts.chats_skipped > 0
-    ):
-        logger.info(
-            "User %s: chats processed=%d skipped=%d | "
-            "interactions fetched=%d sent=%d skipped=%d failed=%d",
-            user_id,
-            counts.chats_processed,
-            counts.chats_skipped,
-            counts.fetched,
-            counts.sent,
-            counts.skipped,
-            counts.failed,
-        )
-    return counts

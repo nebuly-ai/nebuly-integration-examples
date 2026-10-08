@@ -10,13 +10,25 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 logger = logging.getLogger(__name__)
 
 
+class PermanentRejectionError(Exception):
+    """Nebuly refused the payload with a non-retryable 4xx."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(f"Nebuly rejected payload with status {status_code}")
+
+
+def is_permanent_status(status: int) -> bool:
+    return 400 <= status < 500 and status not in {408, 429}
+
+
 def _should_retry(exc: BaseException) -> bool:
     if isinstance(exc, httpx.TransportError):
         return True
     if not isinstance(exc, HTTPStatusError):
         return False
     status = exc.response.status_code
-    return status == 429 or status >= 500
+    return status in {408, 429} or status >= 500
 
 
 class NebulyClient:
@@ -51,6 +63,13 @@ class NebulyClient:
             },
             json=payload,
         )
+        if is_permanent_status(resp.status_code):
+            logger.error(
+                "Nebuly rejected payload: status=%s body=%r",
+                resp.status_code,
+                resp.text[:500],
+            )
+            raise PermanentRejectionError(resp.status_code)
         if resp.is_error:
             logger.error(
                 "Nebuly POST failed: status=%s body=%r",
