@@ -189,6 +189,20 @@ def _process_conversation(  # noqa: C901, PLR0912, PLR0915
             cache.commit()
         return False
 
+    if adapter.name == "remote_sessions" and remote_listing_status(ref) == "pending":
+        cache.upsert_conversation(
+            adapter.name,
+            ref.conversation_id,
+            updated_at_seen=ref.updated_at,
+            coverage_from=None,
+            status="pending",
+            metadata_json=ref.metadata_json,
+        )
+        if not config.dry_run:
+            cache.commit()
+        counts.processed += 1
+        return False
+
     request = FetchRequest(
         ref=ref,
         from_date=config.from_date,
@@ -200,23 +214,6 @@ def _process_conversation(  # noqa: C901, PLR0912, PLR0915
         result = adapter.fetch(request)
     except HTTPStatusError as exc:
         status = exc.response.status_code
-        if (
-            status == 404
-            and adapter.name == "remote_sessions"
-            and remote_listing_status(ref) == "pending"
-        ):
-            cache.upsert_conversation(
-                adapter.name,
-                ref.conversation_id,
-                updated_at_seen=ref.updated_at,
-                coverage_from=None,
-                status="pending",
-                metadata_json=ref.metadata_json,
-            )
-            if not config.dry_run:
-                cache.commit()
-            counts.processed += 1
-            return False
         if status == 404:
             cache.mark_gone(
                 adapter.name,
