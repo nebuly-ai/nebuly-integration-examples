@@ -35,6 +35,7 @@ class LangfuseTrace(TypedDict, total=False):
     input: JsonValue
     output: JsonValue
     tags: list[str] | dict[str, str]
+    metadata: JsonValue
 
 
 class LangfuseListMeta(TypedDict, total=False):

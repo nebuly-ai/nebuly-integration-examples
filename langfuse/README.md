@@ -86,7 +86,7 @@ poetry run python -m langfuse_sync
 - **Langfuse Cloud legacy API sunset (Nov 16, 2026):** This integration targets self-hosted v3 page APIs; v4 is out of scope.
 - **Skipped empty traces:** Empty input and output are not POSTed; watermark still advances.
 - **HTTP 413:** Skipped with a warning; watermark advances.
-- **Tags:** `team:Engineering` maps via Nebuly tags; metadata is not sent.
+- **Tags & metadata:** Langfuse trace tags map to Nebuly tags (`team:Engineering` → key `team`). Trace `metadata` is flattened into dot-separated keys; list values of scalars join with `, `; Langfuse tags win on name collisions. Observation metadata is not sent.
 
 ## Layout
 

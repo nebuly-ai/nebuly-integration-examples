@@ -9,6 +9,7 @@ from langfuse_sync.models import (
     ChatMessage,
     EmbeddingTrace,
     Interaction,
+    JsonPrimitive,
     JsonValue,
     LangfuseObservation,
     LangfuseTrace,
@@ -233,6 +234,40 @@ def _langfuse_tags_to_dict(tags: list[str] | dict[str, str] | None) -> dict[str,
     return {key: ", ".join(sorted(values)) for key, values in grouped.items()}
 
 
+def _scalar_to_str(value: JsonPrimitive) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _flatten_metadata(value: JsonValue | None, prefix: str = "") -> dict[str, str]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        result: dict[str, str] = {}
+        for key, nested in value.items():
+            child_prefix = f"{prefix}.{key}" if prefix else key
+            result.update(_flatten_metadata(nested, child_prefix))
+        return result
+    if isinstance(value, list):
+        if not value:
+            return {}
+        key = prefix or "metadata"
+        scalar_parts: list[str] = []
+        for item in value:
+            if item is None or isinstance(item, (dict, list)):
+                scalar_parts = []
+                break
+            scalar_parts.append(_scalar_to_str(item))
+        else:
+            return {key: ", ".join(scalar_parts)}
+        return {key: json.dumps(value)}
+    if not isinstance(value, (str, int, float, bool)):
+        return {}
+    key = prefix or "metadata"
+    return {key: _scalar_to_str(value)}
+
+
 def _observation_cost_micro_dollars(observation: LangfuseObservation) -> int | None:
     calculated = observation.get("calculatedTotalCost")
     if calculated is not None:
@@ -375,6 +410,9 @@ def interaction_from_langfuse_trace(
         time_start=str(time_start),
         time_end=str(time_end),
         end_user=str(end_user),
-        tags=_langfuse_tags_to_dict(trace.get("tags")),
+        tags={
+            **_flatten_metadata(trace.get("metadata")),
+            **_langfuse_tags_to_dict(trace.get("tags")),
+        },
         traces=convert_observations_to_traces(observations),
     )
