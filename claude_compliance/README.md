@@ -35,6 +35,7 @@ cp .env.example .env
 | `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | no | `600` | Rate limit for Compliance API requests |
 | `ANONYMIZE` | no | `false` | Set to `true` to anonymize content in the Nebuly payload |
 | `SESSION_IDLE_MINUTES` | no | `30` | Minutes without a new prompt before a session interaction is considered closed |
+| `ENTRA_EXTRACT_PATH` | no | — | Path to the Entra JSON extract. When set, directory tags are added on the same POST. See [EXTRACTS.md](EXTRACTS.md). |
 
 ### CLI flags
 
@@ -80,7 +81,7 @@ Edit `compliance_sync/user_defined.py`:
 | `build_session_tags` / `build_session_traces` | Per session interaction cut |
 | `INJECTED_CONTEXT_PATTERNS` | Regexes stripped from user text before classifying a “prompt” (includes compaction summary heuristic) |
 
-`team`, `market`, and `tenure` are not provided by Compliance; set them in these hooks if you have an external directory.
+Directory attributes (`department`, `job_title`, `office_location`, `city`, `country`, `company_name`, `employee_hire_date`) come from the Entra extract, not from Compliance. Set `ENTRA_EXTRACT_PATH` to that file. The join is described in [EXTRACTS.md](EXTRACTS.md). `end_user` stays the Claude user id.
 
 ## Caching & idempotency
 

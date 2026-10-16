@@ -209,6 +209,7 @@ def _process_conversation(  # noqa: C901, PLR0912, PLR0915
         now=now,
         idle_minutes=config.session_idle_minutes,
         anonymize=config.anonymize,
+        directory=config.entra_directory,
     )
     try:
         result = adapter.fetch(request)
@@ -425,6 +426,11 @@ def run_sync(config: Config) -> SyncSummary:
     run_until = config.run_until()
     run_started = datetime.now(UTC)
     summary = SyncSummary()
+    if config.entra_directory is not None:
+        logger.info(
+            "Entra extract loaded: %d directory users",
+            config.entra_directory.user_count,
+        )
 
     try:
         timeout = 300.0

@@ -7,6 +7,7 @@ from typing import Any
 
 from . import user_defined
 from .config import datetime_to_timestamp_str
+from .entra import EntraDirectory, apply_directory_tags
 from .models import (
     ChatMessage,
     ChatMessagesResponse,
@@ -130,7 +131,12 @@ def build_message_pairs(
     )
 
 
-def pair_to_payload(pair: Interaction, *, anonymize: bool) -> dict[str, Any] | None:
+def pair_to_payload(
+    pair: Interaction,
+    *,
+    anonymize: bool,
+    directory: EntraDirectory | None = None,
+) -> dict[str, Any] | None:
     user_input = extract_text_content(pair.user_message)
     # No user text means no Nebuly input; the pair is permanently non-exportable.
     if not user_input:
@@ -142,11 +148,15 @@ def pair_to_payload(pair: Interaction, *, anonymize: bool) -> dict[str, Any] | N
     if chat.user is None:
         return None
 
-    tags = {
-        key: value
-        for key, value in user_defined.build_tags(pair).items()
-        if value is not None
-    }
+    tags = apply_directory_tags(
+        {
+            key: value
+            for key, value in user_defined.build_tags(pair).items()
+            if value is not None
+        },
+        directory,
+        chat.user.email_address,
+    )
 
     interaction = {
         "conversation_id": chat.id,

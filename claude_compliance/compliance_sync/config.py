@@ -9,6 +9,8 @@ from typing import cast
 
 from dotenv import load_dotenv
 
+from .entra import EntraDirectory, load_entra_extract
+
 
 def timestamp_str_to_datetime(timestamp: str) -> datetime:
     if not timestamp:
@@ -67,6 +69,7 @@ class Config:
     verbose: bool
     sources: tuple[str, ...] = DEFAULT_SOURCES
     session_idle_minutes: int = 30
+    entra_directory: EntraDirectory | None = None
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -116,6 +119,10 @@ class Config:
             timestamp_str_to_datetime(args.from_date) if args.from_date else None
         )
         to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
+        entra_extract_path = os.environ.get("ENTRA_EXTRACT_PATH", "").strip()
+        entra_directory = (
+            load_entra_extract(Path(entra_extract_path)) if entra_extract_path else None
+        )
 
         return cls(
             nebuly_api_key=cast(str, nebuly_api_key),
@@ -139,6 +146,7 @@ class Config:
             verbose=args.verbose,
             sources=_parse_sources(args.sources),
             session_idle_minutes=int(os.environ.get("SESSION_IDLE_MINUTES", "30")),
+            entra_directory=entra_directory,
         )
 
     def run_until(self) -> datetime:

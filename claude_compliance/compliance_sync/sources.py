@@ -8,6 +8,8 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from .compliance_client import ComplianceClient
+    from .entra import EntraDirectory
+
 from .config import datetime_to_timestamp_str
 from .converter import build_message_pairs, pair_to_payload
 from .models import (
@@ -63,6 +65,7 @@ class FetchRequest:
     now: datetime
     idle_minutes: int
     anonymize: bool
+    directory: EntraDirectory | None = None
 
 
 def listed_user_missing(ref: ConversationRef) -> bool:
@@ -145,7 +148,11 @@ class ChatSource:
                 key=pair.assistant_message.id,
                 time_start=pair.user_message.created_at,
                 closed=True,
-                payload=pair_to_payload(pair, anonymize=request.anonymize),
+                payload=pair_to_payload(
+                    pair,
+                    anonymize=request.anonymize,
+                    directory=request.directory,
+                ),
             )
             for pair in pairs
         ]
@@ -270,6 +277,47 @@ def _remote_metadata(
     return base.model_copy(update={"status": session.status})
 
 
+def _first_email(*values: str | None) -> str | None:
+    for value in values:
+        if value is not None and value.strip():
+            return value
+    return None
+
+
+def _listing_email(
+    ref: ConversationRef,
+    session: LocalSession | RemoteSession,
+    list_metadata: RemoteSessionListMetadata | None,
+) -> str | None:
+    """Prefer the listing email. The messages endpoint often nulls it."""
+    listed = ref.local_session or ref.remote_session
+    listed_user = (
+        listed.user.email_address if listed is not None and listed.user else None
+    )
+    listed_started = None
+    if isinstance(listed, RemoteSession) and listed.started_by_user is not None:
+        listed_started = listed.started_by_user.email_address
+    meta_user = None
+    meta_started = None
+    if list_metadata is not None:
+        if list_metadata.user is not None:
+            meta_user = list_metadata.user.email_address
+        if list_metadata.started_by_user is not None:
+            meta_started = list_metadata.started_by_user.email_address
+    message_user = session.user.email_address if session.user is not None else None
+    message_started = None
+    if isinstance(session, RemoteSession) and session.started_by_user is not None:
+        message_started = session.started_by_user.email_address
+    return _first_email(
+        listed_user,
+        listed_started,
+        meta_user,
+        meta_started,
+        message_user,
+        message_started,
+    )
+
+
 def _session_result(
     session: LocalSession | RemoteSession,
     messages: list[Any],
@@ -300,6 +348,8 @@ def _session_result(
                 source=source,
                 list_metadata=list_metadata,
                 anonymize=request.anonymize,
+                directory=request.directory,
+                match_email=_listing_email(request.ref, session, list_metadata),
             ),
         )
         for cut in cuts

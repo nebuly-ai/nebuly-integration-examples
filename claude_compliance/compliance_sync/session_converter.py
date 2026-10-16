@@ -8,6 +8,7 @@ from typing import Any, Literal
 from . import user_defined
 from .config import datetime_to_timestamp_str
 from .converter import truncate_text
+from .entra import EntraDirectory, apply_directory_tags
 from .models import (
     LocalSession,
     RemoteSession,
@@ -239,6 +240,8 @@ def session_interaction_to_payload(
     source: Literal["local_session", "remote_session"],
     list_metadata: RemoteSessionListMetadata | None,
     anonymize: bool,
+    directory: EntraDirectory | None = None,
+    match_email: str | None = None,
 ) -> dict[str, Any] | None:
     end_user = resolve_session_end_user(session, list_metadata)
     if end_user is None:
@@ -246,11 +249,15 @@ def session_interaction_to_payload(
     if not cut.input_text:
         return None
 
-    tags = user_defined.build_session_tags(
-        session,
-        cut,
-        source=source,
-        list_metadata=list_metadata,
+    tags = apply_directory_tags(
+        user_defined.build_session_tags(
+            session,
+            cut,
+            source=source,
+            list_metadata=list_metadata,
+        ),
+        directory,
+        match_email,
     )
     traces = user_defined.build_session_traces(cut, session)
 
