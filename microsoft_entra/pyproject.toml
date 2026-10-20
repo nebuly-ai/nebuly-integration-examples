@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "entra-export"
+version = "0.1.0"
+description = "Export Microsoft Entra users to the JSON extract used by Claude Compliance"
+authors = ["The Nebuly Team"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4"
+httpx = "^0.28.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.15.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

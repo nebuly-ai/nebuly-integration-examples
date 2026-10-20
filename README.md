@@ -7,6 +7,7 @@ Integration examples for syncing AI/LLM interactions to and from the [Nebuly](ht
 | Folder | Purpose |
 |--------|---------|
 | [claude_compliance/](claude_compliance/) | Syncs Claude conversations from the Anthropic Compliance API to Nebuly. See its [README](claude_compliance/README.md) for setup and configuration. |
+| [microsoft_entra/](microsoft_entra/) | Exports Microsoft Entra users to the JSON file Claude Compliance uses for directory tags. See its [README](microsoft_entra/README.md). |
 | [microsoft_copilot/](microsoft_copilot/) | Syncs Microsoft Copilot Enterprise interactions from the Microsoft Graph API to Nebuly. See its [README](microsoft_copilot/README.md) for setup and configuration. |
 | [gemini_enterprise/](gemini_enterprise/) | Syncs Gemini Enterprise assistant sessions to Nebuly. See its [README](gemini_enterprise/README.md) for setup and configuration. |
 | [langfuse/](langfuse/) | Pulls Langfuse traces via the public API for a date range and POSTs them to Nebuly. See its [README](langfuse/README.md) for setup and configuration. |

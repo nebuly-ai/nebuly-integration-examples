@@ -2,7 +2,7 @@
 
 This optional join matches Claude activity to a Microsoft Entra directory, then sends each interaction to Nebuly once.
 
-The running sync reads Claude from the Compliance API. The Claude section below is that same data, written as JSON. The Entra section is a file. Set `ENTRA_EXTRACT_PATH` to it. The sync attaches directory tags before the POST. `end_user` stays the Claude user id.
+The running sync reads Claude from the Compliance API. The Claude section below is that same data, written as JSON. The Entra section is a file. Produce it with the [microsoft_entra](../microsoft_entra/README.md) script (`poetry run python -m entra_export`), then set `ENTRA_EXTRACT_PATH` to it. The sync attaches directory tags before the POST. `end_user` stays the Claude user id. Run the export before the first Compliance sync: a later run of the Compliance script does not send an interaction that was already posted.
 
 Without `ENTRA_EXTRACT_PATH`, payloads are unchanged: Claude user id, no directory tags.
 
@@ -120,7 +120,7 @@ One JSON object. It is the slice of Compliance data this sync turns into Nebuly 
 
 ## Entra extract
 
-A JSON object with a `users` array, or a bare array of the same user objects. Field names match Microsoft Graph. Unknown fields are ignored.
+A JSON object with a `users` array, or a bare array of the same user objects. Field names match Microsoft Graph. Unknown fields are ignored. The [microsoft_entra](../microsoft_entra/README.md) script writes this object from `GET /users`.
 
 ```json
 {
