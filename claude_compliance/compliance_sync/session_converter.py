@@ -8,7 +8,7 @@ from typing import Any, Literal
 from . import user_defined
 from .config import datetime_to_timestamp_str
 from .converter import truncate_text
-from .entra import EntraDirectory, apply_directory_tags
+from .entra import EntraDirectory, apply_directory_segments, apply_directory_tags
 from .models import (
     LocalSession,
     RemoteSession,
@@ -271,6 +271,7 @@ def session_interaction_to_payload(
         "hide_content": False,
         "tags": tags,
     }
+    apply_directory_segments(interaction, directory, match_email)
     return {
         "interaction": interaction,
         "traces": traces,

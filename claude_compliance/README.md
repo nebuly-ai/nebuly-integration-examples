@@ -81,7 +81,7 @@ Edit `compliance_sync/user_defined.py`:
 | `build_session_tags` / `build_session_traces` | Per session interaction cut |
 | `INJECTED_CONTEXT_PATTERNS` | Regexes stripped from user text before classifying a “prompt” (includes compaction summary heuristic) |
 
-Directory attributes (`department`, `job_title`, `office_location`, `city`, `country`, `company_name`, `employee_hire_date`) come from the Entra extract, not from Compliance. Create that file with [microsoft_entra](../microsoft_entra/README.md), then set `ENTRA_EXTRACT_PATH`. The join is described in [EXTRACTS.md](EXTRACTS.md). `end_user` stays the Claude user id.
+Directory attributes come from the Entra extract, not from Compliance. Create that file with [microsoft_entra](../microsoft_entra/README.md), then set `ENTRA_EXTRACT_PATH`. A match sets `team` (`department`), `market` (`country`, else `usageLocation`), and `tenure` (`employeeHireDate`). The same values are also tags, along with `job_title`, `office_location`, `city`, and `company_name`. The join is described in [EXTRACTS.md](EXTRACTS.md). `end_user` stays the Claude user id.
 
 ## Caching & idempotency
 

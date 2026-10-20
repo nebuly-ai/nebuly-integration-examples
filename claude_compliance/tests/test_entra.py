@@ -116,6 +116,9 @@ def test_chat_payload_keeps_claude_user_and_adds_tags() -> None:
     assert payload is not None
     interaction = payload["interaction"]
     assert interaction["end_user"] == "user_01"
+    assert interaction["team"] == "Engineering"
+    assert interaction["market"] == "IT"
+    assert interaction["tenure"] == "2020-03-15"
     assert interaction["tags"]["claude source"] == "chat"
     assert interaction["tags"]["department"] == "Engineering"
     assert interaction["tags"]["employee_hire_date"] == "2020-03-15"
@@ -123,6 +126,9 @@ def test_chat_payload_keeps_claude_user_and_adds_tags() -> None:
     plain = pair_to_payload(pair, anonymize=False)
     assert plain is not None
     assert "department" not in plain["interaction"]["tags"]
+    assert "team" not in plain["interaction"]
+    assert "market" not in plain["interaction"]
+    assert "tenure" not in plain["interaction"]
 
 
 def test_unmatched_email_adds_no_directory_tags() -> None:
@@ -138,6 +144,9 @@ def test_unmatched_email_adds_no_directory_tags() -> None:
     assert payload is not None
     assert payload["interaction"]["end_user"] == "user_01"
     assert "department" not in payload["interaction"]["tags"]
+    assert "team" not in payload["interaction"]
+    assert "market" not in payload["interaction"]
+    assert "tenure" not in payload["interaction"]
 
 
 def test_session_uses_listing_email_when_message_email_is_null() -> None:
@@ -163,6 +172,9 @@ def test_session_uses_listing_email_when_message_email_is_null() -> None:
     )
     assert payload is not None
     assert payload["interaction"]["end_user"] == "user_1"
+    assert payload["interaction"]["team"] == "Engineering"
+    assert payload["interaction"]["market"] == "IT"
+    assert payload["interaction"]["tenure"] == "2020-03-15"
     assert payload["interaction"]["tags"]["job_title"] == "Staff Engineer"
     assert payload["interaction"]["tags"]["product surface"] == "claude_code"
 
@@ -221,6 +233,9 @@ def test_chat_fetch_attaches_directory_before_the_payload_is_built() -> None:
     payload = result.interactions[0].payload
     assert payload is not None
     assert payload["interaction"]["end_user"] == "user_01"
+    assert payload["interaction"]["team"] == "Engineering"
+    assert payload["interaction"]["market"] == "IT"
+    assert payload["interaction"]["tenure"] == "2020-03-15"
     assert payload["interaction"]["tags"]["department"] == "Engineering"
 
 
@@ -288,6 +303,7 @@ def test_local_fetch_matches_the_listing_email() -> None:
     payload = result.interactions[0].payload
     assert payload is not None
     assert payload["interaction"]["end_user"] == "user_1"
+    assert payload["interaction"]["team"] == "Engineering"
     assert payload["interaction"]["tags"]["company_name"] == "Example"
 
 

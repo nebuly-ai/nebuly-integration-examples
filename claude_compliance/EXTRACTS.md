@@ -142,7 +142,13 @@ A JSON object with a `users` array, or a bare array of the same user objects. Fi
 }
 ```
 
-Each matched interaction gets these Nebuly tags. The names match the Copilot integration. Null and blank values are omitted, so a user with only `department` set does not get empty tags for the rest.
+Each matched interaction gets `team`, `market`, and `tenure` on the interaction itself, plus these Nebuly tags. The tag names match the Copilot integration. Null and blank values are omitted, so a user with only `department` set does not get empty tags for the rest.
+
+| Entra field | Nebuly interaction field |
+| ----------- | ------------------------ |
+| `department` | `team` |
+| `country`, else `usageLocation` | `market` |
+| `employeeHireDate` | `tenure` (`YYYY-MM-DD`, UTC). Nebuly turns the date into a tenure band. |
 
 | Entra field | Nebuly tag | Notes |
 | ----------- | ---------- | ----- |

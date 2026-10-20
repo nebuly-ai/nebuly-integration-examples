@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -82,14 +82,44 @@ class EntraDirectory:
                 if key is not None and key not in self._by_email:
                     self._by_email[key] = user
 
-    def tags_for_email(self, email: str | None) -> dict[str, str]:
+    def _user_for_email(self, email: str | None) -> EntraUser | None:
         key = _normalize_email(email)
         if key is None:
-            return {}
-        user = self._by_email.get(key)
+            return None
+        return self._by_email.get(key)
+
+    def tags_for_email(self, email: str | None) -> dict[str, str]:
+        user = self._user_for_email(email)
         if user is None:
             return {}
         return directory_tags(user)
+
+    def segments_for_email(self, email: str | None) -> dict[str, str]:
+        """Nebuly interaction fields. Tags stay separate."""
+        user = self._user_for_email(email)
+        if user is None:
+            return {}
+        segments: dict[str, str] = {}
+        team = _non_empty(user.department)
+        if team is not None:
+            segments["team"] = team
+        market = _non_empty(user.country) or _non_empty(user.usage_location)
+        if market is not None:
+            segments["market"] = market
+        tenure = _format_hire_date(user.employee_hire_date)
+        if tenure is not None:
+            segments["tenure"] = tenure
+        return segments
+
+
+def apply_directory_segments(
+    interaction: dict[str, Any],
+    directory: EntraDirectory | None,
+    email: str | None,
+) -> None:
+    if directory is None:
+        return
+    interaction.update(directory.segments_for_email(email))
 
 
 def apply_directory_tags(

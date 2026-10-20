@@ -7,7 +7,7 @@ from typing import Any
 
 from . import user_defined
 from .config import datetime_to_timestamp_str
-from .entra import EntraDirectory, apply_directory_tags
+from .entra import EntraDirectory, apply_directory_segments, apply_directory_tags
 from .models import (
     ChatMessage,
     ChatMessagesResponse,
@@ -168,6 +168,7 @@ def pair_to_payload(
         "hide_content": False,
         "tags": tags,
     }
+    apply_directory_segments(interaction, directory, chat.user.email_address)
 
     return {
         "interaction": interaction,
