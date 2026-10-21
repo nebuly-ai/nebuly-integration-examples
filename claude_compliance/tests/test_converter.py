@@ -16,6 +16,8 @@ from compliance_sync.models import (
     ChatSummary,
     ChatUser,
     TextContent,
+    ToolResultContent,
+    ToolResultTextContent,
     ToolUseContent,
 )
 
@@ -118,3 +120,62 @@ def test_user_defined_hooks_in_payload() -> None:
     assert payload["interaction"]["tags"] == custom_tags
     assert payload["traces"] == custom_traces
     assert payload["user_feedback"] == custom_feedback
+
+
+def test_build_tags_drops_none_project_id() -> None:
+    chat = _chat()
+    chat = chat.model_copy(update={"project_id": None})
+    pair = Interaction(
+        user_message=_msg("u1", "user", "hello"),
+        assistant_message=_msg("a1", "assistant", "hi"),
+        chat=chat,
+    )
+    payload = pair_to_payload(pair, anonymize=False)
+    assert payload is not None
+    assert "claude project-id" not in payload["interaction"]["tags"]
+    assert payload["interaction"]["tags"]["claude source"] == "chat"
+
+
+def test_retrieval_trace_null_id_fallback() -> None:
+    chat = _chat()
+    assistant = ChatMessage(
+        id="a1",
+        role="assistant",
+        created_at=datetime(2025, 2, 1, 10, 2, tzinfo=UTC),
+        content=[
+            ToolUseContent(type="tool_use", id=None, name="bash", input="{}"),
+            TextContent(type="text", text="done"),
+        ],
+    )
+    user = ChatMessage(
+        id="u1",
+        role="user",
+        created_at=datetime(2025, 2, 1, 10, 1, tzinfo=UTC),
+        content=[
+            TextContent(type="text", text="run"),
+            ToolResultContent(
+                type="tool_result",
+                tool_use_id=None,
+                is_error=False,
+                name="bash",
+                content=[ToolResultTextContent(type="text", text="ok")],
+            ),
+        ],
+    )
+    pair = Interaction(user_message=user, assistant_message=assistant, chat=chat)
+    traces = user_defined.build_traces(pair)
+    assert traces[0]["source"] == "bash"
+    assert traces[0]["outputs"] == ["ok"]
+
+
+def test_truncation_at_8000_chars() -> None:
+    chat = _chat()
+    long_text = "x" * 9000
+    pair = Interaction(
+        user_message=_msg("u1", "user", long_text),
+        assistant_message=_msg("a1", "assistant", "hi"),
+        chat=chat,
+    )
+    payload = pair_to_payload(pair, anonymize=False)
+    assert payload is not None
+    assert len(payload["interaction"]["input"]) == 8000
