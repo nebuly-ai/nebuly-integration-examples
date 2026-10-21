@@ -16,7 +16,8 @@ Compliance API (chats + local/remote session transcripts) → interaction cut �
 ```bash
 git clone https://github.com/nebuly-ai/nebuly-integration-examples.git
 cd nebuly-integration-examples/claude_compliance
-poetry install --with dev
+poetry install
+# For ENTRA_FETCH=true: poetry install --with entra
 cp .env.example .env
 # Edit .env with your keys
 ```
@@ -35,7 +36,13 @@ cp .env.example .env
 | `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | no | `600` | Rate limit for Compliance API requests |
 | `ANONYMIZE` | no | `false` | Set to `true` to anonymize content in the Nebuly payload |
 | `SESSION_IDLE_MINUTES` | no | `30` | Minutes without a new prompt before a session interaction is considered closed |
-| `ENTRA_EXTRACT_PATH` | no | — | Path to the Entra JSON extract. Produce it with [microsoft_entra](../microsoft_entra/README.md) before the first sync. When set, directory tags are added on the same POST. See [EXTRACTS.md](EXTRACTS.md). |
+| `ENTRA_FETCH` | no | `false` | When `true`, pull Entra users from Microsoft Graph at startup (in memory). Requires `poetry install --with entra` and `AZURE_*` env vars. Mutually exclusive with `ENTRA_EXTRACT_PATH`. |
+| `ENTRA_EXTRACT_PATH` | no | — | Path to a pre-exported Entra JSON file from [microsoft_entra](../microsoft_entra/README.md). Mutually exclusive with `ENTRA_FETCH`. See [README_ENTRA_JOIN.md](README_ENTRA_JOIN.md). |
+| `AZURE_TENANT_ID` | if `ENTRA_FETCH` | — | Entra directory (tenant) ID |
+| `AZURE_CLIENT_ID` | if `ENTRA_FETCH` | — | App registration client ID |
+| `AZURE_CLIENT_SECRET` | if `ENTRA_FETCH` | — | Client secret value |
+| `AZURE_LOGIN_BASE_URL` | no | `https://login.microsoftonline.com` | Token endpoint host (for mocks or sovereign clouds) |
+| `GRAPH_BASE_URL` | no | `https://graph.microsoft.com` | Microsoft Graph host |
 
 ### CLI flags
 
@@ -81,7 +88,7 @@ Edit `compliance_sync/user_defined.py`:
 | `build_session_tags` / `build_session_traces` | Per session interaction cut |
 | `INJECTED_CONTEXT_PATTERNS` | Regexes stripped from user text before classifying a “prompt” (includes compaction summary heuristic) |
 
-Directory attributes come from the Entra extract, not from Compliance. Create that file with [microsoft_entra](../microsoft_entra/README.md), then set `ENTRA_EXTRACT_PATH`. A match sets `team` (`department`), `market` (`country`, else `usageLocation`), and `tenure` (`employeeHireDate`). The same values are also tags, along with `job_title`, `office_location`, `city`, and `company_name`. The join is described in [EXTRACTS.md](EXTRACTS.md). `end_user` stays the Claude user id.
+Directory attributes come from Entra, not from Compliance. Set `ENTRA_FETCH=true` (live Graph at startup) or export a file with [microsoft_entra](../microsoft_entra/README.md) and set `ENTRA_EXTRACT_PATH`. A match sets `team` (`department`), `market` (`country`, else `usageLocation`), and `tenure` (`employeeHireDate`). The same values are also tags, along with `job_title`, `office_location`, `city`, and `company_name`. Details are in [README_ENTRA_JOIN.md](README_ENTRA_JOIN.md). `end_user` stays the Claude user id.
 
 ## Caching & idempotency
 
@@ -103,12 +110,9 @@ Listing overlap: without `--from-date`, each source uses `watermark − 10 minut
 
 ## Known limitations
 
-- No token or cost fields from Compliance (use Analytics APIs separately if needed).
+- No token or cost fields from Compliance.
 - Chat branches/regenerations are flattened to user/assistant pairs; a second assistant after one user message is dropped.
 - Remote sessions do not expose `model` on messages; session tags may show `unknown`.
-- Prompt detection uses heuristics (`<system-reminder>` stripping, `INJECTED_CONTEXT_PATTERNS`); filter by `product surface` in Nebuly if needed.
-- `--to-date` filters on interaction `time_end`, not listing timestamps.
-- Cowork / Office / Chrome injected wrappers may need extra patterns (see open questions in the integration plan).
 
 ## Running
 
@@ -116,28 +120,6 @@ Listing overlap: without `--from-date`, each source uses `watermark − 10 minut
 poetry run python -m compliance_sync --from-date 2026-01-01T00:00:00Z
 poetry run python -m compliance_sync --sources chats,local_sessions
 ```
-
-### Against the local Compliance mock (nebuly-ingestion-worker)
-
-```bash
-# Terminal 1 — mock API
-cd path/to/nebuly-ingestion-worker
-poetry run uvicorn mocks.claude_compliance.app:app --port 8088
-
-# Terminal 2 — capture Nebuly POSTs (optional)
-python3 capture_server.py 8099 ./captured.jsonl
-
-# Terminal 3 — sync
-cd claude_compliance
-COMPLIANCE_BASE_URL=http://localhost:8088/v1/compliance \
-ORGANIZATION_UUID=org_demo \
-COMPLIANCE_API_KEY=x \
-NEBULY_API_KEY=x \
-NEBULY_ENDPOINT=http://localhost:8099/ingest \
-poetry run python -m compliance_sync --cache-dir /tmp/compliance-cache --verbose
-```
-
-Second run should send **0** interactions. After appending a message via the mock admin route, the next run should send exactly one new interaction.
 
 ## Tests
 

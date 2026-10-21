@@ -428,7 +428,7 @@ def run_sync(config: Config) -> SyncSummary:
     summary = SyncSummary()
     if config.entra_directory is not None:
         logger.info(
-            "Entra extract loaded: %d directory users",
+            "Entra directory loaded: %d directory users",
             config.entra_directory.user_count,
         )
 

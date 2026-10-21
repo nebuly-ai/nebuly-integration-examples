@@ -22,7 +22,9 @@ def write_extract(path: Path, users: list[dict[str, Any]]) -> None:
     )
 
 
-def run_export(config: Config, client: httpx.Client | None = None) -> int:
+def fetch_users(
+    config: Config, client: httpx.Client | None = None
+) -> list[dict[str, Any]]:
     owns_client = client is None
     http = client or httpx.Client(timeout=60.0)
     try:
@@ -33,10 +35,14 @@ def run_export(config: Config, client: httpx.Client | None = None) -> int:
             client_secret=config.azure_client_secret,
             login_base_url=config.login_base_url,
         )
-        users = list_users(http, token, graph_base_url=config.graph_base_url)
+        return list_users(http, token, graph_base_url=config.graph_base_url)
     finally:
         if owns_client:
             http.close()
+
+
+def run_export(config: Config, client: httpx.Client | None = None) -> int:
+    users = fetch_users(config, client)
 
     if config.dry_run:
         return len(users)

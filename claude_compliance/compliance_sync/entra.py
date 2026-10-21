@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import httpx
+
 
 class EntraUser(BaseModel):
     """One directory user, using the Microsoft Graph field names."""
@@ -132,6 +134,21 @@ def apply_directory_tags(
     merged = dict(tags)
     merged.update(directory.tags_for_email(email))
     return merged
+
+
+def fetch_entra_directory(client: httpx.Client | None = None) -> EntraDirectory:
+    """Pull users from Microsoft Graph with the
+    microsoft_entra exporter (entra group)."""
+    try:
+        from entra_export.config import Config as EntraConfig  # noqa: PLC0415
+        from entra_export.export import fetch_users  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            "ENTRA_FETCH=true needs the entra group: poetry install --with entra"
+        ) from exc
+    entra_config = EntraConfig.from_env_and_args([])
+    users = fetch_users(entra_config, client)
+    return EntraDirectory([EntraUser.model_validate(user) for user in users])
 
 
 def load_entra_extract(path: Path) -> EntraDirectory:

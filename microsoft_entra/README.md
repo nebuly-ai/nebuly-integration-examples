@@ -1,14 +1,17 @@
 # Microsoft Entra → directory extract
 
-Exports Microsoft Entra users from Microsoft Graph into the JSON file the [Claude Compliance sync](../claude_compliance/README.md) reads through `ENTRA_EXTRACT_PATH`.
+Exports Microsoft Entra users from Microsoft Graph for the [Claude Compliance sync](../claude_compliance/README.md).
 
-This script does not send anything to Nebuly. It only writes the directory file. Run it **before** the first Claude Compliance sync. The Compliance sync attaches directory tags on the same POST as the interaction, and a later run of that sync does not send an interaction again.
+This package is also a Poetry dependency of `claude_compliance` (`poetry install --with entra`). With `ENTRA_FETCH=true`, the sync calls Graph at startup and does not need a file on disk.
+
+For the file-based flow, this script writes `entra.json`; set `ENTRA_EXTRACT_PATH` in the Compliance sync. It does not send anything to Nebuly. Run Entra setup **before** the first Compliance sync so interactions are tagged on the first POST.
 
 ```
-Microsoft Graph (users) → entra.json → Claude Compliance sync
+Microsoft Graph (users) → entra.json → Claude Compliance sync   (ENTRA_EXTRACT_PATH)
+Microsoft Graph (users) ─────────────────→ Claude Compliance sync   (ENTRA_FETCH=true)
 ```
 
-The file shape is defined in [EXTRACTS.md](../claude_compliance/EXTRACTS.md).
+The JSON shape is documented in [README_ENTRA_JOIN.md](../claude_compliance/README_ENTRA_JOIN.md).
 
 ## Prerequisites
 
@@ -61,24 +64,3 @@ ENTRA_EXTRACT_PATH=../microsoft_entra/entra.json
 ```
 
 Re-running overwrites the file. Users are selected with `id`, `mail`, `userPrincipalName`, `department`, `jobTitle`, `officeLocation`, `city`, `country`, `usageLocation`, `companyName`, and `employeeHireDate`. The Claude sync matches on `mail`, then `userPrincipalName`.
-
-`entra.json` is a directory export. Do not commit it.
-
-### Against the local Entra mock (nebuly-ingestion-worker)
-
-The mock uses the same seed as the Claude Compliance mock, so the exported emails match that mock's users (one user is left unmatched). Any tenant, client id, and secret are accepted.
-
-```bash
-# Terminal 1 — Entra mock
-cd path/to/nebuly-ingestion-worker
-poetry run uvicorn mocks.entra.app:app --port 8089
-
-# Terminal 2 — export
-cd microsoft_entra
-AZURE_TENANT_ID=tenant \
-AZURE_CLIENT_ID=client \
-AZURE_CLIENT_SECRET=secret \
-AZURE_LOGIN_BASE_URL=http://localhost:8089 \
-GRAPH_BASE_URL=http://localhost:8089 \
-poetry run python -m entra_export --output entra.json
-```

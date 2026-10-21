@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+import httpx
 import pytest
 from compliance_sync.config import Config
 from compliance_sync.converter import Interaction, pair_to_payload
-from compliance_sync.entra import EntraDirectory, EntraUser, load_entra_extract
+from compliance_sync.entra import (
+    EntraDirectory,
+    EntraUser,
+    fetch_entra_directory,
+    load_entra_extract,
+)
 from compliance_sync.models import (
     ChatMessage,
     ChatMessagesResponse,
@@ -305,6 +312,85 @@ def test_local_fetch_matches_the_listing_email() -> None:
     assert payload["interaction"]["end_user"] == "user_1"
     assert payload["interaction"]["team"] == "Engineering"
     assert payload["interaction"]["tags"]["company_name"] == "Example"
+
+
+def _graph_transport(user: dict[str, Any]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "login.microsoftonline.com":
+            return httpx.Response(200, json={"access_token": "token"})
+        if request.url.host == "graph.microsoft.com":
+            return httpx.Response(200, json={"value": [user], "@odata.nextLink": None})
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+def test_fetch_entra_directory_from_graph(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("entra_export")
+    monkeypatch.setenv("AZURE_TENANT_ID", "tenant")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "secret")
+    client = httpx.Client(transport=_graph_transport(_USER))
+    directory = fetch_entra_directory(client)
+    tags = directory.tags_for_email("ada@example.com")
+    assert tags["department"] == "Engineering"
+    assert tags["job_title"] == "Staff Engineer"
+
+
+def test_config_loads_entra_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEBULY_API_KEY", "key")
+    monkeypatch.setenv("COMPLIANCE_API_KEY", "key")
+    monkeypatch.setenv("ORGANIZATION_UUID", "org_demo")
+    monkeypatch.setenv("ENTRA_FETCH", "true")
+    monkeypatch.setenv("ENTRA_EXTRACT_PATH", "")
+
+    def _fake_fetch() -> EntraDirectory:
+        return _directory()
+
+    monkeypatch.setattr("compliance_sync.config.fetch_entra_directory", _fake_fetch)
+    config = Config.from_env_and_args([])
+    assert config.entra_directory is not None
+    assert (
+        config.entra_directory.tags_for_email("ada@example.com")["department"]
+        == "Engineering"
+    )
+
+
+def test_config_rejects_entra_fetch_and_extract_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "entra.json"
+    path.write_text('{"users": []}', encoding="utf-8")
+    monkeypatch.setenv("NEBULY_API_KEY", "key")
+    monkeypatch.setenv("COMPLIANCE_API_KEY", "key")
+    monkeypatch.setenv("ORGANIZATION_UUID", "org_demo")
+    monkeypatch.setenv("ENTRA_FETCH", "true")
+    monkeypatch.setenv("ENTRA_EXTRACT_PATH", str(path))
+    with pytest.raises(RuntimeError, match="not both"):
+        Config.from_env_and_args([])
+
+
+def test_config_entra_fetch_requires_azure_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("entra_export")
+    monkeypatch.setenv("NEBULY_API_KEY", "key")
+    monkeypatch.setenv("COMPLIANCE_API_KEY", "key")
+    monkeypatch.setenv("ORGANIZATION_UUID", "org_demo")
+    monkeypatch.setenv("ENTRA_FETCH", "true")
+    monkeypatch.setenv("ENTRA_EXTRACT_PATH", "")
+    monkeypatch.setenv("AZURE_TENANT_ID", "")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "")
+    with pytest.raises(RuntimeError, match="AZURE_TENANT_ID"):
+        Config.from_env_and_args([])
+
+
+def test_fetch_entra_directory_without_entra_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "entra_export.export", None)
+    with pytest.raises(RuntimeError, match="poetry install --with entra"):
+        fetch_entra_directory()
 
 
 def test_config_loads_entra_extract(

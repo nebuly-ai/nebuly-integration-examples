@@ -9,7 +9,7 @@ from typing import cast
 
 from dotenv import load_dotenv
 
-from .entra import EntraDirectory, load_entra_extract
+from .entra import EntraDirectory, fetch_entra_directory, load_entra_extract
 
 
 def timestamp_str_to_datetime(timestamp: str) -> datetime:
@@ -120,9 +120,15 @@ class Config:
         )
         to_date = timestamp_str_to_datetime(args.to_date) if args.to_date else None
         entra_extract_path = os.environ.get("ENTRA_EXTRACT_PATH", "").strip()
-        entra_directory = (
-            load_entra_extract(Path(entra_extract_path)) if entra_extract_path else None
-        )
+        entra_fetch = _parse_bool(os.environ.get("ENTRA_FETCH", "false"))
+        if entra_fetch and entra_extract_path:
+            raise RuntimeError("Set ENTRA_FETCH or ENTRA_EXTRACT_PATH, not both")
+        if entra_fetch:
+            entra_directory = fetch_entra_directory()
+        elif entra_extract_path:
+            entra_directory = load_entra_extract(Path(entra_extract_path))
+        else:
+            entra_directory = None
 
         return cls(
             nebuly_api_key=cast(str, nebuly_api_key),

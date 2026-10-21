@@ -3,7 +3,7 @@ name = "entra-export"
 version = "0.1.0"
 description = "Export Microsoft Entra users to the JSON extract used by Claude Compliance"
 authors = ["The Nebuly Team"]
-package-mode = false
+packages = [{ include = "entra_export" }]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4"

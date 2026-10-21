@@ -2,9 +2,14 @@
 
 This optional join matches Claude activity to a Microsoft Entra directory, then sends each interaction to Nebuly once.
 
-The running sync reads Claude from the Compliance API. The Claude section below is that same data, written as JSON. The Entra section is a file. Produce it with the [microsoft_entra](../microsoft_entra/README.md) script (`poetry run python -m entra_export`), then set `ENTRA_EXTRACT_PATH` to it. The sync attaches directory tags before the POST. `end_user` stays the Claude user id. Run the export before the first Compliance sync: a later run of the Compliance script does not send an interaction that was already posted.
+The running sync reads Claude from the Compliance API. The Claude section below is that same data, written as JSON. For Entra you can either:
 
-Without `ENTRA_EXTRACT_PATH`, payloads are unchanged: Claude user id, no directory tags.
+1. **One step:** set `ENTRA_FETCH=true` in `claude_compliance/.env` (after `poetry install --with entra`) with `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`. The sync pulls users from Microsoft Graph at startup and keeps them in memory.
+2. **File-based:** produce `entra.json` with the [microsoft_entra](../microsoft_entra/README.md) script (`poetry run python -m entra_export`), then set `ENTRA_EXTRACT_PATH`.
+
+Use one option only (`ENTRA_FETCH` and `ENTRA_EXTRACT_PATH` are mutually exclusive). The sync attaches directory tags before the POST. `end_user` stays the Claude user id. Run Entra setup before the first Compliance sync: a later run does not re-send interactions that were already posted.
+
+Without either option, payloads are unchanged: Claude user id, no directory tags.
 
 ## Join
 
