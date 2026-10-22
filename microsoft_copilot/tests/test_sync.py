@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,6 +38,7 @@ def _config(
     audit_enrichment: bool = False,
     audit_settle_lag_seconds: int = 7200,
     settle_lag_seconds: int = 60,
+    csv_export: bool = False,
 ) -> Config:
     return Config(
         azure_tenant_id="tenant_1",
@@ -54,6 +57,8 @@ def _config(
         settle_lag_seconds=settle_lag_seconds,
         audit_enrichment=audit_enrichment,
         audit_settle_lag_seconds=audit_settle_lag_seconds,
+        csv_export=csv_export,
+        csv_export_path=tmp_path / "interactions.csv",
     )
 
 
@@ -147,6 +152,36 @@ def test_dry_run_sends_nothing(tmp_path: Path) -> None:
         asyncio.run(run_sync(config))
 
     nebuly.send_interaction.assert_not_called()
+
+
+def test_csv_export_writes_rows_instead_of_posting(tmp_path: Path) -> None:
+    config = _config(tmp_path, csv_export=True, from_date=_ts(8))
+    mock_graph = MagicMock()
+    mock_graph.list_copilot_users = AsyncMock(return_value=_users())
+    mock_graph.fetch_interactions = AsyncMock(
+        return_value=[_interaction_dict(), _response_dict()],
+    )
+    mock_graph.close = AsyncMock()
+
+    with (
+        patch("copilot_sync.sync.GraphClient", return_value=mock_graph),
+        patch("copilot_sync.sync.NebulyClient") as nebuly_cls,
+    ):
+        nebuly = nebuly_cls.return_value
+        nebuly.send_interaction = AsyncMock()
+        summary = asyncio.run(run_sync(config))
+
+    nebuly.send_interaction.assert_not_called()
+    assert summary.totals.sent == 2
+    with config.csv_export_path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [row["end_user"] for row in rows] == ["user_a", "user_b"]
+    assert rows[0]["conversation_id"] == "sess_1"
+    assert rows[0]["input"] == "hello"
+    assert isinstance(json.loads(rows[0]["tags"]), dict)
+    assert isinstance(json.loads(rows[0]["traces"]), list)
+    assert (tmp_path / "sync_state_csv.db").exists()
+    assert not (tmp_path / "sync_state.db").exists()
 
 
 def test_failed_user_does_not_advance_coverage_earlier_user_committed(

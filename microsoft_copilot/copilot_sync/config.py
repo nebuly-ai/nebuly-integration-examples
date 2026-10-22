@@ -54,6 +54,8 @@ class Config:
     audit_settle_lag_seconds: int = 7200
     audit_poll_interval_seconds: int = 30
     audit_query_timeout_seconds: int = 3600
+    csv_export: bool = False
+    csv_export_path: Path = Path("./interactions.csv")
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -90,17 +92,16 @@ class Config:
         azure_client_id = os.environ.get("AZURE_CLIENT_ID")
         azure_client_secret = os.environ.get("AZURE_CLIENT_SECRET")
         nebuly_api_key = os.environ.get("NEBULY_API_KEY")
+        csv_export = _parse_bool(os.environ.get("CSV_EXPORT", "false"))
 
-        missing = [
-            name
-            for name, val in [
-                ("AZURE_TENANT_ID", azure_tenant_id),
-                ("AZURE_CLIENT_ID", azure_client_id),
-                ("AZURE_CLIENT_SECRET", azure_client_secret),
-                ("NEBULY_API_KEY", nebuly_api_key),
-            ]
-            if not val
+        required = [
+            ("AZURE_TENANT_ID", azure_tenant_id),
+            ("AZURE_CLIENT_ID", azure_client_id),
+            ("AZURE_CLIENT_SECRET", azure_client_secret),
         ]
+        if not csv_export:
+            required.append(("NEBULY_API_KEY", nebuly_api_key))
+        missing = [name for name, val in required if not val]
         if missing:
             raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
 
@@ -126,7 +127,7 @@ class Config:
             graph_max_requests_per_minute=int(
                 os.environ.get("GRAPH_MAX_REQUESTS_PER_MINUTE", "1800"),
             ),
-            nebuly_api_key=cast("str", nebuly_api_key),
+            nebuly_api_key=nebuly_api_key or "",
             nebuly_endpoint=os.environ.get(
                 "NEBULY_ENDPOINT",
                 "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction",
@@ -147,6 +148,10 @@ class Config:
             ),
             audit_query_timeout_seconds=int(
                 os.environ.get("AUDIT_QUERY_TIMEOUT_SECONDS", "3600"),
+            ),
+            csv_export=csv_export,
+            csv_export_path=Path(
+                os.environ.get("CSV_EXPORT_PATH", "./interactions.csv"),
             ),
         )
 

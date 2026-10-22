@@ -53,3 +53,28 @@ def test_audit_enrichment_env_parses(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert config.audit_enrichment is True
     assert config.audit_settle_lag_seconds == 3600
+
+
+def test_csv_export_does_not_require_nebuly_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_required_env(monkeypatch)
+    monkeypatch.delenv("NEBULY_API_KEY")
+    monkeypatch.setenv("CSV_EXPORT", "true")
+    monkeypatch.setenv("CSV_EXPORT_PATH", "exports/out.csv")
+
+    config = Config.from_env_and_args(["--from-date", "2025-06-15T08:00:00Z"])
+
+    assert config.csv_export is True
+    assert str(config.csv_export_path) == "exports/out.csv"
+
+
+def test_missing_nebuly_api_key_raises_without_csv_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_required_env(monkeypatch)
+    monkeypatch.delenv("NEBULY_API_KEY")
+    monkeypatch.delenv("CSV_EXPORT", raising=False)
+
+    with pytest.raises(RuntimeError, match="NEBULY_API_KEY"):
+        Config.from_env_and_args(["--from-date", "2025-06-15T08:00:00Z"])
