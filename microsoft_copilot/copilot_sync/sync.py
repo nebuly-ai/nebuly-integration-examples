@@ -4,13 +4,14 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 from httpx import HTTPStatusError
 
 from .cache import SyncCache, UserCoverage
 from .converter import InteractionTurn, SkipReason, group_interactions, turn_to_payload
+from .csv_writer import CsvInteractionWriter
 from .graph_client import AuditFetchProgress, AuditQueryError, GraphClient
 from .models import AiInteraction, CopilotAuditRecord, CopilotUser
 from .nebuly_client import NebulyClient
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 class FirstRunRequiresFromDateError(RuntimeError):
     """Raised when the first sync run is attempted without --from-date."""
+
+
+class InteractionSink(Protocol):
+    async def send_interaction(self, payload: dict[str, Any]) -> None: ...
 
 
 @dataclass
@@ -275,7 +280,7 @@ async def _send_turns(
     turns: list[InteractionTurn],
     *,
     user: CopilotUser,
-    nebuly: NebulyClient,
+    sink: InteractionSink,
     config: Config,
     cache: SyncCache,
     counts: Counts,
@@ -314,7 +319,7 @@ async def _send_turns(
             counts.sent += 1
             continue
         try:
-            await nebuly.send_interaction(result)
+            await sink.send_interaction(result)
             counts.sent += 1
         except Exception:
             logger.exception("Failed to send turn for user %s", user.id)
@@ -328,7 +333,7 @@ async def _sync_user(
     *,
     config: Config,
     graph: GraphClient,
-    nebuly: NebulyClient,
+    sink: InteractionSink,
     cache: SyncCache,
     run_until: datetime,
 ) -> Counts:
@@ -374,7 +379,7 @@ async def _sync_user(
         in_flight_starts, failed_starts = await _send_turns(
             turns,
             user=user,
-            nebuly=nebuly,
+            sink=sink,
             config=config,
             cache=cache,
             counts=counts,
@@ -405,8 +410,11 @@ async def _sync_user(
 async def run_sync(config: Config) -> SyncSummary:
     _configure_logging(verbose=config.verbose)
 
+    # CSV exports track coverage separately so they never mark ranges as sent to
+    # Nebuly.
+    cache_name = "sync_state_csv.db" if config.csv_export else "sync_state.db"
     cache = SyncCache(
-        config.cache_dir / "sync_state.db",
+        config.cache_dir / cache_name,
         config.azure_tenant_id,
         dry_run=config.dry_run,
     )
@@ -430,11 +438,16 @@ async def run_sync(config: Config) -> SyncSummary:
         )
 
         async with httpx.AsyncClient(timeout=60.0) as nebuly_http:
-            nebuly = NebulyClient(
-                nebuly_http,
-                config.nebuly_api_key,
-                config.nebuly_endpoint,
-            )
+            sink: InteractionSink
+            if config.csv_export:
+                sink = CsvInteractionWriter(config.csv_export_path)
+                logger.info("CSV export enabled: writing to %s", config.csv_export_path)
+            else:
+                sink = NebulyClient(
+                    nebuly_http,
+                    config.nebuly_api_key,
+                    config.nebuly_endpoint,
+                )
 
             licensed = await graph.list_copilot_users()
             users = _eligible_sync_users(licensed, cache)
@@ -457,7 +470,7 @@ async def run_sync(config: Config) -> SyncSummary:
                         user,
                         config=config,
                         graph=graph,
-                        nebuly=nebuly,
+                        sink=sink,
                         cache=cache,
                         run_until=run_until,
                     )

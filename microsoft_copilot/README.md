@@ -35,7 +35,7 @@ cp .env.example .env
 | `AZURE_TENANT_ID`               | yes      | —                                                                            | Azure AD tenant ID                                       |
 | `AZURE_CLIENT_ID`               | yes      | —                                                                            | App registration client ID                               |
 | `AZURE_CLIENT_SECRET`           | yes      | —                                                                            | App registration client secret                           |
-| `NEBULY_API_KEY`                | yes      | —                                                                            | Nebuly secret key                                        |
+| `NEBULY_API_KEY`                | yes*     | —                                                                            | Nebuly secret key (*not required when `CSV_EXPORT=true`) |
 | `NEBULY_ENDPOINT`               | no       | `https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction` | Nebuly ingestion endpoint                                |
 | `COPILOT_SKU`                   | no       | `639dec6b-bb19-468b-871c-c5c441c4b0cb`                                       | Microsoft 365 Copilot SKU GUID                           |
 | `GRAPH_MAX_REQUESTS_PER_MINUTE` | no       | `1800`                                                                       | Rate limit for Graph interaction requests                |
@@ -45,6 +45,8 @@ cp .env.example .env
 | `AUDIT_SETTLE_LAG_SECONDS`      | no       | `7200`                                                                       | Extra tail hold-back while audit records arrive (~60–90 min) |
 | `AUDIT_POLL_INTERVAL_SECONDS` | no       | `30`                                                                         | Poll interval for async audit log queries                |
 | `AUDIT_QUERY_TIMEOUT_SECONDS`   | no       | `3600`                                                                       | Timeout per audit log query                              |
+| `CSV_EXPORT`                    | no       | `false`                                                                      | Write interactions to a CSV file instead of POSTing to Nebuly |
+| `CSV_EXPORT_PATH`               | no       | `./interactions.csv`                                                         | CSV output file used when `CSV_EXPORT=true`              |
 
 
 ### CLI flags
@@ -78,6 +80,18 @@ poetry run python -m copilot_sync --from-date 2026-06-01 --to-date 2026-06-23 --
 
 # Incremental tail sync (uses cached coverage per user)
 poetry run python -m copilot_sync
+```
+
+## CSV export
+
+Set `CSV_EXPORT=true` to write each interaction to `CSV_EXPORT_PATH` instead of sending it to Nebuly. The rows contain exactly what would have been POSTed: one column per interaction field (`conversation_id`, `end_user`, `time_start`, `time_end`, `input`, `output`) plus `tags`, `traces` and `user_feedback` as JSON strings, and `anonymize`.
+
+- Rows are appended, so repeated runs extend the same file. The header is written only when the file is new or empty.
+- CSV runs keep their own coverage in `.cache/sync_state_csv.db`, so exporting to CSV never marks a date range as already sent to Nebuly.
+- `--dry-run` still takes precedence: nothing is written.
+
+```bash
+CSV_EXPORT=true poetry run python -m copilot_sync --from-date 2026-06-01 --to-date 2026-06-23
 ```
 
 ## Customizing the payload
