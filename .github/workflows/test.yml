@@ -15,6 +15,7 @@ jobs:
         project:
           - microsoft_copilot
           - claude_compliance
+          - openai_compliance
           - gemini_enterprise
           - langfuse
     steps:
