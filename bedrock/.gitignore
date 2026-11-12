@@ -1,0 +1,4 @@
+.cache/
+.env
+# Raw Bedrock invocation logs: contain account ids, IAM identities and prompts. Never commit.
+tests/data/raw/
