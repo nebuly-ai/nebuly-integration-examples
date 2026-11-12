@@ -11,6 +11,7 @@ Integration examples for syncing AI/LLM interactions to and from the [Nebuly](ht
 | [microsoft_entra/](microsoft_entra/) | Exports Microsoft Entra users to the JSON file Claude Compliance uses for directory tags. See its [README](microsoft_entra/README.md). |
 | [microsoft_copilot/](microsoft_copilot/) | Syncs Microsoft Copilot Enterprise interactions from the Microsoft Graph API to Nebuly. See its [README](microsoft_copilot/README.md) for setup and configuration. |
 | [gemini_enterprise/](gemini_enterprise/) | Syncs Gemini Enterprise assistant sessions to Nebuly. See its [README](gemini_enterprise/README.md) for setup and configuration. |
+| [bedrock/](bedrock/) | Syncs Amazon Bedrock model invocation logs from S3 to Nebuly, rebuilding conversations and tool-use turns. See its [README](bedrock/README.md) for setup and configuration. |
 | [langfuse/](langfuse/) | Pulls Langfuse traces via the public API for a date range and POSTs them to Nebuly. See its [README](langfuse/README.md) for setup and configuration. |
 | [export/](export/) | Simple utility — fetches historical interactions from Nebuly with pagination and date ranges, saving to JSON (optional Power BI format) (`export_in_json.py`). |
 

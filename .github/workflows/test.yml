@@ -18,6 +18,7 @@ jobs:
           - openai_compliance
           - gemini_enterprise
           - langfuse
+          - bedrock
     steps:
       - uses: actions/checkout@v4
 
