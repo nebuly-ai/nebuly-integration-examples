@@ -36,6 +36,7 @@ def test_insert_chat_message_is_idempotent(tmp_path: Path) -> None:
             conversation_id="c1",
             author_type="user",
             created_at=_ts(9),
+            event_ts=_ts(9),
             previous_message_id=None,
             record=payload,
         )
@@ -47,6 +48,7 @@ def test_insert_chat_message_is_idempotent(tmp_path: Path) -> None:
             conversation_id="c1",
             author_type="user",
             created_at=_ts(9),
+            event_ts=_ts(9),
             previous_message_id=None,
             record=payload,
         )
@@ -92,6 +94,7 @@ def test_unemitted_user_messages_excludes_recorded(tmp_path: Path) -> None:
         conversation_id="c1",
         author_type="user",
         created_at=_ts(9),
+        event_ts=_ts(9),
         previous_message_id=None,
         record={},
     )
@@ -100,6 +103,7 @@ def test_unemitted_user_messages_excludes_recorded(tmp_path: Path) -> None:
         conversation_id="c1",
         author_type="assistant",
         created_at=_ts(9, 1),
+        event_ts=_ts(9, 1),
         previous_message_id="u1",
         record={},
     )
@@ -118,6 +122,7 @@ def test_prune_drops_old_rows(tmp_path: Path) -> None:
         conversation_id="c1",
         author_type="user",
         created_at=old,
+        event_ts=old,
         previous_message_id=None,
         record={},
     )
@@ -126,6 +131,7 @@ def test_prune_drops_old_rows(tmp_path: Path) -> None:
         conversation_id="c1",
         author_type="user",
         created_at=datetime.now(tz=UTC),
+        event_ts=datetime.now(tz=UTC),
         previous_message_id=None,
         record={},
     )
@@ -152,6 +158,7 @@ def test_dry_run_uses_memory_and_persists_nothing(tmp_path: Path) -> None:
         conversation_id="c1",
         author_type="user",
         created_at=_ts(10),
+        event_ts=_ts(10),
         previous_message_id=None,
         record={},
     )
@@ -159,3 +166,92 @@ def test_dry_run_uses_memory_and_persists_nothing(tmp_path: Path) -> None:
     store.close()
 
     assert not (tmp_path / "state.db").exists()
+
+
+def test_insert_chat_message_newer_event_replaces_older(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.insert_chat_message(
+        message_id="m1",
+        conversation_id="c1",
+        author_type="user",
+        created_at=_ts(9),
+        event_ts=_ts(9),
+        previous_message_id=None,
+        record={"message": {"id": "m1", "content": "v1"}},
+    )
+    assert (
+        store.insert_chat_message(
+            message_id="m1",
+            conversation_id="c1",
+            author_type="user",
+            created_at=_ts(9, 5),
+            event_ts=_ts(10),
+            previous_message_id=None,
+            record={"message": {"id": "m1", "content": "v2"}},
+        )
+        is True
+    )
+    stored = store.conversation_messages("c1")
+    assert stored[0].record_json.find("v2") >= 0
+
+    assert (
+        store.insert_chat_message(
+            message_id="m1",
+            conversation_id="c1",
+            author_type="user",
+            created_at=_ts(9),
+            event_ts=_ts(8),
+            previous_message_id=None,
+            record={"message": {"id": "m1", "content": "stale"}},
+        )
+        is False
+    )
+    stored = store.conversation_messages("c1")
+    assert stored[0].record_json.find("v2") >= 0
+
+
+def test_insert_codex_event_dedup(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    record: dict[str, object] = {"event_id": "evt-1"}
+    assert (
+        store.insert_codex_event(
+            event_id="evt-1",
+            session_id="sess-a",
+            event_type="PROMPT_SENT",
+            timestamp=_ts(11),
+            record=record,
+        )
+        is True
+    )
+    assert (
+        store.insert_codex_event(
+            event_id="evt-1",
+            session_id="sess-a",
+            event_type="PROMPT_SENT",
+            timestamp=_ts(11),
+            record=record,
+        )
+        is False
+    )
+
+
+def test_prune_drops_old_codex_events(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    old = datetime.now(tz=UTC) - timedelta(days=40)
+    store.insert_codex_event(
+        event_id="old-codex",
+        session_id="sess-old",
+        event_type="PROMPT_SENT",
+        timestamp=old,
+        record={},
+    )
+    store.insert_codex_event(
+        event_id="new-codex",
+        session_id="sess-new",
+        event_type="PROMPT_SENT",
+        timestamp=datetime.now(tz=UTC),
+        record={},
+    )
+    store.prune(retention_days=35)
+    assert store.codex_session_events("sess-old") == []
+    assert [e.event_id for e in store.codex_session_events("sess-new")] == ["new-codex"]

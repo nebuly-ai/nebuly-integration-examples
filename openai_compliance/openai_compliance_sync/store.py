@@ -4,7 +4,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .config import datetime_to_timestamp_str, timestamp_str_to_datetime
 
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS chat_message (
   conversation_id       TEXT NOT NULL,
   author_type           TEXT NOT NULL,
   created_at            TEXT NOT NULL,
+  event_ts              TEXT NOT NULL,
   previous_message_id   TEXT,
   record_json           TEXT NOT NULL,
   PRIMARY KEY (principal_id, message_id)
@@ -64,6 +65,27 @@ CREATE TABLE IF NOT EXISTS emitted_interaction (
   updated_at        TEXT NOT NULL,
   PRIMARY KEY (principal_id, source, interaction_key)
 );
+
+CREATE TABLE IF NOT EXISTS codex_event (
+  principal_id  TEXT NOT NULL,
+  event_id      TEXT NOT NULL,
+  session_id    TEXT,
+  event_type    TEXT NOT NULL,
+  timestamp     TEXT NOT NULL,
+  record_json   TEXT NOT NULL,
+  PRIMARY KEY (principal_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_codex_event_session
+  ON codex_event (principal_id, session_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS codex_turn_record (
+  principal_id  TEXT NOT NULL,
+  turn_id       TEXT NOT NULL,
+  timestamp     TEXT NOT NULL,
+  record_json   TEXT NOT NULL,
+  PRIMARY KEY (principal_id, turn_id)
+);
 """
 
 
@@ -83,6 +105,15 @@ class StoredAppCall:
     conversation_id: str
     app_id: str
     record_kind: str
+    timestamp: datetime
+    record_json: str
+
+
+@dataclass(frozen=True)
+class StoredCodexEvent:
+    event_id: str
+    session_id: str | None
+    event_type: str
     timestamp: datetime
     record_json: str
 
@@ -108,6 +139,14 @@ class ComplianceStore:
             self._conn = sqlite3.connect(db_path)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        cols = self._conn.execute("PRAGMA table_info(chat_message)").fetchall()
+        if cols and not any(row[1] == "event_ts" for row in cols):
+            self._conn.execute(
+                "ALTER TABLE chat_message ADD COLUMN event_ts TEXT NOT NULL DEFAULT ''"
+            )
 
     def get_cursor(self, event_type: str) -> datetime | None:
         row = self._conn.execute(
@@ -165,6 +204,7 @@ class ComplianceStore:
         conversation_id: str,
         author_type: str,
         created_at: datetime,
+        event_ts: datetime,
         previous_message_id: str | None,
         record: dict[str, object],
     ) -> bool:
@@ -172,9 +212,16 @@ class ComplianceStore:
             """
             INSERT INTO chat_message (
               principal_id, message_id, conversation_id, author_type,
-              created_at, previous_message_id, record_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (principal_id, message_id) DO NOTHING
+              created_at, event_ts, previous_message_id, record_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (principal_id, message_id) DO UPDATE SET
+              conversation_id = excluded.conversation_id,
+              author_type = excluded.author_type,
+              created_at = excluded.created_at,
+              event_ts = excluded.event_ts,
+              previous_message_id = excluded.previous_message_id,
+              record_json = excluded.record_json
+            WHERE excluded.event_ts > chat_message.event_ts
             """,
             (
                 self._principal_id,
@@ -182,11 +229,105 @@ class ComplianceStore:
                 conversation_id,
                 author_type,
                 datetime_to_timestamp_str(created_at),
+                datetime_to_timestamp_str(event_ts),
                 previous_message_id,
                 json.dumps(record),
             ),
         )
         return cur.rowcount > 0
+
+    def insert_codex_event(
+        self,
+        *,
+        event_id: str,
+        session_id: str | None,
+        event_type: str,
+        timestamp: datetime,
+        record: dict[str, object],
+    ) -> bool:
+        cur = self._conn.execute(
+            """
+            INSERT INTO codex_event (
+              principal_id, event_id, session_id, event_type,
+              timestamp, record_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (principal_id, event_id) DO NOTHING
+            """,
+            (
+                self._principal_id,
+                event_id,
+                session_id,
+                event_type,
+                datetime_to_timestamp_str(timestamp),
+                json.dumps(record),
+            ),
+        )
+        return cur.rowcount > 0
+
+    def insert_codex_turn_record(
+        self,
+        *,
+        turn_id: str,
+        timestamp: datetime,
+        record: dict[str, object],
+    ) -> bool:
+        cur = self._conn.execute(
+            """
+            INSERT INTO codex_turn_record (
+              principal_id, turn_id, timestamp, record_json
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (principal_id, turn_id) DO NOTHING
+            """,
+            (
+                self._principal_id,
+                turn_id,
+                datetime_to_timestamp_str(timestamp),
+                json.dumps(record),
+            ),
+        )
+        return cur.rowcount > 0
+
+    def codex_turn_record(self, turn_id: str) -> str | None:
+        row = self._conn.execute(
+            """
+            SELECT record_json FROM codex_turn_record
+            WHERE principal_id = ? AND turn_id = ?
+            """,
+            (self._principal_id, turn_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return cast(str, row[0])
+
+    def unemitted_codex_prompts(self) -> list[StoredCodexEvent]:
+        rows = self._conn.execute(
+            """
+            SELECT e.event_id, e.session_id, e.event_type, e.timestamp, e.record_json
+            FROM codex_event e
+            LEFT JOIN emitted_interaction i
+              ON i.principal_id = e.principal_id
+             AND i.source = 'codex'
+             AND i.interaction_key = e.event_id
+            WHERE e.principal_id = ?
+              AND e.event_type IN ('PROMPT_SENT', 'LEGACY_COMBINED')
+              AND i.interaction_key IS NULL
+            ORDER BY e.timestamp
+            """,
+            (self._principal_id,),
+        ).fetchall()
+        return [_codex_row(row) for row in rows]
+
+    def codex_session_events(self, session_id: str) -> list[StoredCodexEvent]:
+        rows = self._conn.execute(
+            """
+            SELECT event_id, session_id, event_type, timestamp, record_json
+            FROM codex_event
+            WHERE principal_id = ? AND session_id = ?
+            ORDER BY timestamp
+            """,
+            (self._principal_id, session_id),
+        ).fetchall()
+        return [_codex_row(row) for row in rows]
 
     def insert_app_call(
         self,
@@ -310,6 +451,14 @@ class ComplianceStore:
             "DELETE FROM app_call WHERE principal_id = ? AND timestamp < ?",
             (self._principal_id, cutoff_ts),
         )
+        self._conn.execute(
+            "DELETE FROM codex_event WHERE principal_id = ? AND timestamp < ?",
+            (self._principal_id, cutoff_ts),
+        )
+        self._conn.execute(
+            "DELETE FROM codex_turn_record WHERE principal_id = ? AND timestamp < ?",
+            (self._principal_id, cutoff_ts),
+        )
 
     def commit(self) -> None:
         self._conn.commit()
@@ -337,4 +486,14 @@ def _app_row(row: tuple[str, ...]) -> StoredAppCall:
         record_kind=row[3],
         timestamp=timestamp_str_to_datetime(row[4]),
         record_json=row[5],
+    )
+
+
+def _codex_row(row: tuple[str, ...]) -> StoredCodexEvent:
+    return StoredCodexEvent(
+        event_id=row[0],
+        session_id=row[1],
+        event_type=row[2],
+        timestamp=timestamp_str_to_datetime(row[3]),
+        record_json=row[4],
     )
