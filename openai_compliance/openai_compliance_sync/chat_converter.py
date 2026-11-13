@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -23,6 +23,8 @@ class AssembledInteraction:
     user: ConversationMessageRecord
     assistants: list[ConversationMessageRecord]
     closed: bool
+    regenerated: bool = False
+    edited: bool = False
 
     @property
     def llm_model(self) -> str:
@@ -63,6 +65,18 @@ def user_text(record: ConversationMessageRecord) -> str:
     return record.message.content.value
 
 
+def message_effective_time(record: ConversationMessageRecord) -> datetime:
+    if record.message.created_at is not None:
+        dt = record.message.created_at
+    elif record.timestamp is not None:
+        dt = record.timestamp
+    else:
+        raise ValueError(f"message {record.message.id} has no created_at or timestamp")
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 def parse_stored_message(stored: StoredChatMessage) -> ConversationMessageRecord:
     return ConversationMessageRecord.model_validate(json.loads(stored.record_json))
 
@@ -84,13 +98,33 @@ def _build_children(
     return children
 
 
+def _user_is_edited(
+    user: ConversationMessageRecord, records: list[ConversationMessageRecord]
+) -> bool:
+    user_time = message_effective_time(user)
+    parent = user.previous_message_id
+    for other in records:
+        if _author_role(other) != "user" or other.message.id == user.message.id:
+            continue
+        if other.previous_message_id != parent:
+            continue
+        try:
+            other_time = message_effective_time(other)
+        except ValueError:
+            continue
+        if other_time < user_time:
+            return True
+    return False
+
+
 def _assistant_chain(
     user: ConversationMessageRecord,
     children: dict[str, list[ConversationMessageRecord]],
-) -> tuple[list[ConversationMessageRecord], bool]:
+) -> tuple[list[ConversationMessageRecord], bool, bool]:
     chain: list[ConversationMessageRecord] = []
     parent_id = user.message.id
     closed_by_next_user = False
+    regenerated = False
     while True:
         siblings = children.get(parent_id, [])
         if not siblings:
@@ -102,10 +136,12 @@ def _assistant_chain(
         assistants = [row for row in siblings if _author_role(row) != "user"]
         if not assistants:
             break
-        next_assistant = max(assistants, key=lambda row: row.message.created_at)
+        if len(assistants) > 1:
+            regenerated = True
+        next_assistant = max(assistants, key=message_effective_time)
         chain.append(next_assistant)
         parent_id = next_assistant.message.id
-    return chain, closed_by_next_user
+    return chain, closed_by_next_user, regenerated
 
 
 def assemble_interactions(
@@ -120,57 +156,86 @@ def assemble_interactions(
     idle_delta = timedelta(minutes=idle_minutes)
     users = sorted(
         (row for row in records if _author_role(row) == "user"),
-        key=lambda row: row.message.created_at,
+        key=message_effective_time,
     )
     assembled: list[AssembledInteraction] = []
     for user in users:
-        assistants, closed_by_next_user = _assistant_chain(user, children)
+        assistants, closed_by_next_user, regenerated = _assistant_chain(user, children)
         if closed_by_next_user:
             closed = True
         elif not assistants:
             closed = False
         else:
-            last_at = assistants[-1].message.created_at
-            if last_at.tzinfo is None:
-                last_at = last_at.replace(tzinfo=UTC)
-            closed = now - last_at.astimezone(UTC) >= idle_delta
+            last_at = message_effective_time(assistants[-1])
+            closed = now.astimezone(UTC) - last_at >= idle_delta
         assembled.append(
             AssembledInteraction(
                 interaction_key=user.message.id,
                 user=user,
                 assistants=assistants,
                 closed=closed,
+                regenerated=regenerated,
+                edited=_user_is_edited(user, records),
             )
         )
     return assembled
 
 
+def _app_trace_input(record: AppLogRecord) -> str:
+    if record.input is not None:
+        return truncate_text(
+            json.dumps(record.input, separators=(",", ":"), ensure_ascii=False)
+        )
+    return truncate_text(record.request_input() or "")
+
+
+def _app_trace_outputs(record: AppLogRecord) -> list[str]:
+    if record.output:
+        return [
+            truncate_text(json.dumps(item, separators=(",", ":"), ensure_ascii=False))
+            for item in record.output
+        ]
+    legacy = record.response_output_text()
+    if legacy:
+        return [truncate_text(legacy)]
+    return []
+
+
 def app_calls_to_traces(calls: list[StoredAppCall]) -> list[dict[str, Any]]:
-    by_app: dict[str, list[StoredAppCall]] = defaultdict(list)
+    by_key: dict[tuple[str, str], list[StoredAppCall]] = defaultdict(list)
     for call in calls:
-        by_app[call.app_id].append(call)
+        by_key[(call.conversation_id, call.app_id)].append(call)
 
     traces: list[dict[str, Any]] = []
-    for app_id, app_calls in by_app.items():
-        pending_requests: deque[StoredAppCall] = deque()
+    for (_conversation_id, app_id), app_calls in by_key.items():
+        pending: list[StoredAppCall] = []
         for call in sorted(app_calls, key=lambda row: row.timestamp):
             if call.record_kind == "request":
-                pending_requests.append(call)
-            elif call.record_kind == "response" and pending_requests:
-                request_row = pending_requests.popleft()
+                pending.append(call)
+            elif call.record_kind == "response":
+                if not pending:
+                    continue
+                request_row = pending.pop()
                 request = AppLogRecord.model_validate(
                     json.loads(request_row.record_json)
                 )
                 response = AppLogRecord.model_validate(json.loads(call.record_json))
-                input_text = request.request_input() or ""
-                output_text = response.response_output_text() or ""
                 traces.append(
                     {
                         "source": request.app_name or app_id,
-                        "input": input_text,
-                        "outputs": [output_text] if output_text else [],
+                        "input": _app_trace_input(request),
+                        "outputs": _app_trace_outputs(response),
                     }
                 )
+        for request_row in pending:
+            request = AppLogRecord.model_validate(json.loads(request_row.record_json))
+            traces.append(
+                {
+                    "source": request.app_name or app_id,
+                    "input": _app_trace_input(request),
+                    "outputs": [],
+                }
+            )
     return traces
 
 
@@ -203,8 +268,10 @@ def interaction_to_payload(
         "conversation_id": interaction.user.conversation.id,
         "input": truncate_text(user_input),
         "output": truncate_text(interaction.assistant_output_text()),
-        "time_start": datetime_to_timestamp_str(interaction.user.message.created_at),
-        "time_end": datetime_to_timestamp_str(last_assistant.message.created_at),
+        "time_start": datetime_to_timestamp_str(
+            message_effective_time(interaction.user)
+        ),
+        "time_end": datetime_to_timestamp_str(message_effective_time(last_assistant)),
         "end_user": end_user,
         "hide_content": False,
         "tags": tags,

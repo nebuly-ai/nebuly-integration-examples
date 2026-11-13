@@ -22,16 +22,11 @@ DEFAULT_TIMEOUT_SECONDS = 300.0
 EVENT_CONVERSATION_MESSAGE = "CONVERSATION_MESSAGE"
 EVENT_CODEX_LOG = "CODEX_LOG"
 EVENT_APP_LOG = "APP_LOG"
+EVENT_CODEX_TURN = "CODEX_TURN"
 
 
 class SourceUnavailableError(Exception):
     """Compliance API reports this source is disabled for the principal."""
-
-
-def principal_scope_segment(principal_id: str) -> str:
-    if principal_id.startswith("org-"):
-        return "organizations"
-    return "workspaces"
 
 
 def _should_retry(exc: BaseException) -> bool:
@@ -75,26 +70,34 @@ class _RateLimiter:
             self._last_request_at = time.monotonic()
 
 
+def _is_cross_origin_redirect(request_url: httpx.URL, location: str) -> bool:
+    target = httpx.URL(location)
+    if not target.host:
+        return False
+    return target.host != request_url.host
+
+
 class ComplianceClient:
     def __init__(
         self,
         client: httpx.Client,
         api_key: str,
-        principal_id: str,
+        workspace_id: str,
         *,
-        max_requests_per_minute: int = 200,
+        max_requests_per_minute: int = 100,
     ) -> None:
         self._client = client
         self._api_key = api_key
-        self._principal_id = principal_id
-        self._scope = principal_scope_segment(principal_id)
+        self._workspace_id = workspace_id
         self._rate_limiter = _RateLimiter(max_requests_per_minute)
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, include_auth: bool = True) -> dict[str, str]:
+        if not include_auth:
+            return {}
         return {"Authorization": f"Bearer {self._api_key}"}
 
     def _logs_collection_path(self) -> str:
-        return f"{self._scope}/{self._principal_id}/logs"
+        return f"workspaces/{self._workspace_id}/logs"
 
     @retry(
         retry=retry_if_exception(_should_retry),
@@ -109,9 +112,11 @@ class ComplianceClient:
         *,
         params: list[tuple[str, str]] | None = None,
         follow_redirects: bool = True,
+        include_auth: bool = True,
+        accepted_statuses: frozenset[int] | None = None,
     ) -> httpx.Response:
         self._rate_limiter.wait()
-        headers = self._headers()
+        headers = self._headers(include_auth=include_auth)
         try:
             if params is None:
                 resp = self._client.request(
@@ -128,7 +133,8 @@ class ComplianceClient:
                     headers=headers,
                     follow_redirects=follow_redirects,
                 )
-            resp.raise_for_status()
+            if accepted_statuses is None or resp.status_code not in accepted_statuses:
+                resp.raise_for_status()
         except HTTPStatusError as e:
             if e.response.status_code != 429:
                 body_preview = e.response.text[:200]
@@ -150,6 +156,7 @@ class ComplianceClient:
         event_type: str,
         *,
         after: str | None = None,
+        before: str | None = None,
         limit: int = 100,
     ) -> LogFileList:
         params: list[tuple[str, str]] = [
@@ -158,6 +165,8 @@ class ComplianceClient:
         ]
         if after is not None:
             params.append(("after", after))
+        if before is not None:
+            params.append(("before", before))
         try:
             resp = self._request("GET", self._logs_collection_path(), params=params)
         except HTTPStatusError as exc:
@@ -176,11 +185,14 @@ class ComplianceClient:
         event_type: str,
         *,
         after: str | None = None,
+        before: str | None = None,
         limit: int = 100,
     ) -> Iterator[LogFileList]:
         cursor = after
         while True:
-            page = self.list_log_files(event_type, after=cursor, limit=limit)
+            page = self.list_log_files(
+                event_type, after=cursor, before=before, limit=limit
+            )
             yield page
             if not page.has_more:
                 break
@@ -190,7 +202,26 @@ class ComplianceClient:
 
     def download_log_file(self, file_id: str) -> Iterator[dict[str, Any]]:
         path = f"{self._logs_collection_path()}/{file_id}"
-        resp = self._request("GET", path, follow_redirects=True)
+        redirect_statuses = frozenset({301, 302, 303, 307, 308})
+        resp = self._request(
+            "GET",
+            path,
+            follow_redirects=False,
+            accepted_statuses=redirect_statuses,
+        )
+        if resp.status_code in redirect_statuses:
+            location = resp.headers.get("Location")
+            if not location:
+                resp.raise_for_status()
+            cross_origin = _is_cross_origin_redirect(resp.request.url, location)
+            resp = self._request(
+                "GET",
+                location,
+                follow_redirects=True,
+                include_auth=not cross_origin,
+            )
+        elif resp.status_code >= 400:
+            resp.raise_for_status()
         for line_no, line in enumerate(resp.text.splitlines(), start=1):
             stripped = line.strip()
             if not stripped:

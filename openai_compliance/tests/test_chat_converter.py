@@ -44,6 +44,7 @@ def _msg(
     previous_message_id: str | None = None,
     model: str | None = None,
     conversation_id: str = "conv-1",
+    mode: str | None = None,
 ) -> ConversationMessageRecord:
     return ConversationMessageRecord(
         actor=Actor(user_id="u1", user_email="user@example.com"),
@@ -54,7 +55,7 @@ def _msg(
             content=MessageContent(type="text", value=text),
         ),
         previous_message_id=previous_message_id,
-        conversation=ConversationRef(id=conversation_id, title="Title"),
+        conversation=ConversationRef(id=conversation_id, title="Title", mode=mode),
     )
 
 
@@ -328,3 +329,301 @@ def test_entra_tags_and_segments_applied() -> None:
     assert tags["department"] == "Engineering"
     assert payload["interaction"]["team"] == "Engineering"
     assert payload["interaction"]["market"] == "IT"
+
+
+def test_app_log_openapi_pairing() -> None:
+    calls = [
+        StoredAppCall(
+            event_id="req-1",
+            conversation_id="conv-1",
+            app_id="app-a",
+            record_kind="request",
+            timestamp=_ts(9, 1),
+            record_json=json.dumps(
+                {
+                    "event_id": "req-1",
+                    "app_id": "app-a",
+                    "app_name": "Search",
+                    "conversation_id": "conv-1",
+                    "timestamp": "2025-06-15T09:01:00Z",
+                    "log_type": "request",
+                    "input": {"query": "weather"},
+                }
+            ),
+        ),
+        StoredAppCall(
+            event_id="res-1",
+            conversation_id="conv-1",
+            app_id="app-a",
+            record_kind="response",
+            timestamp=_ts(9, 2),
+            record_json=json.dumps(
+                {
+                    "event_id": "res-1",
+                    "app_id": "app-a",
+                    "conversation_id": "conv-1",
+                    "timestamp": "2025-06-15T09:02:00Z",
+                    "log_type": "response",
+                    "output": [{"display_title": "NYC", "display_url": "https://x"}],
+                }
+            ),
+        ),
+    ]
+    traces = app_calls_to_traces(calls)
+    assert len(traces) == 1
+    assert traces[0]["input"] == '{"query":"weather"}'
+    assert traces[0]["outputs"] == ['{"display_title":"NYC","display_url":"https://x"}']
+
+
+def test_app_log_dropped_response_does_not_shift_pair() -> None:
+    calls = [
+        StoredAppCall(
+            event_id="req-1",
+            conversation_id="conv-1",
+            app_id="app-a",
+            record_kind="request",
+            timestamp=_ts(9, 1),
+            record_json=json.dumps(
+                {
+                    "event_id": "req-1",
+                    "app_name": "App",
+                    "log_type": "request",
+                    "request": {"input": "first"},
+                }
+            ),
+        ),
+        StoredAppCall(
+            event_id="req-2",
+            conversation_id="conv-1",
+            app_id="app-a",
+            record_kind="request",
+            timestamp=_ts(9, 2),
+            record_json=json.dumps(
+                {
+                    "event_id": "req-2",
+                    "app_name": "App",
+                    "log_type": "request",
+                    "request": {"input": "second"},
+                }
+            ),
+        ),
+        StoredAppCall(
+            event_id="res-2",
+            conversation_id="conv-1",
+            app_id="app-a",
+            record_kind="response",
+            timestamp=_ts(9, 3),
+            record_json=json.dumps(
+                {
+                    "event_id": "res-2",
+                    "log_type": "response",
+                    "response": {
+                        "output": [
+                            {"response": {"result": {"content": [{"text": "ok"}]}}}
+                        ]
+                    },
+                }
+            ),
+        ),
+    ]
+    traces = app_calls_to_traces(calls)
+    assert traces[0]["input"] == "second"
+    assert traces[0]["outputs"] == ["ok"]
+    assert traces[1]["input"] == "first"
+    assert traces[1]["outputs"] == []
+
+
+def test_unpaired_request_empty_outputs() -> None:
+    calls = [
+        StoredAppCall(
+            event_id="req-only",
+            conversation_id="conv-1",
+            app_id="app-a",
+            record_kind="request",
+            timestamp=_ts(9, 1),
+            record_json=json.dumps(
+                {
+                    "event_id": "req-only",
+                    "app_name": "App",
+                    "log_type": "request",
+                    "input": {"q": 1},
+                }
+            ),
+        )
+    ]
+    traces = app_calls_to_traces(calls)
+    assert traces == [{"source": "App", "input": '{"q":1}', "outputs": []}]
+
+
+def test_tools_skills_tags_from_assistant() -> None:
+    records = [
+        _msg("u1", author_type="user", created_at=_ts(9), text="hello", mode="default"),
+        ConversationMessageRecord(
+            actor=Actor(user_id="u1", user_email="user@example.com"),
+            message=ChatMessagePayload(
+                id="a1",
+                created_at=_ts(9, 1),
+                author=MessageAuthor(
+                    type="assistant",
+                    tools_used=["web"],
+                    skills_used=["skill-id"],
+                    skills_used_names=["Research"],
+                ),
+                content=MessageContent(type="text", value="hi"),
+            ),
+            previous_message_id="u1",
+            conversation=ConversationRef(id="conv-1", title="Title", mode="default"),
+        ),
+        _msg(
+            "u2",
+            author_type="user",
+            created_at=_ts(9, 2),
+            text="next",
+            previous_message_id="a1",
+        ),
+    ]
+    first = _assembled(records, now=_ts(9, 3))[0]
+    payload = interaction_to_payload(
+        first, retrieval_traces=[], anonymize=False, directory=None
+    )
+    assert payload is not None
+    tags = payload["interaction"]["tags"]
+    assert tags["tools used"] == "web"
+    assert tags["skills used"] == "skill-id"
+    assert tags["skills used names"] == "Research"
+    assert tags["conversation mode"] == "default"
+
+
+def test_missing_created_at_falls_back_to_timestamp() -> None:
+    records = [
+        ConversationMessageRecord(
+            actor=Actor(user_id="u1"),
+            timestamp=_ts(9),
+            message=ChatMessagePayload(
+                id="u1",
+                created_at=None,
+                author=MessageAuthor(type="user"),
+                content=MessageContent(type="text", value="hello"),
+            ),
+            conversation=ConversationRef(id="conv-1"),
+        ),
+        ConversationMessageRecord(
+            timestamp=_ts(9, 1),
+            message=ChatMessagePayload(
+                id="a1",
+                created_at=None,
+                author=MessageAuthor(type="assistant"),
+                content=MessageContent(type="text", value="hi"),
+            ),
+            previous_message_id="u1",
+            conversation=ConversationRef(id="conv-1"),
+        ),
+        _msg(
+            "u2",
+            author_type="user",
+            created_at=_ts(9, 2),
+            text="x",
+            previous_message_id="a1",
+        ),
+    ]
+    first = _assembled(records, now=_ts(9, 3))[0]
+    payload = interaction_to_payload(
+        first, retrieval_traces=[], anonymize=False, directory=None
+    )
+    assert payload is not None
+    assert payload["interaction"]["time_start"] == "2025-06-15T09:00:00Z"
+
+
+def test_regenerate_slug_on_multi_assistant_siblings() -> None:
+    records = [
+        _msg("u1", author_type="user", created_at=_ts(9), text="hello"),
+        _msg(
+            "a-old",
+            author_type="assistant",
+            created_at=_ts(9, 1),
+            text="old",
+            previous_message_id="u1",
+        ),
+        _msg(
+            "a-new",
+            author_type="assistant",
+            created_at=_ts(9, 2),
+            text="new",
+            previous_message_id="u1",
+        ),
+        _msg(
+            "u2",
+            author_type="user",
+            created_at=_ts(9, 3),
+            text="next",
+            previous_message_id="a-new",
+        ),
+    ]
+    first = _assembled(records, now=_ts(9, 4))[0]
+    payload = interaction_to_payload(
+        first, retrieval_traces=[], anonymize=False, directory=None
+    )
+    assert payload is not None
+    assert payload["user_feedback"] == [{"slug": "regenerate"}]
+
+
+def test_edit_slug_on_edited_user_message() -> None:
+    records = [
+        _msg("u-original", author_type="user", created_at=_ts(9), text="v1"),
+        _msg(
+            "a1",
+            author_type="assistant",
+            created_at=_ts(9, 1),
+            text="ok",
+            previous_message_id="u-original",
+        ),
+        _msg("u-edited", author_type="user", created_at=_ts(9, 2), text="v2"),
+        _msg(
+            "a2",
+            author_type="assistant",
+            created_at=_ts(9, 3),
+            text="ok2",
+            previous_message_id="u-edited",
+        ),
+        _msg(
+            "u3",
+            author_type="user",
+            created_at=_ts(9, 4),
+            text="close",
+            previous_message_id="a2",
+        ),
+    ]
+    item = next(
+        i for i in _assembled(records, now=_ts(9, 5)) if i.interaction_key == "u-edited"
+    )
+    payload = interaction_to_payload(
+        item, retrieval_traces=[], anonymize=False, directory=None
+    )
+    assert payload is not None
+    assert payload["user_feedback"] == [{"slug": "edit", "text": "v2"}]
+
+
+def test_plain_pair_no_user_feedback() -> None:
+    records = [
+        _msg("u1", author_type="user", created_at=_ts(9), text="hello"),
+        _msg(
+            "a1",
+            author_type="assistant",
+            created_at=_ts(9, 1),
+            text="hi",
+            previous_message_id="u1",
+        ),
+        _msg(
+            "u2",
+            author_type="user",
+            created_at=_ts(9, 2),
+            text="next",
+            previous_message_id="a1",
+        ),
+    ]
+    first = _assembled(records, now=_ts(9, 3))[0]
+    payload = interaction_to_payload(
+        first, retrieval_traces=[], anonymize=False, directory=None
+    )
+    assert payload is not None
+    assert payload["user_feedback"] == []
