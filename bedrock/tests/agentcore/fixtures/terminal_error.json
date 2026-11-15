@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "kind": "sanitized_real",
+    "archive": "agentcore_observability.zip",
+    "source_case": "limits",
+    "transformations": [
+      "All opaque identifiers, resource values and content replaced with synthetic values.",
+      "Operation times shifted uniformly; durations, token counters and parent relationships preserved.",
+      "Memory API spans and unrelated logs omitted; one trace-linked actor lookup log retained.",
+      "Public model IDs, semantic attributes and event encoding shapes retained."
+    ],
+    "does_not_verify": [
+      "custom harness compatibility",
+      "Memory disabled",
+      "context truncation",
+      "cross-trace or nested subagents"
+    ]
+  },
+  "source": {
+    "account_id": "123456789012",
+    "region": "eu-north-1",
+    "source_id": "arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT"
+  },
+  "records": [
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689722596,
+      "ingestionTime": 1735689723250,
+      "eventId": "terminal_error-event-001",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"bedrock_agentcore.memory.client\",\"version\":\"0.0.0\"},\"timeUnixNano\":1735689722596374074,\"observedTimeUnixNano\":1735689722596501664,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"{\\\"level\\\": \\\"synthetic-log-field\\\", \\\"logger\\\": \\\"synthetic-log-field\\\", \\\"message\\\": \\\"Retrieved 0 memories from namespace: /actors/synthetic-actor-005/synthetic-namespace/\\\", \\\"requestId\\\": \\\"synthetic-log-field\\\", \\\"sessionId\\\": \\\"synthetic-log-field\\\"}\",\"attributes\":{\"otelSpanID\":\"synthetic-attribute\",\"otelTraceID\":\"synthetic-attribute\",\"otelTraceSampled\":true,\"otelServiceName\":\"synthetic-attribute\",\"requestId\":\"synthetic-attribute\",\"sessionId\":\"synthetic-attribute\",\"code.file.path\":\"synthetic-attribute\",\"code.function.name\":\"synthetic-attribute\",\"code.line.number\":414},\"flags\":1,\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000034\"}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689723848,
+      "ingestionTime": 1735689723934,
+      "eventId": "terminal_error-event-002",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"opentelemetry.instrumentation.botocore.bedrock-runtime\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000035\",\"parentSpanId\":\"0000000000000036\",\"flags\":256,\"name\":\"chat global.anthropic.claude-haiku-5-5\",\"kind\":\"CLIENT\",\"startTimeUnixNano\":1735689722647511355,\"endTimeUnixNano\":1735689723848888724,\"durationNano\":1201377369,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"harness.id\":\"synthetic-harness\",\"rpc.service\":\"synthetic-attribute\",\"aws.remote.resource.identifier\":\"synthetic-attribute\",\"aws.local.environment\":\"synthetic-attribute\",\"aws.remote.operation\":\"synthetic-attribute\",\"gen_ai.provider.name\":\"aws.bedrock\",\"server.address\":\"synthetic-attribute\",\"gen_ai.request.max_tokens\":2048,\"aws.request_id\":\"synthetic-attribute\",\"aws.local.operation\":\"synthetic-attribute\",\"aws.span.kind\":\"synthetic-attribute\",\"aws.auth.region\":\"synthetic-attribute\",\"rpc.method\":\"synthetic-attribute\",\"gen_ai.response.finish_reasons\":\"synthetic-attribute\",\"server.port\":443,\"gen_ai.request.model\":\"global.anthropic.claude-haiku-5-5\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"http.response.status_code\":200,\"gen_ai.system\":\"aws.bedrock\",\"telemetry.extended\":\"synthetic-attribute\",\"gen_ai.usage.output_tokens\":53,\"aws.genai.span_kind\":\"LLM\",\"rpc.system\":\"synthetic-attribute\",\"aws.remote.service\":\"synthetic-attribute\",\"http.status_code\":200,\"aws.region\":\"synthetic-attribute\",\"aws.remote.resource.type\":\"synthetic-attribute\",\"gen_ai.operation.name\":\"chat\",\"gen_ai.usage.input_tokens\":4,\"aws.genai.token_count_total\":57,\"retry_attempts\":0,\"PlatformType\":\"AWS::BedrockAgentCore\",\"aws.auth.account.access_key\":\"synthetic-attribute\",\"session.id\":\"synthetic-session-005\"},\"status\":{\"code\":\"UNSET\"}}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689723849,
+      "ingestionTime": 1735689723934,
+      "eventId": "terminal_error-event-003",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"strands.telemetry.tracer\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000036\",\"parentSpanId\":\"0000000000000037\",\"flags\":256,\"name\":\"chat\",\"kind\":\"INTERNAL\",\"startTimeUnixNano\":1735689722635936857,\"endTimeUnixNano\":1735689723849751989,\"durationNano\":1213815132,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"harness.id\":\"synthetic-harness\",\"gen_ai.usage.cache_write_input_tokens\":90,\"gen_ai.event.start_time\":\"2025-01-01T00:02:02.635963+00:00\",\"aws.local.environment\":\"synthetic-attribute\",\"gen_ai.provider.name\":\"strands-agents\",\"gen_ai.event.end_time\":\"2025-01-01T00:02:03.849713+00:00\",\"gen_ai.request.model\":\"global.anthropic.claude-haiku-5-5\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"gen_ai.usage.cache_creation.input_tokens\":90,\"gen_ai.system\":\"strands-agents\",\"gen_ai.usage.prompt_tokens\":8994,\"gen_ai.usage.output_tokens\":53,\"gen_ai.server.request.duration\":1183,\"gen_ai.usage.total_tokens\":9047,\"gen_ai.usage.completion_tokens\":53,\"aws.genai.span_kind\":\"LLM\",\"gen_ai.server.time_to_first_token\":1134,\"gen_ai.operation.name\":\"chat\",\"gen_ai.usage.input_tokens\":8994,\"aws.genai.token_count_total\":9047,\"gen_ai.usage.cache_read_input_tokens\":8900,\"PlatformType\":\"AWS::BedrockAgentCore\",\"session.id\":\"synthetic-session-005\",\"gen_ai.usage.cache_read.input_tokens\":8900},\"events\":[{\"timeUnixNano\":1735689722636014734,\"name\":\"gen_ai.system.message\",\"attributes\":{\"content\":\"[{\\\"text\\\": \\\"Synthetic content 1.\\\"}]\"}},{\"timeUnixNano\":1735689722636030306,\"name\":\"gen_ai.user.message\",\"attributes\":{\"content\":\"[{\\\"text\\\": \\\"Synthetic content 43.\\\"}]\"}},{\"timeUnixNano\":1735689723849706605,\"name\":\"gen_ai.choice\",\"attributes\":{\"message\":\"[{\\\"toolUse\\\": {\\\"toolUseId\\\": \\\"synthetic-tool-008\\\", \\\"name\\\": \\\"shell\\\", \\\"input\\\": {\\\"command\\\": \\\"Synthetic content 44.\\\"}}}]\",\"finish_reason\":\"tool_use\"}}],\"status\":{\"code\":\"OK\"}}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689723947,
+      "ingestionTime": 1735689728973,
+      "eventId": "terminal_error-event-004",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"strands.telemetry.tracer\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000038\",\"parentSpanId\":\"0000000000000037\",\"flags\":256,\"name\":\"execute_tool shell\",\"kind\":\"INTERNAL\",\"startTimeUnixNano\":1735689723945648779,\"endTimeUnixNano\":1735689723947718656,\"durationNano\":2069877,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"gen_ai.tool.status\":\"success\",\"harness.id\":\"synthetic-harness\",\"gen_ai.tool.call.id\":\"synthetic-tool-008\",\"gen_ai.tool.description\":\"synthetic-attribute\",\"gen_ai.tool.json_schema\":\"synthetic-attribute\",\"aws.genai.span_kind\":\"TOOL\",\"gen_ai.event.start_time\":\"2025-01-01T00:02:03.945691+00:00\",\"aws.local.environment\":\"synthetic-attribute\",\"gen_ai.provider.name\":\"strands-agents\",\"gen_ai.operation.name\":\"execute_tool\",\"gen_ai.event.end_time\":\"2025-01-01T00:02:03.947697+00:00\",\"gen_ai.tool.name\":\"shell\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"PlatformType\":\"AWS::BedrockAgentCore\",\"session.id\":\"synthetic-session-005\",\"gen_ai.system\":\"strands-agents\"},\"events\":[{\"timeUnixNano\":1735689723945733313,\"name\":\"gen_ai.tool.message\",\"attributes\":{\"content\":\"{\\\"command\\\": \\\"Synthetic content 44.\\\"}\",\"role\":\"tool\",\"id\":\"synthetic-tool-008\"}},{\"timeUnixNano\":1735689723947691542,\"name\":\"gen_ai.choice\",\"attributes\":{\"message\":\"[{\\\"text\\\": \\\"{\\\\\\\"synthetic_field_0\\\\\\\": \\\\\\\"0\\\\\\\", \\\\\\\"synthetic_field_1\\\\\\\": \\\\\\\"Synthetic content 12.\\\\\\\", \\\\\\\"synthetic_field_2\\\\\\\": 0}\\\"}]\",\"id\":\"synthetic-tool-008\"}}],\"status\":{\"code\":\"OK\"}}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689724165,
+      "ingestionTime": 1735689728973,
+      "eventId": "terminal_error-event-005",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"strands.telemetry.tracer\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000037\",\"parentSpanId\":\"0000000000000034\",\"flags\":256,\"name\":\"execute_event_loop_cycle\",\"kind\":\"INTERNAL\",\"startTimeUnixNano\":1735689722634597549,\"endTimeUnixNano\":1735689724165933318,\"durationNano\":1531335769,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"harness.id\":\"synthetic-harness\",\"gen_ai.operation.name\":\"execute_event_loop_cycle\",\"gen_ai.event.end_time\":\"2025-01-01T00:02:04.165914+00:00\",\"event_loop.cycle_id\":\"synthetic-attribute\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"gen_ai.event.start_time\":\"2025-01-01T00:02:02.634632+00:00\",\"PlatformType\":\"AWS::BedrockAgentCore\",\"session.id\":\"synthetic-session-005\",\"gen_ai.system\":\"strands-agents\",\"aws.local.environment\":\"synthetic-attribute\",\"gen_ai.provider.name\":\"strands-agents\"},\"events\":[{\"timeUnixNano\":1735689722634687062,\"name\":\"gen_ai.user.message\",\"attributes\":{\"content\":\"[{\\\"text\\\": \\\"Synthetic content 43.\\\"}]\"}},{\"timeUnixNano\":1735689724165909007,\"name\":\"gen_ai.choice\",\"attributes\":{\"message\":\"[{\\\"toolUse\\\": {\\\"toolUseId\\\": \\\"synthetic-tool-008\\\", \\\"name\\\": \\\"shell\\\", \\\"input\\\": {\\\"command\\\": \\\"Synthetic content 44.\\\"}}}]\",\"tool.result\":\"synthetic-event-attribute\"}}],\"status\":{\"code\":\"OK\"}}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689724168,
+      "ingestionTime": 1735689728973,
+      "eventId": "terminal_error-event-006",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"strands.telemetry.tracer\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000039\",\"parentSpanId\":\"0000000000000034\",\"flags\":256,\"name\":\"execute_event_loop_cycle\",\"kind\":\"INTERNAL\",\"startTimeUnixNano\":1735689724166124365,\"endTimeUnixNano\":1735689724168938246,\"durationNano\":2813881,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"harness.id\":\"synthetic-harness\",\"event_loop.cycle_id\":\"synthetic-attribute\",\"gen_ai.event.start_time\":\"2025-01-01T00:02:04.166150+00:00\",\"aws.local.environment\":\"synthetic-attribute\",\"gen_ai.provider.name\":\"strands-agents\",\"gen_ai.operation.name\":\"execute_event_loop_cycle\",\"gen_ai.event.end_time\":\"2025-01-01T00:02:04.166369+00:00\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"event_loop.parent_cycle_id\":\"synthetic-attribute\",\"PlatformType\":\"AWS::BedrockAgentCore\",\"session.id\":\"synthetic-session-005\",\"gen_ai.system\":\"strands-agents\"},\"events\":[{\"timeUnixNano\":1735689724166183364,\"name\":\"gen_ai.user.message\",\"attributes\":{\"content\":\"[{\\\"text\\\": \\\"Synthetic content 43.\\\"}]\"}},{\"timeUnixNano\":1735689724166200479,\"name\":\"gen_ai.assistant.message\",\"attributes\":{\"content\":\"[{\\\"toolUse\\\": {\\\"toolUseId\\\": \\\"synthetic-tool-008\\\", \\\"name\\\": \\\"shell\\\", \\\"input\\\": {\\\"command\\\": \\\"Synthetic content 44.\\\"}}}]\"}},{\"timeUnixNano\":1735689724166217126,\"name\":\"gen_ai.tool.message\",\"attributes\":{\"content\":\"[{\\\"toolResult\\\": {\\\"toolUseId\\\": \\\"synthetic-tool-008\\\", \\\"status\\\": \\\"success\\\", \\\"content\\\": [{\\\"text\\\": \\\"{\\\\\\\"synthetic_field_0\\\\\\\": \\\\\\\"0\\\\\\\", \\\\\\\"synthetic_field_1\\\\\\\": \\\\\\\"Synthetic content 12.\\\\\\\", \\\\\\\"synthetic_field_2\\\\\\\": 0}\\\"}]}}]\"}},{\"timeUnixNano\":1735689724168933158,\"name\":\"exception\",\"attributes\":{\"exception.escaped\":\"synthetic-event-attribute\",\"exception.stacktrace\":\"synthetic-event-attribute\",\"exception.type\":\"synthetic-event-attribute\",\"exception.message\":\"synthetic-event-attribute\"}}],\"status\":{\"message\":\"Synthetic terminal error.\",\"code\":\"ERROR\"}}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689724170,
+      "ingestionTime": 1735689728973,
+      "eventId": "terminal_error-event-007",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"strands.telemetry.tracer\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"0000000000000034\",\"parentSpanId\":\"000000000000003a\",\"flags\":256,\"name\":\"invoke_agent Strands Agents\",\"kind\":\"INTERNAL\",\"startTimeUnixNano\":1735689722114188693,\"endTimeUnixNano\":1735689724170847434,\"durationNano\":2056658741,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"harness.id\":\"synthetic-harness\",\"gen_ai.agent.name\":\"Strands Agents\",\"aws.genai.span_kind\":\"AGENT\",\"gen_ai.event.start_time\":\"2025-01-01T00:02:02.114217+00:00\",\"aws.local.environment\":\"synthetic-attribute\",\"gen_ai.provider.name\":\"strands-agents\",\"gen_ai.operation.name\":\"invoke_agent\",\"gen_ai.event.end_time\":\"2025-01-01T00:02:04.169198+00:00\",\"gen_ai.request.model\":\"global.anthropic.claude-haiku-5-5\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"gen_ai.agent.tools\":\"synthetic-attribute\",\"PlatformType\":\"AWS::BedrockAgentCore\",\"session.id\":\"synthetic-session-005\",\"gen_ai.system\":\"strands-agents\"},\"events\":[{\"timeUnixNano\":1735689722114284241,\"name\":\"gen_ai.system.message\",\"attributes\":{\"content\":\"[{\\\"text\\\": \\\"Synthetic content 1.\\\"}]\"}},{\"timeUnixNano\":1735689722114306721,\"name\":\"gen_ai.user.message\",\"attributes\":{\"content\":\"[{\\\"text\\\": \\\"Synthetic content 43.\\\"}]\"}},{\"timeUnixNano\":1735689724170842390,\"name\":\"exception\",\"attributes\":{\"exception.escaped\":\"synthetic-event-attribute\",\"exception.stacktrace\":\"synthetic-event-attribute\",\"exception.type\":\"synthetic-event-attribute\",\"exception.message\":\"synthetic-event-attribute\"}}],\"status\":{\"message\":\"Synthetic terminal error.\",\"code\":\"ERROR\"}}"
+    },
+    {
+      "logGroupName": "/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT",
+      "logStreamName": "otel-rt-logs",
+      "timestamp": 1735689724171,
+      "ingestionTime": 1735689728973,
+      "eventId": "terminal_error-event-008",
+      "message": "{\"resource\":{\"attributes\":{\"cloud.provider\":\"aws\",\"cloud.region\":\"eu-north-1\",\"cloud.platform\":\"aws_bedrock_agentcore\",\"cloud.resource_id\":\"arn:aws:bedrock-agentcore:eu-north-1:123456789012:runtime/synthetic-agent/runtime-endpoint/DEFAULT:DEFAULT\",\"service.name\":\"synthetic-agent.DEFAULT\",\"aws.log.group.names\":\"/aws/bedrock-agentcore/runtimes/synthetic-agent-DEFAULT\",\"aws.log.stream.names\":\"otel-rt-logs\",\"deployment.environment.name\":\"bedrock-agentcore:default\"}},\"scope\":{\"name\":\"opentelemetry.instrumentation.starlette\",\"version\":\"0.0.0\"},\"traceId\":\"00000000000000000000000000000006\",\"spanId\":\"000000000000003a\",\"parentSpanId\":\"000000000000003b\",\"flags\":768,\"name\":\"POST /invocations\",\"kind\":\"SERVER\",\"startTimeUnixNano\":1735689721574753044,\"endTimeUnixNano\":1735689724171722450,\"durationNano\":2596969406,\"attributes\":{\"aws.local.service\":\"synthetic-attribute\",\"harness.id\":\"synthetic-harness\",\"net.peer.port\":47906,\"telemetry.extended\":\"synthetic-attribute\",\"http.target\":\"synthetic-attribute\",\"http.flavor\":\"synthetic-attribute\",\"http.url\":\"synthetic-attribute\",\"net.peer.ip\":\"synthetic-attribute\",\"http.host\":\"synthetic-attribute\",\"aws.local.environment\":\"synthetic-attribute\",\"http.status_code\":200,\"aws.local.operation\":\"synthetic-attribute\",\"aws.span.kind\":\"synthetic-attribute\",\"http.server_name\":\"synthetic-attribute\",\"net.host.port\":8080,\"http.route\":\"synthetic-attribute\",\"harness.endpoint.qualifier\":\"DEFAULT\",\"PlatformType\":\"AWS::BedrockAgentCore\",\"http.method\":\"POST\",\"http.response.status_code\":200,\"session.id\":\"synthetic-session-005\",\"http.scheme\":\"synthetic-attribute\"},\"status\":{\"code\":\"UNSET\"}}"
+    }
+  ],
+  "expected": {
+    "trace_id": "00000000000000000000000000000006",
+    "root_span_id": "0000000000000034",
+    "actor_id": "synthetic-actor-005",
+    "session_id": "synthetic-session-005",
+    "input": "Synthetic content 43.",
+    "output": null,
+    "terminal_status": "ERROR",
+    "canonical_model_span_ids": [
+      "0000000000000036"
+    ],
+    "usage_by_model": {
+      "global.anthropic.claude-haiku-5-5": {
+        "input_tokens": 4,
+        "output_tokens": 53,
+        "cache_read_input_tokens": 8900,
+        "cache_write_input_tokens": 90
+      }
+    },
+    "tools": [
+      {
+        "span_id": "0000000000000038",
+        "call_id": "synthetic-tool-008",
+        "name": "shell",
+        "input": {
+          "command": "Synthetic content 44."
+        },
+        "output": [
+          {
+            "text": "{\"synthetic_field_0\": \"0\", \"synthetic_field_1\": \"Synthetic content 12.\", \"synthetic_field_2\": 0}"
+          }
+        ],
+        "internal_to_subagent": false
+      }
+    ]
+  }
+}

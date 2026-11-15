@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "bedrock"
 version = "0.1.0"
-description = "AWS Bedrock integration"
+description = "AWS Bedrock (runtime and AgentCore) to Nebuly connectors"
 authors = ["The Nebuly Team"]
 package-mode = false
 
@@ -10,8 +10,6 @@ python = ">=3.12,<4"
 boto3 = "^1.35"
 httpx = "^0.28.0"
 python-dotenv = "^1.0.0"
-tenacity = "^9.0.0"
-tqdm = "^4.67"
 
 [tool.poetry.group.dev]
 optional = true

@@ -563,12 +563,12 @@ version = "0.4.6"
 description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
-groups = ["main", "dev"]
+groups = ["dev"]
+markers = "sys_platform == \"win32\""
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
-markers = {main = "platform_system == \"Windows\"", dev = "sys_platform == \"win32\""}
 
 [[package]]
 name = "distlib"
@@ -1274,43 +1274,6 @@ files = [
 ]
 
 [[package]]
-name = "tenacity"
-version = "9.2.1"
-description = "Retry code until it succeeds"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "tenacity-9.2.1-py3-none-any.whl", hash = "sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e"},
-    {file = "tenacity-9.2.1.tar.gz", hash = "sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839"},
-]
-
-[package.extras]
-doc = ["reno", "sphinx"]
-test = ["pytest", "tornado (>=6.0)"]
-
-[[package]]
-name = "tqdm"
-version = "4.70.1"
-description = "Fast, Extensible Progress Meter"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73"},
-    {file = "tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4"},
-]
-
-[package.dependencies]
-colorama = {version = "*", markers = "platform_system == \"Windows\""}
-
-[package.extras]
-discord = ["envwrap", "requests"]
-notebook = ["ipywidgets (>=6)"]
-slack = ["envwrap", "slack-sdk"]
-telegram = ["envwrap", "requests"]
-
-[[package]]
 name = "types-s3transfer"
 version = "0.19.3"
 description = "Type annotations and code completion for s3transfer"
@@ -1375,4 +1338,4 @@ python-discovery = ">=1.6.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4"
-content-hash = "9b232858deb20e2569ac01d6112851624af5a878f20374fb54778db47cfcc409"
+content-hash = "cb191e4d50b96eef176350321c20a2bf5569aadc56971a3e0592260f33fcde04"
