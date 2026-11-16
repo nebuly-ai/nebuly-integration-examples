@@ -11,7 +11,8 @@ set of log groups. It keeps:
 - the traces being assembled, with their status: ``open`` (spans may still
   arrive), ``blocked`` (something is missing), ``ready`` (staged for
   delivery) or ``dropped`` (its session belongs to another actor);
-- the owner (actor) of every staged session, as digests;
+- the owner (actor) of every session, as digests, with the owner's traces:
+  the session is free again if none of them is delivered or still staged;
 - the outbox, shared with the runtime connector (``shared/outbox.py``), with a
   link from each interaction to its trace.
 
@@ -97,6 +98,10 @@ CREATE TABLE parser_settings(
 CREATE TABLE conversation_owner(
   conversation TEXT PRIMARY KEY,
   owner TEXT NOT NULL);
+CREATE TABLE conversation_trace(
+  conversation TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  PRIMARY KEY(conversation, trace_id));
 """
 _RECORD_COLUMNS = "log_group,log_stream,event_id,timestamp_ms,ingestion_time_ms,message"
 
@@ -126,7 +131,7 @@ def _receipt(values: tuple[object, ...]) -> str:
 class AgentCoreState(Store):
     LABEL = "AgentCore"
     APPLICATION_ID = 0x41474331
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 4
 
     def __init__(
         self,
@@ -442,24 +447,52 @@ class AgentCoreState(Store):
             TraceRow(row[0], row[1], row[2], json.loads(row[3])) for row in rows
         )
 
-    def claim_conversation(self, session_id: str, actor_id: str) -> bool:
-        """A conversation (session) belongs to one actor: the first one staged.
+    def claim_conversation(self, session_id: str, actor_id: str, trace_id: str) -> bool:
+        """A conversation (session) belongs to one actor: the actor whose traces
+        are sent, may have been sent, or are staged to be sent.
 
-        Returns False when the session already belongs to another actor. Only
-        digests are stored, never the raw ids.
+        Returns False when the session belongs to another actor. A session none
+        of whose traces still holds it (all rejected, expired or never staged)
+        goes to the next actor that claims it. Only digests are stored, never
+        the raw ids.
         """
         conversation = digest(self.source.conversation_key(session_id))
         owner = digest("agentcore.conversation_owner", 1, conversation, actor_id)
         with self._transaction():
-            self._db.execute(
-                "INSERT OR IGNORE INTO conversation_owner VALUES (?,?)",
-                (conversation, owner),
-            )
             row = self._db.execute(
                 "SELECT owner FROM conversation_owner WHERE conversation=?",
                 (conversation,),
             ).fetchone()
-        return bool(row[0] == owner)
+            if row is None or row[0] != owner:
+                if row is not None and self._held(conversation):
+                    return False
+                self._db.execute(
+                    "DELETE FROM conversation_trace WHERE conversation=?",
+                    (conversation,),
+                )
+                self._db.execute(
+                    "INSERT INTO conversation_owner VALUES (?,?) "
+                    "ON CONFLICT(conversation) DO UPDATE SET owner=excluded.owner",
+                    (conversation, owner),
+                )
+            self._db.execute(
+                "INSERT OR IGNORE INTO conversation_trace VALUES (?,?)",
+                (conversation, trace_id),
+            )
+        return True
+
+    def _held(self, conversation: str) -> bool:
+        """A trace of the owner keeps the session: delivered, maybe delivered,
+        or staged and not dropped (a blocked trace may become ready again)."""
+        row = self._db.execute(
+            "SELECT 1 FROM conversation_trace c JOIN trace_outbox l USING(trace_id) "
+            "JOIN outbox o USING(interaction_key) JOIN traces t USING(trace_id) "
+            "WHERE c.conversation=? AND "
+            "(o.status IN ('sending','sent','uncertain') "
+            "OR (o.status='pending' AND t.status!='dropped')) LIMIT 1",
+            (conversation,),
+        ).fetchone()
+        return row is not None
 
     # Outbox -----------------------------------------------------------------------
 
@@ -539,6 +572,13 @@ class AgentCoreState(Store):
             ).fetchall()
             for (trace_id,) in dropped:
                 self._compact_trace(trace_id, "dropped")
+                # A payload staged before the trace was dropped is never sent.
+                self._db.execute(
+                    "UPDATE outbox SET payload='{}' WHERE status='pending' AND "
+                    "interaction_key IN (SELECT interaction_key FROM trace_outbox "
+                    "WHERE trace_id=?)",
+                    (trace_id,),
+                )
             return self._erase_records(cutoff)
 
     def _compact_trace(self, trace_id: str, status: TraceStatus) -> None:

@@ -434,6 +434,25 @@ def test_backfill_does_not_send_pending_interactions_after_selected_end(
     assert resumed.sent == 1
 
 
+def test_to_date_before_the_resume_point_reads_nothing(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    sent: list[dict[str, Any]] = []
+    sync.run_sync(
+        config, logs_client=Logs(case["records"]), transport=recorder(sent), now=now
+    )
+    assert config.from_date is not None
+    report = sync.run_sync(
+        replace(config, from_date=None, to_date=config.from_date),
+        logs_client=Logs([]),
+        transport=recorder(sent),
+        now=now,
+    )
+    assert not report.incomplete
+    assert report.sent == 0
+    assert len(sent) == 1
+
+
 def test_zero_overlap_same_end_can_resume_existing_state(tmp_path: Path) -> None:
     case = load(DEFAULT_CASE)
     config, now = settings(tmp_path, case)

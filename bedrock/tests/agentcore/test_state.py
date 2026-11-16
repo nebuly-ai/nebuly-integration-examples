@@ -342,16 +342,88 @@ def test_old_unrelated_records_are_pruned_with_receipts(tmp_path: Path) -> None:
         assert state.ingest_page(window, page(GROUPS[0], record())) == 0
 
 
+def _staged(state: AgentCoreState, trace_id: str) -> str:
+    state.save_trace(trace_id, "ready", 100, {})
+    return state.put_payload(trace_id, "root", {"synthetic": True})
+
+
 def test_conversation_belongs_to_the_first_actor_across_runs(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     with AgentCoreState(path, SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice")
-        assert state.claim_conversation("session-1", "alice")
-        assert not state.claim_conversation("session-1", "bob")
-        assert state.claim_conversation("session-2", "bob")
+        assert state.claim_conversation("session-1", "alice", "t1")
+        _staged(state, "t1")
+        assert state.claim_conversation("session-1", "alice", "t2")
+        assert not state.claim_conversation("session-1", "bob", "t3")
+        assert state.claim_conversation("session-2", "bob", "t3")
     with AgentCoreState(path, SOURCE, GROUPS) as state:
-        assert not state.claim_conversation("session-1", "bob")
-        assert state.claim_conversation("session-1", "alice")
+        assert not state.claim_conversation("session-1", "bob", "t4")
+        assert state.claim_conversation("session-1", "alice", "t4")
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "keeps"),
+    [
+        ("sent", 200, True),
+        ("uncertain", 503, True),
+        ("rejected", 422, False),
+    ],
+)
+def test_session_stays_with_a_delivered_trace_only(
+    tmp_path: Path, outcome: str, status: int, *, keeps: bool
+) -> None:
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
+        assert state.claim_conversation("session-1", "alice", "t1")
+        key = _staged(state, "t1")
+        state.finish_attempt(state.begin_attempt(key), outcome, http_status=status)  # type: ignore[arg-type]
+        assert state.claim_conversation("session-1", "bob", "t2") is not keeps
+
+
+def test_session_is_freed_when_its_staged_trace_is_dropped(tmp_path: Path) -> None:
+    """The trace expired before delivery."""
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
+        assert state.claim_conversation("session-1", "alice", "t1")
+        _staged(state, "t1")
+        state.save_trace("t1", "dropped", 100, {})
+        assert state.claim_conversation("session-1", "bob", "t2")
+        _staged(state, "t2")
+        assert not state.claim_conversation("session-1", "alice", "t3")
+
+
+def test_session_stays_with_a_staged_trace_blocked_for_now(tmp_path: Path) -> None:
+    """A late record, or an earlier --to-date, may block it until a later run."""
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
+        assert state.claim_conversation("session-1", "alice", "t1")
+        _staged(state, "t1")
+        state.save_trace("t1", "blocked", 100, {})
+        assert not state.claim_conversation("session-1", "bob", "t2")
+
+
+def test_session_stays_with_any_delivered_trace_of_the_owner(tmp_path: Path) -> None:
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
+        assert state.claim_conversation("session-1", "alice", "t1")
+        first = _staged(state, "t1")
+        assert state.claim_conversation("session-1", "alice", "t2")
+        second = _staged(state, "t2")
+        state.finish_attempt(state.begin_attempt(second), "sent", http_status=200)
+        state.finish_attempt(state.begin_attempt(first), "rejected", http_status=422)
+        assert not state.claim_conversation("session-1", "bob", "t3")
+
+
+def test_payload_of_an_expired_staged_trace_is_erased(tmp_path: Path) -> None:
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS, now_ms=61_000) as state:
+        key = _staged(state, "t1")
+        state.save_trace("t1", "blocked", 100, {})
+        assert state.expire_traces(200) == 1
+        state.prune_content(60)
+        assert delivery(state, key).payload == {}
+        assert state.pending_deliveries(ended_before_ns=2**62) == ()
+
+
+def test_claim_without_staging_holds_nothing(tmp_path: Path) -> None:
+    """A crash between the claim and the staging leaves the session free."""
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
+        assert state.claim_conversation("session-1", "alice", "t1")
+        assert state.claim_conversation("session-1", "bob", "t2")
 
 
 def test_dropped_traces_are_erased_after_the_retention(tmp_path: Path) -> None:

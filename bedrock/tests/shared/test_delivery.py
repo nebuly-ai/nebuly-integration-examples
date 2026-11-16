@@ -39,9 +39,8 @@ def deliver_pending(
         (204, "sent"),
         (301, "uncertain"),
         (307, "uncertain"),
+        (308, "uncertain"),
         (400, "rejected"),
-        (401, "rejected"),
-        (403, "rejected"),
         (408, "uncertain"),
         (422, "rejected"),
         (429, "retryable"),
@@ -73,12 +72,8 @@ def test_one_post_after_durable_marker_and_no_replay(
             transport=httpx.MockTransport(respond),
             max_attempts=1,
         ) as client:
-            if status in {401, 403}:
-                with pytest.raises(AuthenticationError, match="authentication failed"):
-                    deliver_pending(state, client)
-            else:
-                report = deliver_pending(state, client)
-                assert getattr(report, outcome) == 1
+            report = deliver_pending(state, client)
+            assert getattr(report, outcome) == 1
             assert state.get(key).status == (
                 "pending" if outcome == "retryable" else outcome
             )
@@ -161,7 +156,60 @@ def test_auth_failure_stops_before_other_pending_deliveries(tmp_path: Path) -> N
         ):
             deliver_pending(state, client)
         assert len(requests) == 1
-        assert len(state.pending_deliveries()) == 1
+        # Nothing was ingested: both stay pending for the run with the right key.
+        assert len(state.pending_deliveries()) == 2
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "match"),
+    [
+        (401, AuthenticationError, "authentication failed"),
+        (403, AuthenticationError, "authentication failed"),
+        (404, DeliveryError, "NEBULY_ENDPOINT"),
+        (405, DeliveryError, "NEBULY_ENDPOINT"),
+    ],
+)
+def test_wrong_key_or_endpoint_keeps_the_item_pending(
+    tmp_path: Path, status: int, error: type[Exception], match: str
+) -> None:
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status)
+
+    with OutboxStore(tmp_path / "db") as state:
+        key = state.put("trace", {"synthetic": True})
+        with (
+            SafeNebulyClient(
+                "key", "https://example.test", transport=httpx.MockTransport(respond)
+            ) as client,
+            pytest.raises(error, match=match),
+        ):
+            deliver_pending(state, client)
+        assert len(requests) == 1
+        assert state.get(key).status == "pending"
+        assert not state.delivery_paused()
+
+
+@pytest.mark.parametrize("status", [308, 502, 503])
+def test_first_uncertain_response_stops_the_run(tmp_path: Path, status: int) -> None:
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status)
+
+    with OutboxStore(tmp_path / "db") as state:
+        for name in ("first", "second", "third"):
+            state.put(name, {"synthetic": True})
+        with SafeNebulyClient(
+            "key", "https://example.test", transport=httpx.MockTransport(respond)
+        ) as client:
+            report = deliver_pending(state, client)
+        assert len(requests) == 1
+        assert report.uncertain == 1
+        assert len(state.pending_deliveries()) == 2
 
 
 def test_dry_run_state_cannot_send(tmp_path: Path) -> None:

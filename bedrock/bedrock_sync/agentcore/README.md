@@ -27,12 +27,12 @@ One agent invocation is one trace: the agent span, its model calls, its tools an
 
 The end user of an invocation is its AgentCore actor id. The connector reads it from, in order:
 
-1. **A span attribute (recommended):** `actor.id` on the agent span, set for each invocation with the actor of that request. With Strands, use the agent's [`trace_attributes`](https://strandsagents.com/docs/user-guide/sdk/observability-evaluation/traces/#custom-attribute-tracking). Use `--actor-id-attribute` if you use another attribute name. Never set one fixed value for every user.
+1. **A span attribute (recommended):** `actor.id` on the agent span, set for each invocation with the actor of that request. On an AgentCore harness, add `actor.id` to the harness environment variable `OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS` (keep the variables and keys already set: `UpdateHarness` replaces the whole map) and pass `baggage="actor.id=<actorId>"` on every `InvokeHarness` call; both are needed. With your own Strands agent code, use the agent's [`trace_attributes`](https://strandsagents.com/docs/user-guide/sdk/observability-evaluation/traces/#custom-attribute-tracking). Use `--actor-id-attribute` if you use another attribute name. Never set one fixed value for every user. With this attribute, AgentCore Memory is not needed.
 2. **AgentCore Memory logs (fallback):** when the agent retrieves memories, the Memory client logs the namespace it read, for example `/actors/user-123/facts/`. The connector takes the actor from it with `--actor-namespace-template` (default `/actors/{actorId}/`; for example `/facts/{actorId}/`). It only reads these logs: it never calls the Memory APIs.
 
 A trace with no actor, or with two different actors in the Memory logs, is not sent (`missing_actor`, `ambiguous_actor`).
 
-**One session belongs to one actor.** The session goes to the actor of its first trace sent; a later trace of the same session with another actor is dropped (`conversation_user_conflict`). Traces ready in the same run are sent oldest first, so the actor who started the session keeps it.
+**One session belongs to one actor.** The session goes to the actor of its first trace sent (or staged to be sent); a later trace of the same session with another actor is dropped (`conversation_user_conflict`). Traces ready in the same run are sent oldest first, so the actor who started the session keeps it. If none of the owner's traces is sent or still staged (all rejected, or expired before they were sent), the session goes to the next actor.
 
 ## AgentCore settings
 
@@ -95,4 +95,5 @@ Edit [`user_defined.py`](user_defined.py) in this folder:
 - Tested with the Strands agent harness, with any agent name. Other frameworks need the same span names and events (`invoke_agent <name>`, `chat`, `execute_tool <name>`, `gen_ai.*` events).
 - Without an actor in the telemetry nothing is sent.
 - Late events beyond the reconciliation window need a manual backfill.
+- A trace is sent as soon as its agent span has ended and the parts it needs were read. A model call or tool span that CloudWatch delivers after that is not added: the interaction stays as sent, with fewer tokens or tools, and the run counts `late_delivery_discrepancy`.
 - No user feedback in the telemetry.

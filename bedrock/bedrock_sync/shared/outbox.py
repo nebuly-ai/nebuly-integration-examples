@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from .delivery import Delivery, Outcome
+from .delivery import NOT_INGESTED_STATUSES, Delivery, Outcome
 from .errors import StateError
 
 if TYPE_CHECKING:
@@ -171,9 +171,13 @@ def validate_outcome(
     ):
         raise ValueError("Rejected requires an explicit permanent 4xx response")
     if outcome == "retryable" and (
-        http_status not in {None, 429} or retry_after_seconds < 0
+        http_status not in {None, 429, *NOT_INGESTED_STATUSES}
+        or retry_after_seconds < 0
     ):
-        raise ValueError("Only connection failure or rate limiting is retryable")
+        raise ValueError(
+            "Only connection failure, rate limiting or a wrong key or endpoint "
+            "is retryable"
+        )
 
 
 def finish_attempt(

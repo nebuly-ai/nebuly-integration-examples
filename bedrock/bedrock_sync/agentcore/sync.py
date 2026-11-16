@@ -245,7 +245,7 @@ def _stage(
         return
     # snapshot_to_payload accepted it, so both ids are present.
     if not state.claim_conversation(
-        str(interaction.session_id), str(interaction.actor_id)
+        str(interaction.session_id), str(interaction.actor_id), interaction.trace_id
     ):
         logger.warning(
             "Dropping trace %s: its session belongs to another actor",
@@ -286,7 +286,7 @@ def _assemble_candidates(
         parse_codes = Counter(item.code for item in diagnostics)
         assembled.append((start, trace_id, earliest, result, parse_codes))
     # Oldest first, so among the traces staged in this run the session goes to
-    # the actor of the oldest one (``claim_conversation``: first staged wins).
+    # the actor of the oldest one (``claim_conversation``).
     assembled.sort(key=lambda item: (item[0], item[1]))
     for _, trace_id, earliest, result, parse_codes in assembled:
         # Parse diagnostics were counted when their records were first read.
@@ -346,6 +346,11 @@ def _plan(state: AgentCoreState, config: AgentCoreConfig, now: datetime) -> _Pla
     ):
         # Recheck a single millisecond rather than failing a valid zero-overlap run.
         start = max(coverage[0], end - 1)
+    if coverage is not None and start is None:
+        resume = max(coverage[0], coverage[1] - config.overlap_seconds * 1000)
+        if end <= resume:
+            # --to-date (or the clock) is before where this run would start.
+            return _Plan((), end, end, reconcile=False)
     reconcile = state.reconciliation_due(end, config.reconciliation_interval_seconds)
     windows = plan_reads(
         coverage=coverage,
@@ -359,6 +364,32 @@ def _plan(state: AgentCoreState, config: AgentCoreConfig, now: datetime) -> _Pla
         min(window.start_ms for window in windows),
         max(window.end_ms for window in windows),
         reconcile,
+    )
+
+
+def _read_and_assemble(
+    state: AgentCoreState,
+    reader: CloudWatchLogReader,
+    plan: _Plan,
+    config: AgentCoreConfig,
+    context: Mapping[str, object],
+    report: SyncReport,
+) -> None:
+    for window in plan.windows:
+        _read_window(state, reader, window, report, coverage=True)
+    if plan.reconcile:
+        state.mark_reconciliation(plan.end_ms)
+    touched = _normalize_new(state, report, config)
+    candidates = (
+        touched
+        | {trace.trace_id for trace in state.pending_traces()}
+        | {trace.trace_id for trace in state.ready_traces(unattempted_only=True)}
+    )
+    bounds = _recover_prefixes(
+        state, reader, candidates, plan.start_ms, plan.end_ms, report, config
+    )
+    _assemble_candidates(
+        state, candidates, bounds, config, context, report, plan.end_ms
     )
 
 
@@ -389,22 +420,13 @@ def run_sync(
             logs_client if logs_client is not None else create_logs_client(config),
             config.log_groups,
         )
-        for window in plan.windows:
-            _read_window(state, reader, window, report, coverage=True)
-        if plan.reconcile:
-            state.mark_reconciliation(plan.end_ms)
-        touched = _normalize_new(state, report, config)
-        candidates = (
-            touched
-            | {trace.trace_id for trace in state.pending_traces()}
-            | {trace.trace_id for trace in state.ready_traces(unattempted_only=True)}
-        )
-        bounds = _recover_prefixes(
-            state, reader, candidates, plan.start_ms, plan.end_ms, report, config
-        )
-        _assemble_candidates(
-            state, candidates, bounds, config, context, report, plan.end_ms
-        )
+        if plan.windows:
+            _read_and_assemble(state, reader, plan, config, context, report)
+        else:
+            logger.info(
+                "Nothing to read: logs are read up to %s",
+                datetime.fromtimestamp(plan.end_ms / 1000, UTC).isoformat(),
+            )
         delivery_report = DeliveryReport()
         if not config.dry_run:
             with SafeNebulyClient(

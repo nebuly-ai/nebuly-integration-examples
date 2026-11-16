@@ -128,6 +128,12 @@ def _parse(record: JsonDict, request_id: str, source_key: str) -> Invocation | S
         # Bedrock always logs one. Without it a call cannot be deduplicated
         # nor read again from S3 after a checkpoint.
         return Skipped(request_id, RecordSkip.INVALID_BODY, "no requestId")
+    try:
+        # Python accepts non-JSON NaN/Infinity and escaped lone surrogates.
+        # Skip these here: SQLite and the UTF-8 delivery would fail on every run.
+        json.dumps(record, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except ValueError:
+        return Skipped(request_id, RecordSkip.INVALID_BODY, "invalid JSON text")
 
     input_section = as_dict(record.get("input"))
     output_section = as_dict(record.get("output"))

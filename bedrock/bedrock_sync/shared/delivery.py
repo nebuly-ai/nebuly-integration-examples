@@ -4,11 +4,14 @@ Shared by the AgentCore and runtime connectors. Nebuly does not deduplicate,
 so a POST whose outcome is unknown is never replayed automatically:
 
 - ``sent``: confirmed 2xx;
-- ``rejected``: explicit permanent 4xx (401/403 also stop the run);
-- ``uncertain``: Nebuly may have accepted it (read errors, 408, 5xx, a crash
-  while ``sending``); left for an operator;
+- ``rejected``: explicit permanent 4xx;
+- ``uncertain``: Nebuly may have accepted it (read errors, 3xx, 408, 5xx, a
+  crash while ``sending``); left for an operator. The run stops there, so an
+  outage or a redirecting endpoint costs one item, not the whole outbox;
 - ``retryable``: connection failure or 429, rejected before ingestion; the
-  item stays ``pending`` for a later attempt.
+  item stays ``pending`` for a later attempt. 401/403 (bad key) and 404/405
+  (wrong endpoint) are never ingested either: the item stays ``pending`` and
+  the run stops with an error to fix first.
 
 The store (an outbox in SQLite) commits ``sending`` before each POST.
 """
@@ -88,6 +91,9 @@ class DeliveryReport:
     """Deliveries wait for an earlier Retry-After, from this run or a previous one."""
 
 
+NOT_INGESTED_STATUSES = frozenset({401, 403, 404, 405})
+"""Wrong key or endpoint: nothing was ingested, so the item stays pending."""
+
 MAX_RETRY_AFTER_SECONDS = 86400
 """A longer Retry-After is capped, so one bad header cannot stop delivery."""
 
@@ -164,7 +170,10 @@ class SafeNebulyClient:
     def send(self, request: httpx.Request) -> SendResult:
         for index in range(self._max_attempts):
             result = self._send_once(request)
-            if result.outcome != "retryable":
+            if (
+                result.outcome != "retryable"
+                or result.http_status in NOT_INGESTED_STATUSES
+            ):
                 return result
             delay = (
                 result.retry_after_seconds
@@ -192,6 +201,8 @@ class SafeNebulyClient:
             return SendResult("sent", status)
         if status == 429 and self._retry_http_429:
             return SendResult("retryable", status, retry_after)
+        if status in NOT_INGESTED_STATUSES:
+            return SendResult("retryable", status, 0)
         if 400 <= status < 500 and status not in {408, 429}:
             return SendResult("rejected", status)
         return SendResult("uncertain", status)
@@ -222,15 +233,23 @@ def deliver(
             attempt,
             result.outcome,
             http_status=result.http_status,
-            retry_after_seconds=result.retry_after_seconds or 60,
+            retry_after_seconds=60
+            if result.retry_after_seconds is None
+            else result.retry_after_seconds,
             finished_ms=clock_ms() if clock_ms else None,
         )
         counts[result.outcome] += 1
-        if result.outcome == "retryable":
-            # Preserve the remainder without hammering a throttled/unreachable API.
-            break
         if result.http_status in {401, 403}:
             raise AuthenticationError(
                 "Nebuly authentication failed; correct credentials before another run"
             )
+        if result.http_status in NOT_INGESTED_STATUSES:
+            raise DeliveryError(
+                f"Nebuly endpoint not found (HTTP {result.http_status}); "
+                "check NEBULY_ENDPOINT before another run"
+            )
+        if result.outcome in {"retryable", "uncertain"}:
+            # Preserve the remainder: a throttled, unreachable or failing API
+            # must not turn the whole outbox retryable or uncertain in one run.
+            break
     return DeliveryReport(**counts, paused=store.delivery_paused())

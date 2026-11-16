@@ -99,9 +99,11 @@ Nebuly does not deduplicate, so a POST whose outcome is unknown is never sent ag
 | Status | Meaning | Next run |
 | ------ | ------- | -------- |
 | `sent` | Nebuly confirmed it (2xx) | Never sent again |
-| `rejected` | Nebuly refused it (4xx, except 408 and 429); 401/403 also stop the run | Never sent again |
-| `uncertain` | Nebuly may have received it (timeout after sending, 408, 5xx, a crash while sending) | Not sent again: check it by hand |
-| `pending` | Not sent yet, or a connection failure or 429 (Nebuly did not receive it). A short wait is retried in the same run | Sent again by a later run, no earlier than the `Retry-After` delay (at least 60 seconds, at most 1 day). Until then no payload is sent |
+| `rejected` | Nebuly refused it (4xx, except 401, 403, 404, 405, 408 and 429) | Never sent again |
+| `uncertain` | Nebuly may have received it (timeout after sending, 3xx, 408, 5xx, a crash while sending) | Not sent again: check it by hand |
+| `pending` | Not sent yet, or Nebuly did not receive it: a connection failure, a 429, a wrong key (401/403) or a wrong endpoint (404/405). A short wait is retried in the same run | Sent again by a later run. After a connection failure or 429, no earlier than the `Retry-After` delay (at least 60 seconds, at most 1 day), and until then no payload is sent |
+
+A run stops sending at the first payload that ends `uncertain`, waits for a retry, or meets a wrong key or endpoint (the run then fails with an error naming it). The other payloads stay `pending`, so an outage or a wrong setting costs at most one payload.
 
 ## Customizing the payload
 

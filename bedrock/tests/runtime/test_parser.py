@@ -56,6 +56,19 @@ def test_error_record_is_skipped() -> None:
     assert result == Skipped("req-1", RecordSkip.ERROR_RECORD, "ThrottlingException")
 
 
+@pytest.mark.parametrize(
+    "text", [json.loads('"x\\ud800y"'), float("nan")], ids=["surrogate", "nan"]
+)
+def test_text_that_cannot_be_stored_is_skipped(text: object) -> None:
+    # Parsed from valid JSON, yet SQLite and UTF-8 delivery would fail on it.
+    record = converse_record([user("hi")], "ok")
+    record["input"]["inputBodyJson"]["messages"][0]["content"][0]["text"] = text
+
+    result = parse_record(record)
+
+    assert result == Skipped("req-1", RecordSkip.INVALID_BODY, "invalid JSON text")
+
+
 def test_body_left_in_s3_is_missing() -> None:
     record = {
         **envelope(),
