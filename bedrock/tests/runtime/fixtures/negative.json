@@ -1,0 +1,561 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "negative",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "Six interactions have a missing or blank id and are not sent.",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132822552Z_822db4cde3e4d571.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:11Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "4c702f14-703a-5fce-8fef-d17c1c584561",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "6b1c3d9e-9787-4e80-96c0-b02657e9c0ea",
+      "scenario": "negative",
+      "conversation_id": "fca2279f-3555-4116-823d-335b604bda8f"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Negative metadata fixture. Reply with OK."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 25,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "OK"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1534
+       },
+       "usage": {
+        "inputTokens": 25,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4,
+        "totalTokens": 29
+       }
+      },
+      "outputTokenCount": 4
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132825826Z_2f147e75de9ee193.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:16Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "b2cdcdac-17b7-5a4f-8216-be19d0e1812c",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "negative",
+      "conversation_id": "043cb722-bfa4-43a5-a292-c1bf2ebea55b",
+      "session_id": "wrong-legacy-session",
+      "interaction_id": "202f0160-5c6c-4358-833e-55656ae8820b",
+      "user": "wrong-legacy-user"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Correct identity must come from the explicit triplet."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 24,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQS9wUKEggTEAEYAjgBQgh0aGlua2luZxIMwJI15Cvq0dPJW4q/GgxTb6lgveNmnQirjEMiMNYBqzHXsk/982yJzOsKUtV6p5iWxDQoQ7Gt1BE3JZaaBebxUZKTfTCA336keT5HvyqSBcATAgn3o9wGrSyFJOAoi0/vGfH296WAZuAs/Fj+/9+n19+evuzNE2PhsYfDOxIpwZGnNraNJnCxRE4ieqIT67drTpHqB9ul5TTLiI1V4VIDOPLXpfUq1wjrSXiaAOBSaL9B2MA0DqU48HGWJopDk2dAGZ7xIVf3WxLZzhjzzBuyqMFBKxgLykRqyFv0BdGfW8fcCtVNqisMql/tcHabVC4rI1V/6nJYUHQ2VG3AGpG9nnH2Z4zVauJ8K0fEK7O7zCMMx5fABuoSWsVepjXDaIi40vQJMTVuIEbT6lWdDkxtHqGYIUkFnsPO/WFdmNSBfGif46oGC5W8uojSb9OBcaMitIn2395KR5TKUp+gsp1/LTHrKWmvpkKdzPCWEcKharV1wczq7be8qAoCrwTLyrooEQtkujOpdVnwxck1MwYofheFeif/W3iMk3gWHei5VyZYgLa2Ove1727Fai7qA1JPobU8wC18Og57A/MnxCQ4/fP4YjcfVuNpM6Y2fdIqyM/xJ2YIBMO1bcEhUHNHCTgUK9aeqVNtufr9Gu8kvTlUXsW5LuTr8EFd2LLMF/03S9Qk0Z9V6Zf/F0sNNqWDc34FInh4/houuIn18tY33D2ISTcgXKaosNt5tmckp6RJn1Jqkn9t9dHS4gpFyiMOGX1TCO0c5wJirCpoyAIflr4tcMhi5lkOUOsBhN4KN4CzZfXkZPDXh0ECyPL4QmuE08FUR+zpAQ312YCfmEV6r55cCk7uAGfLSsx1oXIpUTFBhRjR0kY8OoDpSbr7FLXlb5bkkE8ZmGKvSbpYsTEOsrelnveRLM8OJUng2g6mtjfWo3PqWgsYFajEgZLigJLilL6CnDCO9za1ktuDjbSO64yKjPYYAQ=="
+            }
+           }
+          },
+          {
+           "text": "I'm not sure what you're referring to. This message doesn't include a prior conversation, a dataset, or the triplet itself, so I can't tell what \"identity\" or \"the explicit triplet\" means here.\n\nCould you share:\n\n1. **The triplet** (for example, `(name, ID, source)` or some other fields), and where it comes from.\n2. **What \"identity\" means in your context.** Are you matching records, resolving entities, authenticating users, or something else?\n3. **What you want from me.** Should I explain a principle, critique an approach, write code, or check a specific case?\n\nIf you're describing a rule, such as \"identity must be determined only by the explicit triplet and not by inferred or fuzzy matching,\" I can work with that once you confirm it."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 2686
+       },
+       "usage": {
+        "inputTokens": 24,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 338,
+        "totalTokens": 362
+       }
+      },
+      "outputTokenCount": 338
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132834038Z_4a8326cd52e95fc2.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:10Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "5c008b2f-8b93-5f71-8200-c9fa5c8d6196",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "cd271e0e-c972-4d8a-af0e-71bb80c0846b",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "negative"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Negative metadata fixture. Reply with OK."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 25,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "OK"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1000
+       },
+       "usage": {
+        "inputTokens": 25,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4,
+        "totalTokens": 29
+       }
+      },
+      "outputTokenCount": 4
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132836780Z_9c942c25779c84ed.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:13Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "8905214c-0834-5931-af4c-7f9cb7a22973",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Negative metadata fixture. Reply with OK."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 25,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "OK"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 939
+       },
+       "usage": {
+        "inputTokens": 25,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4,
+        "totalTokens": 29
+       }
+      },
+      "outputTokenCount": 4
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:28:14Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "d0cbfb39-3942-5292-a608-b29adbfb5a11",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "747bd8fc-7ddf-4230-ba61-aa999caac0e8",
+      "user_id": "",
+      "scenario": "negative",
+      "conversation_id": "9d0733e7-423c-4667-b159-405522710597"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Negative metadata fixture. Reply with OK."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 25,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "OK"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 960
+       },
+       "usage": {
+        "inputTokens": 25,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4,
+        "totalTokens": 29
+       }
+      },
+      "outputTokenCount": 4
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132841910Z_1455c79410bd09ef.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:09Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "a1513270-1ada-5e75-8077-19d3a4645e43",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "negative",
+      "conversation_id": "425b46b4-b91e-431f-b5c7-2f3969fb9dff"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Negative metadata fixture. Reply with OK."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 25,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "OK"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 946
+       },
+       "usage": {
+        "inputTokens": 25,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4,
+        "totalTokens": 29
+       }
+      },
+      "outputTokenCount": 4
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132908429Z_9b3cd748499c00e0.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:15Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "1c90495e-b21d-5343-8533-ad469114e542",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "f4b92171-dac5-4393-9e52-dcfe6b46bcc9",
+      "user_id": "   ",
+      "scenario": "negative",
+      "conversation_id": "6a5e10a6-082f-457b-8052-8a32ff9d0b6c"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Negative metadata fixture. Reply with OK."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 25,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "OK"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 965
+       },
+       "usage": {
+        "inputTokens": 25,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4,
+        "totalTokens": 29
+       }
+      },
+      "outputTokenCount": 4
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "043cb722-bfa4-43a5-a292-c1bf2ebea55b",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Correct identity must come from the explicit triplet.",
+    "output": "I'm not sure what you're referring to. This message doesn't include a prior conversation, a dataset, or the triplet itself, so I can't tell what \"identity\" or \"the explicit triplet\" means here.\n\nCould you share:\n\n1. **The triplet** (for example, `(name, ID, source)` or some other fields), and where it comes from.\n2. **What \"identity\" means in your context.** Are you matching records, resolving entities, authenticating users, or something else?\n3. **What you want from me.** Should I explain a principle, critique an approach, write code, or check a specific case?\n\nIf you're describing a rule, such as \"identity must be determined only by the explicit triplet and not by inferred or fuzzy matching,\" I can work with that once you confirm it.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 24,
+      "output_tokens": 338,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 1,
+   "missing_triplet": 6,
+   "closed_idle": 1
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

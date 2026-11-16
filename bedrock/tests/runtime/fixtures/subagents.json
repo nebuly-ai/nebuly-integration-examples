@@ -1,0 +1,1064 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "subagents",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132822552Z_822db4cde3e4d571.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:56Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "d7c77f6a-4036-5e7c-a646-4d3b7429b14a",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "efddbfd9-a4b4-4128-a6b8-3a4603f2710f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "28c45f08-c9fc-46b8-8268-af64ad3056ad",
+      "subagent_marking": "agent_role"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use delegate for two separate tasks: compute 11*13 and compute 17*19. Then summarize both results."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "delegate",
+           "description": "Delegate one task to a child agent.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "task": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "task"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 523,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_KWEa0CbFTQCmRZpdPL7Fqh",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 11*13 and report the result."
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_wVbd5BFmYkItqefLpzvm8k",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 17*19 and report the result."
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1316
+       },
+       "usage": {
+        "inputTokens": 523,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 105,
+        "totalTokens": 628
+       }
+      },
+      "outputTokenCount": 105
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:28:03Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "9b8aa543-8cfc-56ae-98c0-dcd17dea4306",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "2811a71e-1800-44c2-90cb-87518875d55f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "d6e23516-9d99-4cc8-8ea3-2c73dc5c60f0",
+      "subagent_marking": "none"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use delegate for two separate tasks: compute 11*13 and compute 17*19. Then summarize both results."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_4dyGwCqwdxyunbTs1MQTK3",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 11*13 and report the result."
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_BpwiRxthqUlCWIGl4OlNCD",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 17*19 and report the result."
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_4dyGwCqwdxyunbTs1MQTK3",
+            "content": [
+             {
+              "text": "{\"role\": \"assistant\", \"content\": [{\"text\": \"11 \\u00d7 13 = 143\"}]}"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_BpwiRxthqUlCWIGl4OlNCD",
+            "content": [
+             {
+              "text": "{\"role\": \"assistant\", \"content\": [{\"text\": \"323\"}]}"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "delegate",
+           "description": "Delegate one task to a child agent.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "task": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "task"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 632,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSnwQKEggTEAEYAjgBQgh0aGlua2luZxIMEVRQfEj3iQUssnOqGgwQUZhClUcEeSmIdmkiMOqfY8fuD+iN8j9gKK8Btklbf3nn9lRyn7UJUko8nR7MddJLJOmTPA+zdbqfXzFMaiq6A9dQa1AJQLm0POOxdd98DNaYDBM9MJWb6flnBOWoZCrTaOwSKB6mpYh7QAM3QFrpvfmDDVFaNO7dXvdlGEWJpVb6miVQCB9w/TZMJI+WsEuOtUWf2TKlWaf1PQu2digh+6mXtpCKJYSVvr1fKvqZIahw+/sjis5rs4vjdyFXSdsZ1mGpAwpgM4dk745M7cNCux/S75oYjqv0AShWUGNq3yrO0coTe1i9WesG9krISGMHQaR8l8ia1x1MmzyPz1SieQAWBmbqMyZYto2lLEWiiqFlEi6PChd+aArzye/2ehOn/puz1jKMjduENDkohVyzTnn69A8C2W0vaFlj8OYBq2geBF1i3qKC3jVf8WRJxCHmV14j1fqbAr35AN7JhaB7NtUfgrlmyu1oqnaH2o/BZrr0/QMRMy7qN+6hbHDtNSBAYevfUbfe0kl5Z6dvjXJ/HM2+aZqTn6LyeqCjvK9kdE+eL1Y2PrrCVl82+hDkCghBF1yVO83zYIn9P63jtvqBH48S6ofZBy+EcH603hGnqPvBcOX78D15tbbMcPP4wVhcYvXxhK8oOPHRkEh0YfICW+F90sihRYcIvMkYAQ=="
+            }
+           }
+          },
+          {
+           "text": "I delegated the two multiplications separately, and both results check out:\n\n- **11 \u00d7 13 = 143**\n- **17 \u00d7 19 = 323**"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1229
+       },
+       "usage": {
+        "inputTokens": 632,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 87,
+        "totalTokens": 719
+       }
+      },
+      "outputTokenCount": 87
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132825826Z_2f147e75de9ee193.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:00Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "50927864-d19f-55de-91eb-cfebb64bf23c",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "2811a71e-1800-44c2-90cb-87518875d55f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "d6e23516-9d99-4cc8-8ea3-2c73dc5c60f0",
+      "subagent_marking": "none"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use delegate for two separate tasks: compute 11*13 and compute 17*19. Then summarize both results."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "delegate",
+           "description": "Delegate one task to a child agent.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "task": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "task"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 523,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_4dyGwCqwdxyunbTs1MQTK3",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 11*13 and report the result."
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_BpwiRxthqUlCWIGl4OlNCD",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 17*19 and report the result."
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1264
+       },
+       "usage": {
+        "inputTokens": 523,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 105,
+        "totalTokens": 628
+       }
+      },
+      "outputTokenCount": 105
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:28:01Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "4c955f7d-82e2-542e-8cc1-d534cb884a4c",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "2811a71e-1800-44c2-90cb-87518875d55f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "d6e23516-9d99-4cc8-8ea3-2c73dc5c60f0",
+      "subagent_marking": "none"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "{\"task\": \"Compute 11*13 and report the result.\"}"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 27,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "11 \u00d7 13 = 143"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1021
+       },
+       "usage": {
+        "inputTokens": 27,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 11,
+        "totalTokens": 38
+       }
+      },
+      "outputTokenCount": 11
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132834038Z_4a8326cd52e95fc2.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:59Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "c89335e9-d66f-59b4-9e83-94ce10e2ab1a",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "agent_role": "subagent",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "28c45f08-c9fc-46b8-8268-af64ad3056ad",
+      "interaction_id": "efddbfd9-a4b4-4128-a6b8-3a4603f2710f",
+      "subagent_marking": "agent_role"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Late internal subtask: generate a short internal label."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 17,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "redactedContent": "cnNuX2V5SmhiR2NpT2lKRlV6STFOaUlzSW5SNWNDSTZJbUZ5WTJncmFuZHpJaXdpY0hKdlptbHNaU0k2SW1GeVkyZ3RNU0lzSW1semN5STZJbUYzY3lJc0ltdHBaQ0k2SWkxTFZ6bDJZbVF0T1dadVYxcDBkV2hUU1RRNVV6SkpNMnRrZEdsMlpWZHJVbTgwV0Vjd1ZWZEpNVkVpTENKalpYSjBhV1pwWTJGMFpTSTZJbVY1U21oaVIyTnBUMmxLUmxWNlNURk9hVWx6U1c1U05XTkRTVFpKYlVaNVdUSm5kR015Ykc1aWJWWjVTekp3TTJONVNYTkpia0o1WWpKYWNHSkhWV2xQYVVwb1kyMU9iMHhVUldsTVEwcHdZek5OYVU5cFNtaGtNMDFwVEVOS2NtRlhVV2xQYVVwelkwTXhibEV5TlVkVmVtaDBVekIwV1ZNelVqWldiVEZQWTJwb2FGZFdiREJqTVVJeVQxZFdRazFyVVRCVldHaFJXbnBDYTJNeU1EUkpiakF1WlhsS2NXUXljMmxQYm5OcFlUTlNOVWxxYjJsU1ZVMXBURU5LYW1OdVdXbFBhVXBSVEZSSk1VNXBTWE5KYm1kcFQybEtZV0p0U25WU1YzQTBZakIwU21NeWNFeGFWMlJ4WTFod1NtVnRWazlrYWtwcFQwZEdWMkZYVmt4TVZURldZVmQ0TlZkWFRuSmtNV2hLU1dsM2FXVlRTVFpKYldSTFUyeEZkRmxVUWpGV1YzaE9WR3hCTTFwRVpFOU5SVGx1V1RKNFEwNUVVbkpUZW1Nd1YydzVUMDVJY0c1aVZsWnFUVEJrTTA5WE9HbE1RMG94WXpKVmFVOXBTbnBoVjJOcFRFTkthR0pIWTJsUGFVcEdWWHBKTVU1cFNYTkpiWFJ3V2tOSk5rbHBNVXhXZW13eVdXMVJkRTlYV25WV01YQXdaRmRvVkZOVVVUVlZla3BLVFRKMGEyUkhiREphVm1SeVZXMDRNRmRGWTNkV1ZtUktUVlpGYVdaVGQybGpTRXAyWkcxc2ExcFlTbnBKYW5CaVNXMDVhR0ZUU21STVEwb3pZMjFzTUZwV09XMWpiVGwwU1dwdmVFNTZhekJPYW1zeFRucFZlRXhEU2pOamJXd3dXbFk1TVdKdVVuQmlRMGsyVFZSak5VNUVZelJOYWtVeFRWTjNhV050Vm1oYVJqa3hZbTVTY0dKRFNUWk5WR2MwVDFSak1FMUVaM2ROU0RBdVNDMXVVME5HV0hNeldIbEdOV05UUlVsWmVrTjVjbVJCUlhKQllsOU5NekkzVUVScVJUWmlUREJyWlVoeFlrVmxiMUIxY0hObVMxcFpSRTQ0UlRkeE9WOWFTM1oxY2pKS2RGRm1iRVphTW5kb01IcFdka0VpTENKcGMzTmZiV1YwWVNJNmV5SnliM1YwYVc1bklqb2lTVUZFT0NKOWZRLmV5SndjbTkwWldOMFpXUWlPaUpsZVVwcFkyMUdkVmt5YUdaaFYxRnBUMmxLVUdJeWJGSlZNMXB1VFRGU00yRXdNWFZSYlZZMFdtdFdTVTE1TVVKSmFYZHBZekpHYzJSRFNUWkphbHBzV1RKd2RXUldWbXhrTWtaTFdETmFkMVZHUmtOT2JXZ3hZVEk1U2s1SE9VNVBWbkJMV2xWS2RXRnVXa1ZhTUU1bVQwaE9TRlZ0YzJsTVEwcHFZakkxTUZwWE5UQllNalYyWW0xT2JFbHFiMmxVUkVaMllXNUNjbEZWVmxsalJrNVlWRk14ZVdSVFNYTkpia3BzV1RKc2QyRlhWblZrU0UxcFQyeDBOMGx1UW5OWldGSnRZak5LZEVscWIybFpXR1I2U1dsM2FXRXliR3RKYW05cFZHdFNSMUZyV25OaFJVcHNZbGN3ZWs5RE1XMVVla0pKVlVoS1JXUXdjM1JPVkZaTlpXdFdVazVYVm5CVk0wWjZWVVphVEdKRlVrVmhlVWx6U1cxV2RWa3pTalZqU0ZKc1drWTVhV050Um5WWk1tZHBUMmxLVEZJeWJFWmpiVkp2VkRGR2VtSlZWakZpUldScVpXdHNkVlJHYkhSWlZUbFpVbXhLV21ORk1VcFRSRXBtWTBWT2FsZEZNVXBUUkdoeFRrUldWbVZJWkZoUlZsSkxZakZTV2xGck5UQmlXR3hzWVZSV2VGZEdielJrVnpoNFVXcENjR05GU2xoWmJUVTFWVEI0V1dSc2NHOVRSbkJLVjJ4bk5GbDZXazFSTVZaRFdXMVNlbFZYYURWT2FscE5UakZHVGxZemNFeFhSemx2WkcwMGRFNUZUbmxsV0c5NlVsZFdTMlJZYURWYVdFVXhVbGhXY1dONlNuVk5NMEpTVFVWM2RHTlhXVEZUYkVZMVdEQlpNazVFWkVwWk1teE9VV3BTVTFScVp6UllNVTVJVDFoR2JsSXdWbWhqUkVJelVWVnpNV0Y2VW1wUk1sbDBWRlpTUlV4VmNGTmhWRVp6VTBoR2MxSlVhSHBOUjFwRFkyMVNVRTFZVlRSVFNFWnBZakZDYTJWWVJsSmFSV2gyWTIxd2NsZFdTbWhUUmxaaFdWZFNTbUpJYkdwUFZFcEpVVlpDYWxSVlpEVmlibEY2VGtWR1dGZEdTbGxSYW1kMFUwVTFiVlpXUmtoamEyaDNaV3R3VTFSdVZuRlNSMmhNVGpKS1ZVOVZkREppU0U1d1pWUnNTMkZWT1c5VGJUbFBVbGRvVVdGdFdsWlhSbHAwVWtWSmQySXpRa2RsYTNCNFdWWkdjR1J0TVVSaVJWWjZWakpHYkZZelFUQlZhMnhOVXpKc1dWWldTbUZTYlVwU1lVVldVV0ZWVlRCa1ZGcFpZMVpzVG1Kc1VsaGFNbWh4VVd4Qk1GUkZOVEZsVjBVelpWY3hUMlZwTVhkT1JUQjVVMGhvZDFKdFpHeGtNRXBaVVd0d1JXVnJiSFZWYkRrd1QxZHZNMDVVWXpCT1JXeDJUa2QwYWsxdE1URmhTR2hoWkZWT2JGRnVSbGhoYmtwMVQwWkdiR1JYZUZCV1NGSjFVV3RTU2s1dGJ6RlJibXhDVlVWYWNtRlVaSGxoUjFKSVdqQmFSbFpwTURSaVYxSnVVMWRrVEZaSVVrdGpla0pzVjBVME5HSnVRbXhYYmtFeVZFYzVTRlZJUmpCUmExSXlUMFZyZDFsc2NGUmtSa0l5VDFoT1RGbFhNRE5YUjAwd1QxVk5NR1JyT1ZOTk0xcHFaVU5LT1ZoWU1DSXNJbU5wY0dobGNuUmxlSFFpT2lKeWJtRkdWbVZMU1dGQ2JUUnhSRGR3VW5WR2JHUmxORW95ZGtFeWVIYzRUbmRPUVc5UmVsRm1kR05LVkZCWFdWODBkV2hwVFZNd1pqY3lORnBPYW5Kc1VXdzBiemhIZFdGTmVpMDFSbEpRYUU5NWFXVjZRelZTZVROc1ozSTNjME15VW5oT2RWUlFlblZJV2paNFlYbzRjbkEzTkZWaVlYWXpWa1ptVDBaaU4zRXlhRzEyVWs5TWVITklTRVJ3ZW5admMydHdhamhtZURWUVpWSkpXa1JUYUhVNVYxazBVVjlMWWpObk1VcDFVV1ExY2pRd2RtWnBYelpSYms4M1R6VjJlbWhMVlMxb1dreGxZVTVGZWtWRlJtUlhVbmhhVUdwdlpIcDRia0Z6TFY5RVgyRkxiblZ5WjIxSExXcFZTbGgxUjBaNVdUVmFRV1JGUlZWT1JGOXJZWE51TVdkV1luSk1ObFZVVkUxMlFYcEtaR3N4VkhwMFUySmxPR3c1WTJkWFdXSTVhREJ6YW1GM1gwcERVMGg0WVdkTVZXNXNkemxtT1RKRFVuYzRaMDExY2pNMk1rVTFTVWRSYmpkSU9XcFRjeTF0UzNsclltcExhMVozYm5vMGNVWk5PVTV6Y0dsMVpVZEROMTh3TVRoS1kwcHZWamRrVkMxWVh6RkdXRUZaTUhrMlFXcFBOM2w0VnpkNE9UZFRZMDFPYm1aNlNXdHJPRFZ6WlRaVFMzWktWVkpSTFVoUk5TMXVRMkV0TlVKWVV6ZE1VMGR4Wm1oTWVuaFdNbEExV25CV1RWQjRibVoxWjBnd1pIQjJOR05wUzJKTFlXdExPV28wZDFaSFdESmxRVGxTVWtkclZGWkpVRmxrUTJKekxTMXFlVkJEVDJoUU5UZHlOa2xUWlhwQ1ZXTnRWR1p4UzJWWldXRjJkR04zYkVGSFlXRXdZMHRPYUhkalVsUmhRWEJLY2tkMWJGbFhSVkZvUkhWRlJrNWtiM1p5Yldwck1qZFVRV0pTTVRaak9FMTVlbkYyVkd4elNuRnhTV1pzVm5CUlgyNVJjaTFtYmpJMU9YaDJURUpmUVVFMGRYUmhhM1ZtTjFGWWRsRkpXV1pvYUUxdmNHTlVTRVo1WTFaSlkxRkhiMFphY25WUFdrcE1WVmRMVmxNMmMzTktMVWhhUlV0UVRtOTVNbk5pYmpoUlZGbHhObHBpUWtJelIxaEhiVE5LYzNCaVlrZHRURWc0YlVjelIyVTBNMkZJY2s1cFMzZHFVVGRLVG5kelMwdHBTbXBQTUZFd2J6UmhOVFJTY0hOUk16TTNNbEJhTVVOTU5rRmZkRzlqWDFCV2JYQnJkV3hvYTBjMFJrZDBUMEZzZERReVNVOUpjME16UWxSNlRUaExSMmxRYzE4dFdGcHFja2x3WDE5UFRuZzJSMlpDTkRZM2NGWTVjRmREZFdsdmRqVkpXWEpyV2xSbWQxOURVMmwyTTBablFsaG9TWEJhVFdkbVNtVnBMWG80WnpSaFZVMU9UVTFRUzNGSmJVVmZhRm80YzNJelMwdzNUalpKY3pkelZFSXhTbHBhY1ZKVFNsZHlMVWxRWlVSRVpXUTVRblZZT1cxSVVIRlNXVzVOWWxRMldteGFWRlpVUjA1a1VVZ3RkR3hwWWtVeVkyMXdiRWxmUWprMVdIWk5OVnBVYlVGeVQyZFNaVzR0YWxkTFp6a3hOV1JTZGsxcE9FYzBjV1JTUW5scFREbFhOMkZPVmxOQlMzVnRjMkUxZFVzM1ZtMDBWMFpxYVdocldIZE1XV2hYU1drMlFqUjRORGxUUW1oT2VHUm5TbUZSYzFOT2MyY3hiakIzT0VnMVpEbFlTV3hXYURGS2JubGZYME5MVUcxZmVHbEZVRXB4Y0hkWFRYUTFlVzFrTnpkWGFuWklOVGRqTVRkVVVXTmlTemcxWjNKeU5HMTVPWEJpY1RoNFpIRXdSMUJvTVdWNWF6a3lOMGhqZEdkd05tOXpZM2hQY0VweVluaDVaek5TU1VKWU1uWldORWcxY1hadGJYUXRNa2t6UzBkMVNEbDBkVWhSWldOV1dFSmhSR1p2VEdGbFprOHdaWEpZUXpCcVUwcGxYMVZyY0ZWR2NXZzNUa2MzY0ZaMVJHNVFPV1ZwVjJwYVlUUlZSVE5RYUMxU2VVWlVkR3hEUkRoa1pWQllOalpRU0ZKMFIwNHhOMUJRUldVNVIzUm5UazlDYzI5MWNUWTVkbnBCZVhCdGFrOXBZWGN0VkY5Nk9IbFBkMGRWYzBKUU1saDVkVFp1UVVkd1FtdDFWamQ2WldvMU9FUk1OVUpsUTFFMk5IWjJTSEZDZFdoM1QxZFlTMkZQVldKS1REUkVlVTFKTlVkNlExTTNPRmwwWm1WcGJTMXZRMHRuV2pKclZscFhaM0ZoVG5Sa1ZUTkpUbWg1Y3pGQmFrcG1TRVZYVlMxRFZXMW5kM0poVERnNE1sbFdkVXhSVGtSeVlpMVJORlpRTFhWSWFtOXJiMHM0T0RaSllscE1jM2w1VW1sSFZrTXlOMUptUXpGaFRUZHNRVzlMV1VsZk1UVndkMEowZFhwSlpqRjVkMFZmWDFoNVpWTm9NMDgwVkZaeFlXODBTMnRuY0hONFp6SlBlR2hxVWtwNVJpMU1jSFJTTTFaelZuQXpTa3BSVjB4bE56UndRbFI2VWpsWGQwWXlhM3BVVDNOVWFXOVZTV3Q2V2w5dFRrdFRXWGhzWW5STVJ6aHdOekJPU1VSdlEyZDNUbVV6WldocGFIRkJNbWhzUzNkalZtUmlUR2h4TTNKT1dteEdYMGRpYTA1QmEycHRSVkF6ZVMxeFdHeGhWbDgyVjJRd2MwNVNSRTVvTmpaSGRqZDVRbVpFV1V4ZkxXOW1hRWh0VkdJNFVVeHJXRmh3UkVaMFZrRndXWGR3ZFVWR05XMW5Na015YUVWall5MU9TM0pQZGtVM1gwSjZUM1Y0YTFWV1prRlJRa0puYWtWbGFHZExWemhhTTFsVGNYVnllREIwZVU1R09IRkRaRVZzUjFSdGVIUjFjVFZyWDBka1RXMW1UVFpuWkdKeFRWTXdYM0pxUTA5blkyVXlPWFoxU25oeFgySlBla0ZLT0ZORVdGWTJORGwyYlVaamVFNURORmd4TVdscE1reFdTVXAyV2tKTU1rMUdUSE5HWjFoZk56bDJiME5GTW1GWmFVdElabHBHZUdOTlZHVlJSV3htTUhVM1QzRktaV3hmVTJKbVp5SjkuYmpxSG1XX0d3ZE1UWjExa190MklBWHJMZnozcHBEcjYxdGF5U1NZaEcxb3VnbEwzYzVvTnNRMHRYVlJ2dlJKR3QtaDRUWm9tcjJxVlU0aWpLb20xUEE="
+           }
+          },
+          {
+           "text": "Late Internal Task"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 979
+       },
+       "usage": {
+        "inputTokens": 17,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 56,
+        "totalTokens": 73
+       }
+      },
+      "outputTokenCount": 56
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:28:04Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "12fdc706-27d9-5754-b283-9fa68b5a50df",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "2811a71e-1800-44c2-90cb-87518875d55f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "d6e23516-9d99-4cc8-8ea3-2c73dc5c60f0",
+      "subagent_marking": "none"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Late internal subtask: generate a short internal label."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 17,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "redactedContent": "cnNuX2V5SmhiR2NpT2lKRlV6STFOaUlzSW5SNWNDSTZJbUZ5WTJncmFuZHpJaXdpY0hKdlptbHNaU0k2SW1GeVkyZ3RNU0lzSW1semN5STZJbUYzY3lJc0ltdHBaQ0k2SW5GR2JrSnVZMnQ1TmpCTWJEZG5lREZ1YWt4RVkyOWllbFZtYW5scmJXOURVMGszY205M01GSXRRVUVpTENKalpYSjBhV1pwWTJGMFpTSTZJbVY1U21oaVIyTnBUMmxLUmxWNlNURk9hVWx6U1c1U05XTkRTVFpKYlVaNVdUSm5kR015Ykc1aWJWWjVTekp3TTJONVNYTkpia0o1WWpKYWNHSkhWV2xQYVVwb1kyMU9iMHhVUldsTVEwcHdZek5OYVU5cFNtaGtNMDFwVEVOS2NtRlhVV2xQYVVwelkwTXhibEV5TlVkVmVtaDBVekIwV1ZNelVqWldiVEZQWTJwb2FGZFdiREJqTVVJeVQxZFdRazFyVVRCVldHaFJXbnBDYTJNeU1EUkpiakF1WlhsS2NXUXljMmxQYm5OcFlUTlNOVWxxYjJsU1ZVMXBURU5LYW1OdVdXbFBhVXBSVEZSSk1VNXBTWE5KYm1kcFQybEtTVmxWYkhkVU1HeHFWVEE1UjFsdGNEQlRWM042Wkd4T1UxUjZSbmhYV0hBd1ZWUmtOVk16UW5KVFJYUm1Va1paZUZwSFdtWlNNalZTU1dsM2FXVlRTVFpKYTFWNVRtNUtlbFZ0U2tWaVJrWTJWVEJvUTFSRlpFTmpiRXBSVG1wT2NHRnNWakpXUkd4dFYyMWpORkY2VmtkVWF6Rm1WSHBhUmxZd1ZXbE1RMG94WXpKVmFVOXBTbnBoVjJOcFRFTkthR0pIWTJsUGFVcEdWWHBKTVU1cFNYTkpiWFJ3V2tOSk5rbHVSa2RpYTBwMVdUSjBOVTVxUWsxaVJHUnVaVVJHZFdGcmVFVlpNamxwWld4V2JXRnViSEppVnpsRVZUQnJNMk50T1ROTlJrbDBVVlZGYVdaVGQybGpTRXAyWkcxc2ExcFlTbnBKYW5CaVNXMDVhR0ZUU21STVEwb3pZMjFzTUZwV09XMWpiVGwwU1dwdmVFNTZhekJPYW1zeFRYcE5kMHhEU2pOamJXd3dXbFk1TVdKdVVuQmlRMGsyVFZSak5VNUVZelJOVkdONlRVTjNhV050Vm1oYVJqa3hZbTVTY0dKRFNUWk5WR2MwVDFSak1FMUVaM2ROU0RBdWRHUmpkbEo0Tm5kYWVrNURZekZKU0RVeWRtY3dWMFZEWTBJeldGUXdYMVYxWlhwU2RHczJWMlpYZVd4NmJsbG9SRkJoU0c1TllWZ3RhVFYzYlc1WFNrbFZUSFZxYUdwWmFWOTRUVGQxWHpsS1RrVlJSSGNpTENKcGMzTmZiV1YwWVNJNmV5SnliM1YwYVc1bklqb2lTVUZFT0NKOWZRLmV5SndjbTkwWldOMFpXUWlPaUpsZVVwcFkyMUdkVmt5YUdaaFYxRnBUMmxLVUdJeWJGSlZNMXB1VFRGU00yRXdNWFZSYlZZMFdtdFdTVTE1TVVKSmFYZHBZekpHYzJSRFNUWkphMFoyVkVka2VWTlZjSE5PTTFaSFlsVXhXbGRxWjNoT1JtUlZaVlY0YWs1SVRsUlBSVEUxWTFkRmRHUnNWVEJhTVVrMVpWZDBTRmRzUldsTVEwcHFZakkxTUZwWE5UQllNalYyWW0xT2JFbHFiMmxSVld4cVdrZHNhMU14Vm5KbFZWWnpUMGhzZEU5VFNYTkpia3BzV1RKc2QyRlhWblZrU0UxcFQyeDBOMGx1UW5OWldGSnRZak5LZEVscWIybFpXR1I2U1dsM2FXRXliR3RKYW05cFZHdFNSMUZyV25OaFJVcHNZbGN3ZWs5RE1XMVVla0pKVlVoS1JXUXdjM1JPVkZaTlpXdFdVazVYVm5CVk0wWjZWVVphVEdKRlVrVmhlVWx6U1cxV2RWa3pTalZqU0ZKc1drWTVhV050Um5WWk1tZHBUMmxLVEZJeWJFWmpiVkp2VkRGR2VtSlZWakZpUldScVpXdHNkVlJHYkhSWlZUbFpVbXhLV21ORk1VcFRSRXBtWTBWT2FsZEZNVXBUUkdoeFRrUldWbVZJWkZoUlZsSkxZakZTV2xGck5UQmlXR3hzWVZSV2VGZEdielJrVnpoNFVXcENjR05GU2xoWmJUVTFWVEI0V1dSc2NHOVRSbkJLVjJ4bk5GbDZXazFSTVZaRFdXMVNlbFZYYURWT2FscE5UakZHVGxZemNFeFhSemx2WkcwMGRFNUZUbmxsV0c5NlVsZFdTMlJZYURWYVdFVXhVbGhXY1dONlNuVk5NMEpTVFVWM2RHTlhXVEZUYkVZMVdEQlpNazVFWkVwWk1teE9VV3BTVTFScVp6UllNVTVJVDFoR2JsSXdWbWhqUkVJelVWVnpNV0Y2VW1wUk1sbDBWRlpTUlV4VmNGTmhWRVp6VTBoR2MxSlVhSHBOUjFwRFkyMVNVRTFZVlRSVFNFWnBZakZDYTJWWVJsSmFSV2gyWTIxd2NsZFdTbWhUUmxaaFdWZFNTbUpJYkdwUFZFcEpVVlpDYWxSVlpEVmlibEY2VGtWR1dGZEdTbGxSYW1kMFUwVTFiVlpXUmtoamEyaDNaV3R3VTFSdVZuRlNSMmhNVGpKS1ZVOVZkREppU0U1d1pWUnNTMkZWT1c5VGJUbFBVbGRvVVdGdFdsWlhSbHAwVWtWSmQySXpRa2RsYTNCNFdWWkdjR1J0TVVSaVJWWjZWakpHYkZZelFUQlZhMnhOVXpKc1dWWldTbUZTYlVwU1lVVldVV0ZWVlRCa1ZGcFpZMVpzVG1Kc1VsaGFNbWh4VVd4Qk1GUkZOVEZsVjBVelpWY3hUMlZwTVhkT1JUQjVVMGhvZDFKdFpHeGtNRXBaVVd0d1JXVnJiSFZWYkRrd1QxZHZNMDVVWXpCT1JXeDJUa2QwYWsxdE1URmhTR2hoWkZWT2JGRnVSbGhoYmtwMVQwWkdiR1JYZUZCV1NGSjFVV3RTU2s1dGJ6RlJibXhDVlVWYWNtRlVaSGxoUjFKSVdqQmFSbFpwTURSaVYxSnVVMWRrVEZaSVVrdGpla0pzVjBVME5HSnVRbXhYYmtFeVZFYzVTRlZJUmpCUmExSXlUMFZyZDFsc2NGUmtSa0l5VDFoT1RGbFhNRE5YUjAwd1QxVk5NR1JyT1ZOTk0xcHFaVU5LT1ZoWU1DSXNJbU5wY0dobGNuUmxlSFFpT2lJNVIwMTVWRFY0YVhSc2VuSXhUWEpRWjNZdGNITkpZMWRzUzFSbU5YSkpPR0ZDUmpaS1RuQXdhR1pqVW1kTWJqWmlSMHBpWVVwYUxUYzJMVUZRT0hsUVZHMWZkRkZvUW5Wb05qaGhlV1JYWDFKME5HYzVTekJHTnkxbFdWTXliUzFGTlhaTldrVlJOMW96VEhRNE1YWnhWVUZwU0VGS1ZGbHpOa05pWW1wcmRqWnVSRWN0U1hneVJXZE1ZekF3ZERCaFRtcGpSRU52U0V4clozUlJTVzV0VWpkdVh6VkdSaTFaY1RCTGFEUXhVelUxVEdaVFF6QklUMFpVUmxRMmIzbEpNV2RhZWs5eVJYUlRNWE4zTlVsWVRtMDNaalZUYUVOa1N6RkdPR3hKU0VjdE5tZFFOMUZrZW1wdFVsb3laMDluVlZrMFZsOXlkMU0yWVRGQlRscHhUbUpsZUUxTmJqWXlWRlprU0VsWVRVUnBkVE5VT0VsNGRGaHRPVTFRVWpoaVZuWnFNWFJUZUcxcFgzcFlaQzB6TlhJMU9XVkVUMVpoWWt0UGFFTlRlblpZZUZKYWFVVTNlamcyUnpsUlVuSktRbUpRUW1VNFNFNTFkVWhxTUc1NVlrSmxabEkxWTFKQlJtWkpUMFJNY2pOWlRGVndjbmszYTFwblRYUm1VM05sYkVNMk5tVnRSV0UzTjAxMU0yUmZiVmRPV2pGa1VEaG5TR2xMUTBGRmNuZGZVbFZVTUhKQlQwSldOMmxJVGtGWFEwWnVPVkZrYTJOSWNHRnFkRWhQV1hKeWVYZHBkMWhOUkhVM2REWjFjRWRFZDNCU1VXcEZjelprYjBSTFlURlVWak5XTm1ZeE4yaEVjQzB3VkZCRVZVZEpiWGs0VFZORVoycHNjRFI1UWt4MGRWZHZWbE5NZG5SYWFWQmpUbXRNUjI1Q1lUbEVXUzEwVTFWV2FEVjZjbDlQWTE4elp6ZHVOVWhoUmpkTWRsOUxTRkpJZUU5TFVtRlNjVU5PZDJZemREWlFjbXhqWlRFeGRWRm9kazFKUkRsUFIzRnhVemhUVlRWa1FqbFJjRzFLYVV0c2JsVnBhVlZ3TjJkdk0yODFZalJNUWsxM2JsTTRVMjF0UkVSbFRYRndSakpJWTFWTVZsRkxhbHBWTTJSTWNHODNTWFJwY1hSTlRUQnJkRGxLYURoeWFtNXNRbmc0YjJWaVdUUnNMVjlxVFRCMGRtMVNZVGRhWnpsQ1lXWndka2RqT1cwNVNrRTVSRVJ6VXpJNE1FZE9hV2RGYUMxdGVFaExSeTE0ZWxGbVZqaExPRmxvTlZwNWN6UnZkVkIzVEc5SVYxQTNTa3hWVWpsRFZsZFBTbk4xZFZvNVZXUklRV3hWWVdoeVluUjFZV1JGT0hwaFRFSlhhbGR5WTFwUU1UQnhhVGRFTmpWcGJWYzNlR3hWYVRkYVMwUjNSWFpQY3kxMFRrWlVWbkJKY1UxWlZXcFRVV1F5VEVnMVdIbzFZeTB0YldwbU0yWXROR1pRY0RrdE9IUmxOMVZYVmkxVVJWOU1WMUZVYmxFdFJVazRjMVpMYVdwb2NURnNPV1p3TWpsdFRIWnpVbmxmTm1kdVVWWnpXSFJUTkZBMVZtNHlkRlJITFZwd1lWaG9VRk5yVjBVdFdrVk9NVzltT0RORVFYQmZOM0pFY2poaVZIcHVObTVQVnpCbVpWZGxSMmxaWlRKdVUwOXBhV0pSTUZGc09HZGFkR3hqUnpnd1NqRnRiUzFxTlMxVlJtSkNPRlJyYW5sak1GUkVSelF4U2xGeGJXZzJSa1ZIZWtWSWJrNWpjRFJrVFhSaE1XbHZaRUUxWkdkS1N6aHdha3h3UmpGUlZFSlhUamwwUm5CSVNFZFFOVzgxT1ZOTmNXSm1VVzVrWVdKVVZuSnpRak5ZWTJweFgwTlhjRXBuV0RCR1ZrVmllWFk1WDBWeFpGVjJTbU5tT1RRNVkzSllVVWgwYVhkWFoyOU1WVTQxY0RORFQyWnJaRE5zYkV4Vk1FWnBkVWhQYmt0ZlIwSXdhalpPVDJ4amNXWTNkVk16T0ZsSVdHZGtTRnBpV21KQ1dsbHdSMFpQUkRBdGIxOHhTVXhDWWtKcWREZDJka0l6VGtGWGNuWkJUbEJSUkZGNWRqQkxhM1pITUZWcWEzUjBVblEwVDJ4NGNGSkNhbkJoTWtodk5VcEtUeTFGVlVKdlV6STFNMVZLT1ZrdGNUVTRSemhmUmpaaFEwRnZialZUUTJscVlsQmpVakJDYkRsNFVqaHBWVkJ1VVRWdFpGSk9aMkZqVlVkeUxYVXhObDlyTW5KMGJGTXhRME52Tnkwd1pHZ3RNM2xXUVVZeFZsRlhWMDlGTjB0cVlVTkpOR2htWWpsNlFsUkhOa3BxUjNsWFRFNWxOVEo2VUY5Q1pWbHdka00yVTNsemRsOW9NbTFzTFRCWU4yeHRiRkUwV1ZOTVNFNUllbHBHYW05Tk1HSk9ObWt6UlZaRFkxZzVURkp1V1UxV1VXdDJhVVF0WkRCcGJpMDNNMlpJWlRkQlZIaFFPRmxhVlMxQ1RrRkVPRVZUVURGV2MybEhNR3MyVVhsSU9EbExXVGhWYmkxWWNWazJSekV6Tld4T2NEVkNNV05QYlZsdWNGUjFORGxVVkdWblkxTjRSMkowUVRsbWFIYzNha2xUUjNOUWRtVkphVlUxVWpCeFQybElkVmhMT0hsVWRqVmpkMWxFVEdkWVJtRndWMmxXZDNsSlJqUnZiVTR4V0VSMGFUazBkV3RYUTFCVVkxUlhVMHBSVVd0ZlJVOU9XWG90TUdkV1FVbEpiMmxEYkV0R05FTnRWbEZMWmxSMFFVWXlWa2hDVEZKTVJHMVZXR1ZGTFRONU9GUmxXSEZtVXpGNGEwVkhhVnBQT1RCM2NtWkplbVpRY0U1NVMwZHlUbUZUVFhvd2QyVkNiVmxGYjNjMWFYWm5hamRDWm1wSGNITTRkRVpVWWs0MFNDMVRhSGR1U0dJNFNXcFVXRmxtYlZVMlVGVXpjMFJ2VUZwTVoxVldVR2xSYkUxVFYwSXllRmxIY0dkaGExVjFSMWRxTkZNMmRrVTBlRmxVYlZGVGVqWjZTWFpGUTJKV1RUVjJRbDk0TFVjdGVYVk5SbE5QTlRaRFgzaEVNamN5VDFkaGNHcHFaRkJMTlVScll6VjBSVVpZWjFaWGRrdEZhMGR3Wld0bE9HVmplVjlXVWxJMk9VOXJhekJST1VaaVdGQmFNSGh0U1U1V01VVkZPRFkxTmtFaWZRLmdGdlNLT3pZelEtN2Jpc1BfQzRQdElYQ3NBV3Z0LUtYckl3MHVtRzlIbk9hV3RPclZMMEFtQVVQVmtWdGJ0UEpkUkxtYXdrUlJYRC1uaFRfejJRb1RR"
+           }
+          },
+          {
+           "text": "Late-stage subtask"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1043
+       },
+       "usage": {
+        "inputTokens": 17,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 65,
+        "totalTokens": 82
+       }
+      },
+      "outputTokenCount": 65
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132841910Z_1455c79410bd09ef.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:57Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "8de32ef0-70a3-5966-9bd7-9043c2fb5c52",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "agent_role": "subagent",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "28c45f08-c9fc-46b8-8268-af64ad3056ad",
+      "interaction_id": "efddbfd9-a4b4-4128-a6b8-3a4603f2710f",
+      "subagent_marking": "agent_role"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "{\"task\": \"Compute 11*13 and report the result.\"}"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 27,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "11 \u00d7 13 = 143"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 977
+       },
+       "usage": {
+        "inputTokens": 27,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 11,
+        "totalTokens": 38
+       }
+      },
+      "outputTokenCount": 11
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132857371Z_318d4e1ecfac0698.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:57Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "10e281d4-e8f2-5798-90b7-166973d44f78",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "agent_role": "subagent",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "28c45f08-c9fc-46b8-8268-af64ad3056ad",
+      "interaction_id": "efddbfd9-a4b4-4128-a6b8-3a4603f2710f",
+      "subagent_marking": "agent_role"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "{\"task\": \"Compute 17*19 and report the result.\"}"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 21,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "17 \u00d7 19 = 323."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 881
+       },
+       "usage": {
+        "inputTokens": 21,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 12,
+        "totalTokens": 33
+       }
+      },
+      "outputTokenCount": 12
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:27:58Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "b82f28d0-858f-566c-a73c-1ee3c141e1cc",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "efddbfd9-a4b4-4128-a6b8-3a4603f2710f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "28c45f08-c9fc-46b8-8268-af64ad3056ad",
+      "subagent_marking": "agent_role"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use delegate for two separate tasks: compute 11*13 and compute 17*19. Then summarize both results."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_KWEa0CbFTQCmRZpdPL7Fqh",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 11*13 and report the result."
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_wVbd5BFmYkItqefLpzvm8k",
+            "name": "delegate",
+            "type": "tool_use",
+            "input": {
+             "task": "Compute 17*19 and report the result."
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_KWEa0CbFTQCmRZpdPL7Fqh",
+            "content": [
+             {
+              "text": "{\"role\": \"assistant\", \"content\": [{\"text\": \"11 \\u00d7 13 = 143\"}]}"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_wVbd5BFmYkItqefLpzvm8k",
+            "content": [
+             {
+              "text": "{\"role\": \"assistant\", \"content\": [{\"text\": \"17 \\u00d7 19 = 323.\"}]}"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "delegate",
+           "description": "Delegate one task to a child agent.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "task": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "task"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 644,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSnwQKEggTEAEYAjgBQgh0aGlua2luZxIM4mGsuLZcI8HA+A4EGgw+C6Hf7TOJ9jmN0p0iMNWERO29eUDGhbtin3+Z75igOWfplw792nj8bdkDrJl2OPsDImM5h2yOkE2Sbxc5lCq6A+9q2iT7Ny+pQUXbTzNgPcbZdj1BNnwkfp22AFzCKMf2K3Spa1KFfLEPI3yB/7GZRl+HLu6zvExjsV1f6RajhPhXHqjpqIvqMysQ9m5ucu9I9Nd91jiH7eJwqj52swKjTOes2roU/6AnzEXMY6FXJiB7rSnS6GIHTH59Q65U2U8rUyXxENjTAbMyvXh3Le9xDhWuVs/cDehgy0UMtyDECYfgznkv5GVAmbm5f+rOwnt550FF1AHj1kTImFNSIo4sq2zQ+Ce7mays+EGwuKH2ZAY5Ius5YwHjeP+cPV4l7B/rzD1HNPxOd4E8s8YDbjWXalciVB0a4sQMfQo5j9udgrBQYqjJAlaY/PFY/m4xq4rStiC/Gh0RAhfhteJZq5RbC0LknLY0qb4mLNHiJue+NwKAtEs+ki4idTQ4I+TJJD8ANe2Ns9Mc051YpmuKhxjFd7I45RPTd6C1T1EbyI1SiU8i4/BLOT9FHnwy66IhQf1wmaZQeFLaGArnzsQ/WhsWtWByFKRUYKs5N8QeaIOxeWgzo/XJ6fI1tNaBouYC9nmX67H6bn7K6TDxdkrXLFNsJxQcexIrNi0VoxUYAQ=="
+            }
+           }
+          },
+          {
+           "text": "I delegated the two multiplications, and both results check out:\n\n- **11 \u00d7 13 = 143**\n- **17 \u00d7 19 = 323**"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1277
+       },
+       "usage": {
+        "inputTokens": 644,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 85,
+        "totalTokens": 729
+       }
+      },
+      "outputTokenCount": 85
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132902161Z_67db6a6dab6baa38.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:01Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "15c81ed8-0753-570c-954a-f82e3010550c",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "2811a71e-1800-44c2-90cb-87518875d55f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "subagents",
+      "conversation_id": "d6e23516-9d99-4cc8-8ea3-2c73dc5c60f0",
+      "subagent_marking": "none"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "{\"task\": \"Compute 17*19 and report the result.\"}"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 21,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "323"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 595
+       },
+       "usage": {
+        "inputTokens": 21,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "totalTokens": 26
+       }
+      },
+      "outputTokenCount": 5
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "28c45f08-c9fc-46b8-8268-af64ad3056ad",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use delegate for two separate tasks: compute 11*13 and compute 17*19. Then summarize both results.",
+    "output": "I delegated the two multiplications, and both results check out:\n\n- **11 \u00d7 13 = 143**\n- **17 \u00d7 19 = 323**",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 1194,
+      "output_tokens": 201,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     },
+     "gpt-6.1-terra": {
+      "input_tokens": 38,
+      "output_tokens": 68,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": [
+     "delegate",
+     "delegate"
+    ]
+   },
+   {
+    "conversation_id": "d6e23516-9d99-4cc8-8ea3-2c73dc5c60f0",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use delegate for two separate tasks: compute 11*13 and compute 17*19. Then summarize both results.",
+    "output": "Late-stage subtask",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 1182,
+      "output_tokens": 203,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     },
+     "gpt-6.1-terra": {
+      "input_tokens": 38,
+      "output_tokens": 70,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 10,
+   "closed_idle": 2
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

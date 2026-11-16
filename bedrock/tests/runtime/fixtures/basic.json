@@ -1,0 +1,386 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "basic",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132026350Z_e901d49cd5f23c2f.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:19:33Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "ee25a802-aa62-5fd5-887e-0bc7cf412c54",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "a93b8362-542a-4e68-a1cf-43fd8f74e293",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "basic",
+      "conversation_id": "7a94fe4f-2d86-41dd-87bc-095ad9c95a19"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Reply briefly: what is 2+2?"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 22,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "4"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1026
+       },
+       "usage": {
+        "inputTokens": 22,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3,
+        "totalTokens": 25
+       }
+      },
+      "outputTokenCount": 3
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132027303Z_785f1c343069a694.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:19:34Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "15adee37-5308-5b85-a5cc-f815bd6220c6",
+     "operation": "ConverseStream",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "061d8286-7a9a-4726-bfae-6442f4d42bf4",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "basic",
+      "conversation_id": "cae29c67-bbae-467e-b620-b47c384c73ca"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Reply briefly: what is 2+2?"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 22,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "4"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 888
+       },
+       "usage": {
+        "inputTokens": 22,
+        "outputTokens": 3,
+        "totalTokens": 25
+       }
+      },
+      "outputTokenCount": 3
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132029470Z_d76266551bf3ce9c.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:19:36Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "2281ca72-2913-528f-a908-714bc7c4ba8a",
+     "operation": "ConverseStream",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "6128164a-8808-427b-907a-8d1cf4860414",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "basic",
+      "conversation_id": "cfc467a1-9da5-4595-b78a-da819c481e0a"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Reply briefly: what is 2+2?"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 16,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "4"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 741
+       },
+       "usage": {
+        "inputTokens": 16,
+        "outputTokens": 5,
+        "totalTokens": 21
+       }
+      },
+      "outputTokenCount": 5
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132033365Z_441f4a82c263545c.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:19:35Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "f1c31489-a415-56a5-b710-4d6f07db42cd",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "b5786231-86f0-4708-a3ef-754b8293e14f",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "basic",
+      "conversation_id": "060e3a51-9f9c-4842-b87b-08c64828a580"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Reply briefly: what is 2+2?"
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 16,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "4"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 554
+       },
+       "usage": {
+        "inputTokens": 16,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "totalTokens": 21
+       }
+      },
+      "outputTokenCount": 5
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "7a94fe4f-2d86-41dd-87bc-095ad9c95a19",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Reply briefly: what is 2+2?",
+    "output": "4",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 22,
+      "output_tokens": 3,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "cae29c67-bbae-467e-b620-b47c384c73ca",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Reply briefly: what is 2+2?",
+    "output": "4",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 22,
+      "output_tokens": 3,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "060e3a51-9f9c-4842-b87b-08c64828a580",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Reply briefly: what is 2+2?",
+    "output": "4",
+    "tokens": {
+     "gpt-6.1-terra": {
+      "input_tokens": 16,
+      "output_tokens": 5,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "cfc467a1-9da5-4595-b78a-da819c481e0a",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Reply briefly: what is 2+2?",
+    "output": "4",
+    "tokens": {
+     "gpt-6.1-terra": {
+      "input_tokens": 16,
+      "output_tokens": 5,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 4,
+   "closed_idle": 4
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

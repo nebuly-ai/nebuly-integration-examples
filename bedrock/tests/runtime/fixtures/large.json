@@ -1,0 +1,131 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "large",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132951160Z_9521a65720535303.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:21Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "eaaeb59e-7be9-53fa-ab9c-b88326ea5860",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "3f7e2ac6-b76d-4e15-a1a3-8fc67aa0f785",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "large",
+      "conversation_id": "d269e04a-c82f-4fcf-8c5b-ecf9db8b9484"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyS3Path": "s3://synthetic-bedrock-logs/AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/data/eaaeb59e-7be9-53fa-ab9c-b88326ea5860_input.json.gz",
+      "inputTokenCount": 51017,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "This is a synthetic test fixture: the same sentence, \"This is synthetic fixture text about invocation logging,\" repeated many times. It contains no substantive information beyond that."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1807
+       },
+       "usage": {
+        "inputTokens": 51017,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 57,
+        "totalTokens": 51074
+       }
+      },
+      "outputTokenCount": 57
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/data/eaaeb59e-7be9-53fa-ab9c-b88326ea5860_input.json.gz",
+   "body": {
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Summarize briefly:\nThis is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. "
+       }
+      ]
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    }
+   }
+  }
+ ],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "d269e04a-c82f-4fcf-8c5b-ecf9db8b9484",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Summarize briefly:\nThis is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging. This is synthetic fixture text about invocation logging.",
+    "output": "This is a synthetic test fixture: the same sentence, \"This is synthetic fixture text about invocation logging,\" repeated many times. It contains no substantive information beyond that.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 51017,
+      "output_tokens": 57,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 1,
+   "closed_idle": 1
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

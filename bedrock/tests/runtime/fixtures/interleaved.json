@@ -1,0 +1,377 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "interleaved",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132823463Z_1b4da8dcadec4406.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:37Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "2186817c-92cf-59d1-8134-7fc9c360f8c1",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "ccf7af3a-0144-434a-a60a-37f8cf2686e5",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "interleaved",
+      "conversation_id": "5165a363-b3de-47b4-8a35-e6dd4dee438c"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Initial step A: compute 11*13."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 21,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "11 \u00d7 13 = 143\n\nComputing this as 11 \u00d7 13 = 11 \u00d7 10 + 11 \u00d7 3 = 110 + 33 = 143."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1220
+       },
+       "usage": {
+        "inputTokens": 21,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 52,
+        "totalTokens": 73
+       }
+      },
+      "outputTokenCount": 52
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132834038Z_4a8326cd52e95fc2.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:38Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "62b8747e-7ecd-5284-a48f-69959795ed40",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "3d9d4f70-7b05-443d-96ef-ac26ae92a271",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "interleaved",
+      "conversation_id": "5165a363-b3de-47b4-8a35-e6dd4dee438c"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Initial step B: compute 17*19."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 21,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "17 \u00d7 19 = 323\n\nQuick check: 17 \u00d7 20 = 340, minus 17 gives 323."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1134
+       },
+       "usage": {
+        "inputTokens": 21,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 38,
+        "totalTokens": 59
+       }
+      },
+      "outputTokenCount": 38
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132836780Z_9c942c25779c84ed.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:41Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "e6640a31-f844-5829-b5c0-ab7e854c5db6",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "3d9d4f70-7b05-443d-96ef-ac26ae92a271",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "interleaved",
+      "conversation_id": "5165a363-b3de-47b4-8a35-e6dd4dee438c"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Final answer B: report 323."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 18,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSiwUKEggTEAEYAjgBQgh0aGlua2luZxIMyboH00gH/yKRmSPRGgwcneaDrYo6Yv7V9lYiMDdSreejFJMKvzN5Hymttnq0qT3s+3nSM2wlg+KatvVJQVOQ0sLvvqfDQr8kgKlraCqmBClGqAOWr/xBGzEXCwxCPG5MyfQqmity8Yl9CJoueo1bSzXJV92Sru6C2TgVdo3RQ5mszRAIKF/qRBmOxm5vmVFzMz+fh8pUFlbhX+JA/KtO6j3SH+53M0naf5kImaK8MQpP/0O4TZAduA4eMA6zN4Xr3u7Islc46za97YAsYlCprtCMIdqrzOChqSjSdnRAvqsstGEo3Nazvd07u1gqINMDt11hHX9b95PgXcQL9/7rG6XavywlZqDXXmOrFv6gPP1pL2ltfdm1ESpEC5wyhENAWfJpyAp5jD1qwlPiGPRnzu6namcK9P6UJSrc2MDl5VusW3skb0ZFt+YpnEDoBWch+mn8QWdiTBfboMJG9gm7O2TOeNNCT8PK1/ylru+Zx02qRgJ9kN+rDQisJCOs7VNyVObsDg1TSyeijgBFXfWMp92YQVg8U49ZyLE5V9BpQ7DQYlQYV8EmM2H+LGsbJMW5JoIQCXmlnpp/ZZCQyWhwJO7pbB0kJjjF6IvwYHU/kX67cgdt9PsRKmRhu5zQOwGRmi5Z2czFLWDLy2Qxf1fPbH+nBD4fqHTVizncysHgIRXga1Sn1v+kTKpOINR9/w+5kI2nIVevhNHkw/O12fVC1OslSpztqKMKHtbHr05qJY8salYAxqOrXQ4pSGjfMEX5sfV4JzuWpDWqNWLKBExpNKhrATzzYRaFV1bOA26RL1L5GxFFDV7Pj3v6jZITK/JL+q1gmrYYAQ=="
+            }
+           }
+          },
+          {
+           "text": "I don't have the question or the answer choices, so I can't tell what \"B\" refers to or whether 323 is correct. This conversation doesn't include an earlier problem.\n\nIf you paste the full question and the options, I'll work through it and tell you whether B (323) is right. If the number came from a calculation or a source, share that too and I'll check it."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1857
+       },
+       "usage": {
+        "inputTokens": 18,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 176,
+        "totalTokens": 194
+       }
+      },
+      "outputTokenCount": 176
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132841910Z_1455c79410bd09ef.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:39Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "2a9629d3-873e-59cf-9258-5ac8df3bb0bb",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "ccf7af3a-0144-434a-a60a-37f8cf2686e5",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "interleaved",
+      "conversation_id": "5165a363-b3de-47b4-8a35-e6dd4dee438c"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Final answer A: report 143."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 18,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQS5gYKEggTEAEYAjgBQgh0aGlua2luZxIMSFP0oPsg+K5j+MY5Ggy1jNuaOOQf+uzM/hAiMHfaouiB3wG8o7E2wPvw0ojLGrCB8lJkdcospQf1qJrnpi4fMinE81ZtTVco5lWKWiqBBikJUeThyH2ju8L7je8XyuH1oSDxptarkcHBNHGVUvZwZKVTp/lb7ETBpyd8LM98rCxqfAexhza/EqtlgxjJq2Wy3SOoejZRYI2KCzSdOYM7H34S7ZvHRl602/jAZEUuuDrPl+HPwY9E4sM+iKP88nMcAhzht2aOuhEL9tynxumyx/c7rjl6X8WAy0Kc7Yg2qxQOn4JFJNGDszzgkbeUwbLD4gTSZ9WMNSwh74YtXPO3Sq2tX1MNwSzf1kmXCHkyF6xuMLfcby0459otWqUtsZem9OcR5aANfMMuhK4C4nYpKiSFkAQr6k4g0VE8hi7hJYqhAYIlvxXUsfN/aFFVOJATFNPaTfSDbSJmRvwKbF/5ZrdPO2i0Aby86ifBJ+JowkaEIj2EY7uZ6QSujfTs3OKR3ZSYAumMhXDyn+wElgcBeY1QFKRNVcIkP4UgdMUeiufzdvbZQK1FJfHGtETfxI7TnCSxw7fET3xNL9cEuqmBv1ceJ5MEZDbpd29sAdqLNyaOYpfvjWa5R1/PJ4eq4wowPwSZmuutBPT4lEaujzTWURlrsVJyj7KOOkaeq7HjCuzj+U0NzVpABzmNoIqagUrLfKYt4Q/efIYCg0EW/c2FNEID5qS6iQkO4+uDSazHB/eblq9Af5J5Ik9EAQb92id4zMnrmakj4EIoOKSsUtQ5qn3X2c/ZEWi1EaijV4xGF+BrqXt8JSofTFd58+/o4N1MJ7apymHgcvHWm3Rly0JTzsZmmEG1BPZfa10Q+0voVzwUWLNypKX1iExqMsIYu8A+LOQD3i/9IKgiC8LLyROS7RYQHsbAOkBdASyvBLuAwUTaiQCpPWBPV069lmKgAxn67N/RFvv8vLWNT5GC0KVJZkoECgPYfchaXUEf/XIWUoRJOfntv5Mrcnx7BZzX3c96pYpM+tcLmcxs9SnMGfOZvYJDsqAqBxg5CWk37zbet4X9L70VzSwLysdhG/h09sbH+jeKyQMREnIjqClbcyWa2ymZe9FqHQ4HPRQBXtfKbJMYAQ=="
+            }
+           }
+          },
+          {
+           "text": "I don't have the question that \"143\" answers, so I can't confirm or check it. I can note the answer as you've given it: **A: 143**.\n\nIf you share the problem, I can work through it and tell you whether 143 is correct."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 2074
+       },
+       "usage": {
+        "inputTokens": 18,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 208,
+        "totalTokens": 226
+       }
+      },
+      "outputTokenCount": 208
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "5165a363-b3de-47b4-8a35-e6dd4dee438c",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Initial step A: compute 11*13.",
+    "output": "I don't have the question that \"143\" answers, so I can't confirm or check it. I can note the answer as you've given it: **A: 143**.\n\nIf you share the problem, I can work through it and tell you whether 143 is correct.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 39,
+      "output_tokens": 260,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "5165a363-b3de-47b4-8a35-e6dd4dee438c",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Initial step B: compute 17*19.",
+    "output": "I don't have the question or the answer choices, so I can't tell what \"B\" refers to or whether 323 is correct. This conversation doesn't include an earlier problem.\n\nIf you paste the full question and the options, I'll work through it and tell you whether B (323) is right. If the number came from a calculation or a source, share that too and I'll check it.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 39,
+      "output_tokens": 214,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 4,
+   "closed_next_interaction": 1,
+   "closed_idle": 1
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

@@ -1,0 +1,233 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "history_reset",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132841910Z_1455c79410bd09ef.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:05Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "84263e9c-9aea-5bdd-a5b9-881bf91c0c1d",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "7e15d4fa-0cab-420f-ad19-43be6a27f94e",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "history_reset",
+      "conversation_id": "25926568-aa65-4afe-a043-80ff9dff78ed"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Remember HISTORY-77."
+          }
+         ]
+        }
+       ],
+       "system": [
+        {
+         "text": "Answer in English."
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 26,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSgwYKEggTEAEYAjgBQgh0aGlua2luZxIMGHLgzVSgs07zYuJFGgwmjLbhaLFmIUWJP64iMGNx2YpQ/SoU8nVbJkqhCo9sX3NADwrShofGVtuvJvWJrB+1gYFzAPunsBOkkpI4diqeBWTsXpf1hVp4/lBQeHgDaW2lXj4ANZZOsCuttvffng1HKBnw3o/yZ1GFOTiX9Kp83M8M7LCeU7PNAJCJJHKjKrB33TgnWE8iQJTvgpe7Gttb/1lU5cnezZ2W+x5eGfzr4glTmPIPexcR5m28ihJahetFQNtTrA6EWdZ/4X8udrHra9PyQlTNovfGPeVZ1O67v6ZcpssslAkhY832EqBi1z4fm1mQNUKzoU7a/IRBmVlLfRLkatzaOLjE5dxrXdke70sSIiEbQPJUkMHKRG/67aNzASCf+VTJ+DEovm+z8wm5RAYm9E/1qUP+NdON6r/U9YBBxki0zn3UxUTKFySu9q57MpH/LiXCdssOuAorbg9BjIiPW3iA7HJwEyAsXB7k+BEYo7QcQZt93a8lFzBjIbGg72fKowBI6EakAqwsTp4pSlYbSyY3feoXhcM70Vay74K+SoNSzleHebAireMAZlMOKHKzYAW7UlBtbsTAB5t3/Ji1My4PkzRR8KLI5mmbfXP2PdHI149VAI7nqRrGCvtqquEd+M2QxKCasFtxpf28q/Hc4hdqY+gZzBHV6TbUwWlrFiJaVc5VsXehN//momXmWW94M33olnh1SVRxMXT2rKn6kFhKwklWGDLsNCfZQuvyh1AqjZuM94X+hk9pbUeHRnUpfnNrAfKJkHXUl19VkiEl4Dx0HVPevXbXVwAUe1w6B4qAM5g4hbrL/6AjhTaKclUGt2DxFHDLue3IYKWmvYZmzLaM80Zz8p8tvPEXUIGXgJiETgTi5VUcs7YKiADIZ1Vxj/cedLxt0FSttKtp9K4YkwW51qSI2QsdxAJqZ8uY1SpclOnUNqqDwiEZJrKJEO5HNwPaC/w8SLgjRbFYg/v+AXs7TzFkV1sZKzwYAQ=="
+            }
+           }
+          },
+          {
+           "text": "I'll remember \"HISTORY-77\" for the rest of this conversation. I can't guarantee it will be available in future sessions, though, since I don't have persistent memory unless your platform provides it."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 2734
+       },
+       "usage": {
+        "inputTokens": 26,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 165,
+        "totalTokens": 191
+       }
+      },
+      "outputTokenCount": 165
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132902770Z_6da029f18ab5bd8d.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:08Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "5dcd4947-2940-56b2-8edb-bae43f375440",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "638fb6a1-b486-45f9-ae30-ea03609a8bba",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "history_reset",
+      "conversation_id": "25926568-aa65-4afe-a043-80ff9dff78ed"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "History was truncated. Reply with a greeting."
+          }
+         ]
+        }
+       ],
+       "system": [
+        {
+         "text": "Answer in Italian."
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       }
+      },
+      "inputTokenCount": 32,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "Ciao! Sono qui e pronto ad aiutarti. Sembra che la cronologia della nostra conversazione sia stata troncata, quindi non ho il contesto dei messaggi precedenti. Puoi dirmi di cosa hai bisogno o riprendere da dove avevamo interrotto?"
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1762
+       },
+       "usage": {
+        "inputTokens": 32,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 106,
+        "totalTokens": 138
+       }
+      },
+      "outputTokenCount": 106
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "25926568-aa65-4afe-a043-80ff9dff78ed",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Remember HISTORY-77.",
+    "output": "I'll remember \"HISTORY-77\" for the rest of this conversation. I can't guarantee it will be available in future sessions, though, since I don't have persistent memory unless your platform provides it.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 26,
+      "output_tokens": 165,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "25926568-aa65-4afe-a043-80ff9dff78ed",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "History was truncated. Reply with a greeting.",
+    "output": "Ciao! Sono qui e pronto ad aiutarti. Sembra che la cronologia della nostra conversazione sia stata troncata, quindi non ho il contesto dei messaggi precedenti. Puoi dirmi di cosa hai bisogno o riprendere da dove avevamo interrotto?",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 32,
+      "output_tokens": 106,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 2,
+   "closed_next_interaction": 1,
+   "closed_idle": 1
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

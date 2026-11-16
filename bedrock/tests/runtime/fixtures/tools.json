@@ -1,0 +1,1653 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "tools",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132819485Z_ff14dbcdc2740a39.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:47Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "a9a199b2-93e5-54aa-aea2-a5ed7bdf03ed",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "44486c43-0ed6-4d83-833d-13019def6ba3",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "da103baa-5ed3-471b-a8be-c2df896aec81"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_puOrSiNvqT2sI8gRVUS7c3",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_pl0fLkKezN7cHtNP6kYXhs",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_puOrSiNvqT2sI8gRVUS7c3",
+            "content": [
+             {
+              "text": "SYNTHETIC_ERROR"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_pl0fLkKezN7cHtNP6kYXhs",
+            "content": [
+             {
+              "text": "SYNTHETIC_ERROR"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 567,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSwAUKEggTEAEYAjgBQgh0aGlua2luZxIMaQuvNo4jxNqY2iWdGgyYjRipTNdwT44/Z+ciMI/OSGdFrCH34985LICO76cvMjkIv4HEIqNjHwOT1mOQmnoupHzk8G+96FHy2Oow2irbBBMkksSlF/tLGCfAeeB5uKb8Ou6wwz5BYrEUDxi7MWxfRe9rPeFVOP1V/s1n0adrGUggp0/jCQqmX29ETP9Cj36KW9v4k3q+bhPByIdRkZ6Rs6fLOv74QDY3ZUEUSU8LSFotHTkuOrGsPZbLwBLxcUfjqdBH9Pbcuz+YSRhQROZ6tamZYnFWoGVS2xPwxBGKL0wYEvihodKvjP4la63DLrgUmLbEEKf/D/1jWzDQIpL2zhuFDjDCtKFiNvNacCQWSr9Xh2Fweq2HNElFUFmPXilfzpOix9b/0KmAN8skPBdW1BCl2bGwsQWyfnYwRCOnKOPH4/+QUPeGVnchnVY3jFbZoeh04YLw8NNP5m7oy+4bbfF4jtFZImqHpgugrDb2hJtcpJ9KTswiOHaelkI9ERrSO3uQU2QNDc61l9qjC6mNJ7z7IATlgZTUTbnVLyZA9HTnpeNWmY0Rkl1tqTBTZc1R/TSIVpydc1L2MjQHJQSF21sPw34nXEkiyjvsGYJJB+3heZLyVvtdljCsw06/QA29crKESGHMXry6FI6qUPEiGAYhciAX9fF891Q2iUT7Z0odTGxMTn+Aen3rkaD/THIuPpraC4uQtpG1DzhQcuDyk0YYXafrpFkMg0xuru5yzdUn1WhzcZaJ/gIl+OCKLrq7ZdW624iHe2yk55zfnw8MRQiv81vgCG9Yc6JD8Ys0C513bAidoQ4zN3zDGEZGIqIR3XeEYWkKMA87ZkuB/87lO5iRiQ9zFSjVzxV4b57okt8nhqyCDpPk9k9zgI2dUnqKVIzBDL+Jkxva3BgB"
+            }
+           }
+          },
+          {
+           "text": "Both lookups returned an error. I'll retry them once."
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_semg5KRuSNjLwjYtZndjUW",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_BglwDOoYBSd8Tle8BROC7N",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1574
+       },
+       "usage": {
+        "inputTokens": 567,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 199,
+        "totalTokens": 766
+       }
+      },
+      "outputTokenCount": 199
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:27:48Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "2163dfd5-b76f-568e-a371-14b97b4ecf86",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "44486c43-0ed6-4d83-833d-13019def6ba3",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "da103baa-5ed3-471b-a8be-c2df896aec81"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_puOrSiNvqT2sI8gRVUS7c3",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_pl0fLkKezN7cHtNP6kYXhs",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_puOrSiNvqT2sI8gRVUS7c3",
+            "content": [
+             {
+              "text": "SYNTHETIC_ERROR"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_pl0fLkKezN7cHtNP6kYXhs",
+            "content": [
+             {
+              "text": "SYNTHETIC_ERROR"
+             }
+            ]
+           }
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSwAUKEggTEAEYAjgBQgh0aGlua2luZxIMaQuvNo4jxNqY2iWdGgyYjRipTNdwT44/Z+ciMI/OSGdFrCH34985LICO76cvMjkIv4HEIqNjHwOT1mOQmnoupHzk8G+96FHy2Oow2irbBBMkksSlF/tLGCfAeeB5uKb8Ou6wwz5BYrEUDxi7MWxfRe9rPeFVOP1V/s1n0adrGUggp0/jCQqmX29ETP9Cj36KW9v4k3q+bhPByIdRkZ6Rs6fLOv74QDY3ZUEUSU8LSFotHTkuOrGsPZbLwBLxcUfjqdBH9Pbcuz+YSRhQROZ6tamZYnFWoGVS2xPwxBGKL0wYEvihodKvjP4la63DLrgUmLbEEKf/D/1jWzDQIpL2zhuFDjDCtKFiNvNacCQWSr9Xh2Fweq2HNElFUFmPXilfzpOix9b/0KmAN8skPBdW1BCl2bGwsQWyfnYwRCOnKOPH4/+QUPeGVnchnVY3jFbZoeh04YLw8NNP5m7oy+4bbfF4jtFZImqHpgugrDb2hJtcpJ9KTswiOHaelkI9ERrSO3uQU2QNDc61l9qjC6mNJ7z7IATlgZTUTbnVLyZA9HTnpeNWmY0Rkl1tqTBTZc1R/TSIVpydc1L2MjQHJQSF21sPw34nXEkiyjvsGYJJB+3heZLyVvtdljCsw06/QA29crKESGHMXry6FI6qUPEiGAYhciAX9fF891Q2iUT7Z0odTGxMTn+Aen3rkaD/THIuPpraC4uQtpG1DzhQcuDyk0YYXafrpFkMg0xuru5yzdUn1WhzcZaJ/gIl+OCKLrq7ZdW624iHe2yk55zfnw8MRQiv81vgCG9Yc6JD8Ys0C513bAidoQ4zN3zDGEZGIqIR3XeEYWkKMA87ZkuB/87lO5iRiQ9zFSjVzxV4b57okt8nhqyCDpPk9k9zgI2dUnqKVIzBDL+Jkxva3BgB"
+            }
+           }
+          },
+          {
+           "text": "Both lookups returned an error. I'll retry them once."
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_semg5KRuSNjLwjYtZndjUW",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_BglwDOoYBSd8Tle8BROC7N",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_semg5KRuSNjLwjYtZndjUW",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_BglwDOoYBSd8Tle8BROC7N",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 836,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQStwUKEggTEAEYAjgBQgh0aGlua2luZxIMvtfuXwt9nrAJHoy1GgyQN++cqjxZIfaXMn0iMAjI1eUO/UIGXyQb/5r/A0EaSTwD+lx5zFTN6bgScqp/d2a0ghRNb+eFbwEokwVGNCrSBJoRtkjVnuYM8IeeYQyV5E80wfars7k4iA/o5CCv+9v6QLdEJi1FrA6ZckmIN92gNJGP8kB81XuBj8hm4NHyubNjHHuA9WopRVD7enPKTAqtJeT13L3Zg3z9cREwfLFDR5s5FwwsWerue5ghV0EJzOLJ7oFSFnrhl0bzeg5aiWb3FGJ5w9tcSfU8ptj13Jd+DxS5oq9v8M5GDgG15Qlvp0mfqEjSBqPC3WXb0BDflsuQ3aaueFRPlLvjc0mSms4xGIYQbKHzYZ/Hrs5jHuK37jDbn+zyEkwYILPIVF3tpuhzvIOrFgEPDhZ5Fd7liH0z9NiCRMjUh/dp2Wgk8r0PZYHtfBSrPBpSk1Og6MvicRFgJQif0IoIvWmKYDf1DbJZaMup7VMgIakFm9cCv4869xvMrQ35BAd3rlzd5gCIOUr1ctVHGZZFgLkGwgXiCiyU/y5JIDUnjaQoCJJejSutVlSR3zmDeT/KuI3PYl6Xx1uC2q7YhVatNGqq+yCYd18dQNQqPWAxt0RBxjFmWgUhgxJRwSpFfRjITvB7ZlDRjgIOnb+L9HW4sHUNI8jXSTEQhIvIALjF0didr8DYbkbLpxug6QOAS4d3va5T5COb1fvgI0PYudrTjceCEWJlZLzxuWijfKT4JVuegayBZ+1rNiMdyLrPrir/xq+wppXUYGvm1ZCCSES6OgcUDibOYNANPSeiMWWmROdx/arAKlcYWRcWu/V8C6WhhXeWFc5Uu3Q0EevpLHbWyLBpCno2ftNgUNzSOp8HBAWQPmN8O5lCZQGuFxgB"
+            }
+           }
+          },
+          {
+           "text": "On the retry, both lookups succeeded and returned the same value.\n\n- **alpha:** `fixture-value-42`\n- **beta:** `fixture-value-42`\n\nThe two keys returned identical values. The first attempt failed with a synthetic error for both, so I retried once."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1549
+       },
+       "usage": {
+        "inputTokens": 836,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 141,
+        "totalTokens": 977
+       }
+      },
+      "outputTokenCount": 141
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132822552Z_822db4cde3e4d571.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:46Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "77e9963d-e4b8-5cdf-a00e-8a66de6e07f2",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "44486c43-0ed6-4d83-833d-13019def6ba3",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "da103baa-5ed3-471b-a8be-c2df896aec81"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 511,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_puOrSiNvqT2sI8gRVUS7c3",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_pl0fLkKezN7cHtNP6kYXhs",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1107
+       },
+       "usage": {
+        "inputTokens": 511,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 84,
+        "totalTokens": 595
+       }
+      },
+      "outputTokenCount": 84
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:27:54Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "175e515f-aa85-57ee-8049-abe85704803a",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "e0b890f4-b02e-4afb-a6c1-c81df9c6fb8a",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "df8ca2f3-53a5-4005-a6f5-bb2d3d359b0b"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "redactedContent": ""
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_950bea7785345ac49901c5369ba74a33",
+            "name": "lookup",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_ee21d51808ae5ad7986fc7d43d385d0f",
+            "name": "lookup",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "call_950bea7785345ac49901c5369ba74a33",
+            "content": [
+             {
+              "text": "SYNTHETIC_ERROR"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "call_ee21d51808ae5ad7986fc7d43d385d0f",
+            "content": [
+             {
+              "text": "SYNTHETIC_ERROR"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 144,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "redactedContent": "cnNuX2V5SmhiR2NpT2lKRlV6STFOaUlzSW5SNWNDSTZJbUZ5WTJncmFuZHpJaXdpY0hKdlptbHNaU0k2SW1GeVkyZ3RNU0lzSW1semN5STZJbUYzY3lJc0ltdHBaQ0k2SW1odVgyTTRNamx4YUdGNmRFeHNNVVJFZG5sRlZIWmxUREZFU2pkcFdHeG1SR2xQUlVKRGFGSktURmtpTENKalpYSjBhV1pwWTJGMFpTSTZJbVY1U21oaVIyTnBUMmxLUmxWNlNURk9hVWx6U1c1U05XTkRTVFpKYlVaNVdUSm5kR015Ykc1aWJWWjVTekp3TTJONVNYTkpia0o1WWpKYWNHSkhWV2xQYVVwb1kyMU9iMHhVUldsTVEwcHdZek5OYVU5cFNtaGtNMDFwVEVOS2NtRlhVV2xQYVVwelkwTXhibEV5TlVkVmVtaDBVekIwV1ZNelVqWldiVEZQWTJwb2FGZFdiREJqTVVJeVQxZFdRazFyVVRCVldHaFJXbnBDYTJNeU1EUkpiakF1WlhsS2NXUXljMmxQYm5OcFlUTlNOVWxxYjJsU1ZVMXBURU5LYW1OdVdXbFBhVXBSVEZSSk1VNXBTWE5KYm1kcFQybEthRmxYZUZWVVYzaHZVVzFrYUU5RVpIRlVNMHAwVGpKbk5WUlVSakJOU0ZaMVVrVTRlVmxYU2t4aVZVcHFWVmhhYjFSR1VsVmlSRlpTU1dsM2FXVlRTVFpKYm1SVVRqSm9ZV1ZxVmxsT1dHUldUVzFzZWxKSVNYZFdSMDU0VG1wQ1ZXUXdXa1JUYkdRMVRtNVdiMVpHUmxkUFZYaHlVek53YTJGc1ZXbE1RMG94WXpKVmFVOXBTbnBoVjJOcFRFTkthR0pIWTJsUGFVcEdWWHBKTVU1cFNYTkpiWFJ3V2tOSk5rbHRhSFZZTWswMFRXcHNlR0ZIUmpaa1JYaHpUVlZTUldSdWJFWldTRnBzVkVSR1JWTnFaSEJYUjNodFVrZHNVRkpWU2tSaFJrcExWRVpyYVdaVGQybGpTRXAyWkcxc2ExcFlTbnBKYW5CaVNXMDVhR0ZUU21STVEwb3pZMjFzTUZwV09XMWpiVGwwU1dwdmVFNTZhekJPYW1zeFRucFZkMHhEU2pOamJXd3dXbFk1TVdKdVVuQmlRMGsyVFZSak5VNUVZelJOYWtVeFRVTjNhV050Vm1oYVJqa3hZbTVTY0dKRFNUWk5WR2MwVDFSak1FMUVaM2ROU0RBdVRWWkVWMUYxWmpoUVRrRTBkMUZpYjNFeVVtSnpZbFZFYVUxRVFubGljRTVvYVVOVWVYcGlUemRsV21WQmNXeDZRelZIU3pCNVNtbGtlVnBZVFRJNVJrTlNWRFJOVEVWaU1GaHZWRE4wV2pOc05WTkZUVUVpTENKcGMzTmZiV1YwWVNJNmV5SnliM1YwYVc1bklqb2lTVUZFT0NKOWZRLmV5SndjbTkwWldOMFpXUWlPaUpsZVVwcFkyMUdkVmt5YUdaaFYxRnBUMmxLVUdJeWJGSlZNMXB1VFRGU00yRXdNWFZSYlZZMFdtdFdTVTE1TVVKSmFYZHBZekpHYzJSRFNUWkpibWhMVjFoYVRWSXdTbnBOTURGeFkwWTRNazVZY0d4U1NGSlJXV3BDUjFJd1VqTlVSbHBxWWtkb1RsSlZPVE5qYTNoSVRsWmFlV0ZIT0dsTVEwcHFZakkxTUZwWE5UQllNalYyWW0xT2JFbHFiMmxWVlU1cVVrZEtlR1ZZVlhwUFJtUTBXV2t3ZDFKRFNYTkpia3BzV1RKc2QyRlhWblZrU0UxcFQyeDBOMGx1UW5OWldGSnRZak5LZEVscWIybFpXR1I2U1dsM2FXRXliR3RKYW05cFZHdFNSMUZyV25OaFJVcHNZbGN3ZWs5RE1XMVVla0pKVlVoS1JXUXdjM1JPVkZaTlpXdFdVazVYVm5CVk0wWjZWVVphVEdKRlVrVmhlVWx6U1cxV2RWa3pTalZqU0ZKc1drWTVhV050Um5WWk1tZHBUMmxLVEZJeWJFWmpiVkp2VkRGR2VtSlZWakZpUldScVpXdHNkVlJHYkhSWlZUbFpVbXhLV21ORk1VcFRSRXBtWTBWT2FsZEZNVXBUUkdoeFRrUldWbVZJWkZoUlZsSkxZakZTV2xGck5UQmlXR3hzWVZSV2VGZEdielJrVnpoNFVXcENjR05GU2xoWmJUVTFWVEI0V1dSc2NHOVRSbkJLVjJ4bk5GbDZXazFSTVZaRFdXMVNlbFZYYURWT2FscE5UakZHVGxZemNFeFhSemx2WkcwMGRFNUZUbmxsV0c5NlVsZFdTMlJZYURWYVdFVXhVbGhXY1dONlNuVk5NMEpTVFVWM2RHTlhXVEZUYkVZMVdEQlpNazVFWkVwWk1teE9VV3BTVTFScVp6UllNVTVJVDFoR2JsSXdWbWhqUkVJelVWVnpNV0Y2VW1wUk1sbDBWRlpTUlV4VmNGTmhWRVp6VTBoR2MxSlVhSHBOUjFwRFkyMVNVRTFZVlRSVFNFWnBZakZDYTJWWVJsSmFSV2gyWTIxd2NsZFdTbWhUUmxaaFdWZFNTbUpJYkdwUFZFcEpVVlpDYWxSVlpEVmlibEY2VGtWR1dGZEdTbGxSYW1kMFUwVTFiVlpXUmtoamEyaDNaV3R3VTFSdVZuRlNSMmhNVGpKS1ZVOVZkREppU0U1d1pWUnNTMkZWT1c5VGJUbFBVbGRvVVdGdFdsWlhSbHAwVWtWSmQySXpRa2RsYTNCNFdWWkdjR1J0TVVSaVJWWjZWakpHYkZZelFUQlZhMnhOVXpKc1dWWldTbUZTYlVwU1lVVldVV0ZWVlRCa1ZGcFpZMVpzVG1Kc1VsaGFNbWh4VVd4Qk1GUkZOVEZsVjBVelpWY3hUMlZwTVhkT1JUQjVVMGhvZDFKdFpHeGtNRXBaVVd0d1JXVnJiSFZWYkRrd1QxZHZNMDVVWXpCT1JXeDJUa2QwYWsxdE1URmhTR2hoWkZWT2JGRnVSbGhoYmtwMVQwWkdiR1JYZUZCV1NGSjFVV3RTU2s1dGJ6RlJibXhDVlVWYWNtRlVaSGxoUjFKSVdqQmFSbFpwTURSaVYxSnVVMWRrVEZaSVVrdGpla0pzVjBVME5HSnVRbXhYYmtFeVZFYzVTRlZJUmpCUmExSXlUMFZyZDFsc2NGUmtSa0l5VDFoT1RGbFhNRE5YUjAwd1QxVk5NR1JyT1ZOTk0xcHFaVU5LT1ZoWU1DSXNJbU5wY0dobGNuUmxlSFFpT2lKTlNGOHRiM0kzV2xCeWNEUkRXSFpYYWpFeFJVSmZjMkpoT0Zwc1JHWTBTRmhyYVVwcVF6a3dXWGxVVjBOVVN6UkpRM1UxTjFWeGFrMXVSbVJyY2pSNFJGcHJaRVp0ZFVsaVNFZzFlWFl3YURGdlpWcEhhVk5hVVdNMmMwNUZjbDkxYUVSQ1VGQmxNM1IwUW1KNWJsZDBVMHRMUjJkM2VqbDZVM0ZTVFdnM2FsUlZjbkJGT0ZaTE1UaFdNMEpaYmxwUlFtTmZWVGxXWVRWYU5GZE5jRFZmV1RsTlVtYzJhVFp1WmpZeFkzUm5XRU5EU1cxelRGSmZkbTltZERsR1pVeDFObXg2UWtWZmJVbFdUQzFVTUVGb1ZFRk5URmhEWkdjNVVFZGhlVTAwT1ZkTExXMUtjblp3YTI5SGFUZEJiRUowTm00eWRXbGlOVEIwWm1NMmVIcG5SVlJqZUY5eGFESXpNR2t3YmxZMFMzcE9NWGQ1YW13d1RscDNkUzAwVlVoNE16ZDJkMGt5UTBJMGRsSkJVbVV6WmtNMlJ5MDJSbXh2WVdaNk1GOTBVRkp5VVV3d09UYzBSV2hhUkhoeFMyRjJNbVpaVUVsdE9XRm9kV1JKTUhWdU0wdHZlRTlRVTJNNWJIQXhiSFZZTFhacVRFTnhjRmxuZFUwek4zVnRRamQzZGs1U1ptNUxXaTFKYUdGUVltSTRVVmh3YW5sM1VUSmhWazh3VFMxTFN6aFJkVk5CVWpaV2NrMTRlbVIxUVVSc1dYWk1NVGxmWW5aclZtTlBSRWxRY1VwWWR6QkxhRzkxYmkwMVREWTROVXhpYmxKVVJVZzBNbGgzYTBsUmJIZGFMVTFYVEMxTU1qVldVR1ZMYkZoSWFFNUNZbmxXY0dSUmNGWlBVbkpTVTI5ZlNscFBkamhSTnpGWFNWSlpVMk5MWmpoQmRYbGljM0ZmVlVkTE0xb3hZVzkxT0RGMVRXaDBTRkJrY1VKUU1FNTBNbUpUTkVOMlpFOTNaV013Y2tsellVMW9hazFVZG1KMlVFUkVXV0ZYVm01U1JGRnROVlJPY2tKc2MwWklSM2hwZVdWWVUyRXljVVJTU0dsVldIZEVUblptVDNKelQwTlpXbGQxUVdJM1NrWlZaVEp5VEY5TWNFNHpTVkJOWlRaQlZHZHhNVTFyWVdaVVJqQlVVV05vZG5ZNVJGSlpOVEU1U2taRlNrNUhSM1JEZVhnM1lYcElZemhpYUUxMlExTTFhaTFUV1c5d2EydGlVMmxmZFd0a09FUlZSMXBpVkZvMVkxaEhaRTFrVFVwclJsOVNjR1J3WlVsdFJFVldUMDR3VTJWSlFYaExWSEZMWWpkMlREa3hWRlJxU1Y5RFMwcERZMnBaTnpsNlJWbGxPVEV3T1VocVF6azBiemhCYlV3eVZVRnFWMnhTZVd0NU9GcE5XR2hIUlVOWFMzRlljVzkwUmxCVVQxcFVWM0Y2TWpkWVNVMUlXall3WWtWUk1ubFlRV2xJUVV0dWNHcFpSV3hTYUhsbVVXTkxlRlpWWlZGRU9IZzJVR3RyWXpZNVVHOW1ZakI2YVVkMlZXUTVXRVZFZUZwMkxUTXhkbFpOZDBWUmNtUlVNSEY2TkVWM1NuZE1SbFowYlRCWGIyWndaemR5TjBVNGJEWmFZbXc1YTNBNVlsaGxOMWd6Wm5STFUyVTFRa2ROZG10U1ZUaFlSazB3YkhBdFJVOUNUVE5QVTJSak5EWnJZblpFTlhoWWFWWkliREJYUVhCR1VUUklNbGx4Y21wRWVFZzVNM05XYUhCSU1uSkpjSFJ6YWs4NWFGRjZVRGhOZFRGVGRtMTJPWEZXT0hneVVYVlZPVXQzWTFJNU5YbFRhRlZ4U1RBd2RFeGZWMFpVV1V3dFZsUjRXSGw0VVdGVlJub3hjRTlsWHpKVk5ERXhTVTFrWDJjM1JHaHRlV1JqY2xWdWFqRm1TRnBLTVVZMmNHdG5hRkZtV1VSTWMxZG5XbkZGVTFWcVFUQkhkMG8xZUd0eE1FVjNRMnBHTmtGdGN6aGtTM1JSZDB4dmVUaFllbGsyTm5ORWRrdGxUazR3TkdkdVZqaDJjRWM1YkhKblUyUmtMVFZyTkhsWFdXcHlhak42ZUZoeWVtVmtWREJsZUcxSmRVMW1RWEpxT1RSeFQwUkdlbmd5Y0dWM1dUQXdXa2MwVVc0d016SmFZVmxJTmkxYWRWVlJZV1ZIUTFaSFdrRnNRM2MzTUVoWlpXbEVORWx2UWpOT1FWVjBUSFpTTFZWbFFteEZRVVkyZW5oSFZUVnBXVWQ2YTFsM2IwTmxSMlIzYkdsNGQyVTBRbGhaY1ZOR1NYaDFUemx2TFZKcVNEUllOMDUzZDNjNFYwSnpTR2RYWWxoclFTMXdOR0pCUVVOVE1GQXdabFJCYzNweVFtRmFWMWszTW05WU1IcHZMVzVPYzBWWGJGWlFWa2xEVlhaaWRsbFBkMWRoWDA0ek9YazBTVUpSTjBGMFpHVmxaa3hDY21kRlpqbHRibGhUV0RWT2FqTTBlVlJWYVRod2RrNWpOMlJQT1RoRWJIWnhPVEJLVlZORFJscENWR2RNUTBGRmFqZEdRVlJQYkZGQ01VbHFTRXRUU2psWGJtZHZjVVIzVDBSTVQyMUhZa2xCWjJ0NldFa3pRazFxYkZobWVuRldiRGgwYjBNM1RrUktMVkZzU0d0T1gwNXFPRUpyY1hCb1lVNVJVbmRPV1RJNVJUWjRUR0V3Y2tsd09GUnBkbEZNUXkwM1JFdEZlbHBQWTJaZmJsY3paVnB5U25SeVRXcE1lbFpYWXkxUFpuWlpTMmg0YTJOVGRXSmFaRWRWZGtabWJrMVZXbE5yV1VKc1prTnRTa3AyUzBKek1VRXRjQzE1ZG1GMGRFY3dlRXN0UWtsMVQwaDZSMWxCUW1wV1VqRm1MVmx6VVU1b1FXaG5ZMTlvT0RGR2NtaEZTeTB0TFZocFZEaGtUamt6Y2pSTGRUQkNNMnhKYjA1a2NYSnFiRVpKUzJsdFNVa3haMTlHUmt0c1lrTnBORmxFZGkwdGFIZEZUVUpJTUVwNk9XOHlWSFpUUnpSTmNqZEZWRU51ZG1sWmJUSjRNa3A1WWxKTGF6RmFPVUpLTUZKWmQycHZOREJKVWxCeU1rcFBiSGg2VFZaelYyb3hOWG93U2swNWEzRjVWMmhtU2tkdU1USjNaVnB1YmxWUU5FWXRUekJUVkZsVVVFODJZVk53Wkd0RWVIUkZXSGx3TVV4aWEycGlNM0ZuYkVzd09FcGlNWGRLV0UxRlFVNW9iV0ZCWmswM1ZIZ3hWVUpCVjFCdWQzTlJiMWM0V1ZOSmJVOVhiVFJvY21WQmR6QmFhM2RQYm1OdFpEaEpkMkV6YzNZM1RtSTNTMnAzV25oRmQySlhObkkxT1dKbmIwVmxhMGhXYkRWS2NYbDBWWEJ1U2xnMlUzRnFRMkZtUlZBM01FWlZiSEJpZWpnNFNETjZkV0ZqUlZobmFqSnpVR2hXYWpKaVkzUlZVVEY1YWpCbE5uVnBWV3RYVDJsMVJFbEVhMmRhZFVOdGNrdEtkMlU1UzB4TFNuSmpVa0ZqT0V0T05YTnRabVpPWkVkeU9VbEtUazR6Y1ZoQ1ZERk5jbXRCZDJoVVoyZFJSbTlHTTBSa1RFVkVRVGxMTUZwek5ucG9aRU52Y1hOS1JXcE5NR2c0Y2xacE4xSTBYekk0TVVGWFR6QTRjVFpxT1Y5M1UyZFBWVXRHU21sR1RqWjNXRE5LVEVGbk1VeG9OREEwVEZOTlZIRnhRMTl3UTAwd0xVTndWMjluTkZkcmVYQndRbEptWlU1bVJVOWpVbmRVTkd4MFpGRkNSVzV5TTJwcU5IVnZNbWd3VHpOWlZWVlBhR3htWVdOSU0yTnhUSFV4VTJveVRuUnVVWE0wYW10d1NqUTBMV2t5UWw5ZmJITjFXVGs1WlRsWlMybzRZbEYyTm1sMVRGSkVhVlZzTUd4NGJtZHhRV1JrYlVkMGRFeEVVVkk1ZFhKUlZHTllRVzkzVjNoaU9XTk1Sa0YyWVZZemRuSklhbmRvY0hFNWRXaHpjMGRSVDBOd1pWTmxNVFZ1TFVSMFV5MXJhR1ZTVkhOS0xWTjJVSEpRUkVWQmRIZFhZMDVYWVZJd1ZuWmFkRWRRVlVndFNVOXBXVkZQTFhrMFIxbGhhbXRyUVZaZlVGUkJOak5oTlZwcE5HMVNlQzFLUVRVNU9XSk1kRkJsTldwS2RFbDJlVEJMUzFBNVFUaHJUMkpZYzNWTlNrWTRNa1JrVlcxRVkwOXlUelpRUjJkS2FYUkVkbFZMTmtnemJsZEliM05vUWxONVQxRTJSMXBJTjBkaFFXUlJiVEJ5TFdWdWVuTnBTMGxZY25SQ1pHMDFPV0ZLWVVkMVQxWjVURVI0ZDI1eGJuQnpkRzVDT1RoS1F6RndOM0l5T0VkQlJ6RXpkMHBpT1d4cE5WZEtWM1Z3V0Uwek9XbDFTM2QwV1habWJWbHBVRXB4WTBoUVkxcGpkbFppV2xObU5YaFRUV2hMYWxsbWVEVk5jV3N6VlRkMlJHSktTR1ZmUzFOUFUyeFdYMmR6WkZadGVFaElWV3hMWTNGZk1uTkRaemd0WVZFMU5tbDZRa1p6VERnMFpXUjZURUpWVkMxclltRkhOR0pRU25wQlYwaG1WRmhGUTB4RlpGZHlkRkpQTmtKM2R6VlRjRkJ2ZDJGeWNUbHdUVWhGZDAxd2JGVjRiVlJsZEc1WlRqRTJXRFZVU2s1Q2MyZHNiV2RyTTJFemFDMXdOWFJDUVMxbWFWZDZhVVZDT1dGUmRsVlhNR2hoVG1aelpWVjJZMFpWT0ZkRE0zQTJORlpWTWpodlRFVkNSVUZJYjNjMWJEZHVVbk40YjA5bU5sWmhaVGswUW10NmIxUkVNRlZxYzB0cFgzQXhUbFpXYUY5WldIRXpMVlJ2YUZoRVYzVlpkM2t4T0RCcU1WSk1OM05LYzFGeGNsSkJaV3BPVmxaTE9HZEJiMWxQYzJ3MU1GZDFiVlJqVnkxMlpGOUNPVk10U1dkYWNIaElXVGRPUzI5Q1dtcG5kMkZ4UjJGVFgzbFhhMHRPWm1SeVFVWnVVMXBOY2padlMzcERORWRRY2toR1VFSmpOME15TTBwd1JtUnZSVGxxZGxCUWFYSTJNR2x0VTA1elRXdFhSWFpOUmtwVFZYbHhkbmxXV2tKR1ptTnVkRk4zT1ZCTk1WVlFUWFpUYm5WeFUwdE1OVFJDTkROaFNuZERVR0kyU1UxTk4xVm5hMjkyTXpaaE5FOHhPV1JrZVVKdWFVaDFlRWxMZEU1dFYzVnVVV2RLZG1oWE4xUjZWamQwZFc5QkluMC4xZE9vcVBIMVhfUXR2bEZLX253bUVDcVdwdV9wNU1KY1Z3VHUxSDV4ME5HWHU3N3o3NjY4WXZ4Ujl2NUsxMFg5a3VwUm5KWFdIZV9jNk1RYU5aVWJ1Zw=="
+           }
+          },
+          {
+           "text": "Both lookups returned errors, so I couldn\u2019t retrieve or summarize alpha and beta."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 910
+       },
+       "usage": {
+        "inputTokens": 144,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 42,
+        "totalTokens": 186
+       }
+      },
+      "outputTokenCount": 42
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:27:55Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "743985df-eb8d-5b95-93d6-c093b9c76951",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "84bc6d30-e778-48f6-a2ab-e3d500679b5e",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "4b6acb94-fec6-40c0-9ba1-a0288859b3d1"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 57,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "call_9c7efd10a63c5a69b45ca5e7b1d7cda7",
+            "name": "lookup",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_19450707a35e512d8d8a23201a66174c",
+            "name": "lookup",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 967
+       },
+       "usage": {
+        "inputTokens": 57,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 46,
+        "totalTokens": 103
+       }
+      },
+      "outputTokenCount": 46
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132823463Z_1b4da8dcadec4406.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:52Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "162ec34a-173e-5daf-bcfe-5c6630d8b783",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "621aa7ba-7465-41f9-b659-b54aec67a7d7",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "0ece05f2-aca6-4ade-b834-0e6886b3beaa"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "call_edc5e6059c26504993573e0dd31f9686",
+            "name": "lookup",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_f6d3d2d0e7c45bb48b3f6ef8d64eaf20",
+            "name": "lookup",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "call_edc5e6059c26504993573e0dd31f9686",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "call_f6d3d2d0e7c45bb48b3f6ef8d64eaf20",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 129,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "text": "- **Alpha:** fixture-value-42\n- **Beta:** fixture-value-42\n\nBoth returned the same value."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 868
+       },
+       "usage": {
+        "inputTokens": 129,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 28,
+        "totalTokens": 157
+       }
+      },
+      "outputTokenCount": 28
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132825826Z_2f147e75de9ee193.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:43Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "dc5d6c70-737e-5665-9e6f-1eb72e2964ce",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "a30888a8-1ec8-4372-aabe-b2ccc434df38",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "88846c99-0276-464b-ac23-4c532fb75b62"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 511,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_6D4BGeGubkGhTMDUxrVuvh",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_nDmoHTdcSQe8X5eMFEFioC",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1171
+       },
+       "usage": {
+        "inputTokens": 511,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 84,
+        "totalTokens": 595
+       }
+      },
+      "outputTokenCount": 84
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:27:44Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "3f6e0f42-c945-51ff-bf6c-b987912eba5b",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "a30888a8-1ec8-4372-aabe-b2ccc434df38",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "88846c99-0276-464b-ac23-4c532fb75b62"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_6D4BGeGubkGhTMDUxrVuvh",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_nDmoHTdcSQe8X5eMFEFioC",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_6D4BGeGubkGhTMDUxrVuvh",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_nDmoHTdcSQe8X5eMFEFioC",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 555,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSogQKEggTEAEYAjgBQgh0aGlua2luZxIMi7yV/kCmHJHXU18DGgyla4An/9n9PbtHOp8iMJMKjEIvF4bjTHMIohGXfqySz+GdGe3mjB2bBd1m5rz6T17xgZzSj1BhehRVNsQG8Cq9AwACELACXZupfv66nfD7FEfP5Bkj4jbqByDkEJktMYVA5QBhGZDNQsfb0XUP9MLH06PAQsyXpq6khUo1FkkxpOQtAKvTmXBTUGTjd619SNzrnZ34Pg51rdWuHR7FqSPsTPNA3t3jpz0vgewPxNz7qZBaRKC6JW6eWBHay2/GW//0OHOwG2c877NVhmSVWw0MTlimyswygFHvdIiNaB4njUUAKsu9CbzLsTqn2criTqLqIgNtnWCHlvTFSj8pCpA7gabn1UIaoLSD9uhp6+Kog/nrAF49iC3rqv/2LH+GUi8aItc5z8I3maiTjSSW6fQJaUZCpnwQrimn0c/dQteyeDFnDcO52cBFeQEkEQQS2vc76aqZiuQRlrPJnPFT0evuLxjUVlkVIO5LZgRhYupfuevo9QSR0wm2xs1tUUbHsvbysfwvYa6EkXgf2zh4e6Om2Zzx7UeMPPz29Bij9SjBrLD5BFqHxHicWFNRImLyaAY3lG/jq1z74G7Ay5QxVcdlv+DwsNhitqIRE6ndJ4Q0i8Z6TMkzMkdyixDpBftLJZiHfXjZuM3SauzEylFJ6fcSWYPPWhEpGCUh8kWAh+sYAQ=="
+            }
+           }
+          },
+          {
+           "text": "Both lookups returned the same value, `fixture-value-42`:\n\n- **alpha:** `fixture-value-42`\n- **beta:** `fixture-value-42`\n\nThe two keys are indistinguishable in this result. The value looks like a placeholder, so the lookup may be returning fixture data rather than real values for these keys."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1570
+       },
+       "usage": {
+        "inputTokens": 555,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 134,
+        "totalTokens": 689
+       }
+      },
+      "outputTokenCount": 134
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132831100Z_29fcce86d36d7873.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:51Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "4a914b70-496e-517a-bf2b-34ef1ab6ff51",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "621aa7ba-7465-41f9-b659-b54aec67a7d7",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "0ece05f2-aca6-4ade-b834-0e6886b3beaa"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 57,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "call_edc5e6059c26504993573e0dd31f9686",
+            "name": "lookup",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_f6d3d2d0e7c45bb48b3f6ef8d64eaf20",
+            "name": "lookup",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 828
+       },
+       "usage": {
+        "inputTokens": 57,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 46,
+        "totalTokens": 103
+       }
+      },
+      "outputTokenCount": 46
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132836780Z_9c942c25779c84ed.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:27:50Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "9a2b2565-575b-5a2b-9344-3ea865c7a163",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "a8a97a21-7483-46db-871b-17ed5ac0f253",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "8911bb3e-087e-437d-b042-56e3f979fcd1"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 511,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_vTOvSlWwwVr7ForB0hpwPm",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_RNpAuXM7N4VTd5GmRXExcy",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1185
+       },
+       "usage": {
+        "inputTokens": 511,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 84,
+        "totalTokens": 595
+       }
+      },
+      "outputTokenCount": 84
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    },
+    {
+     "timestamp": "2026-11-01T13:27:53Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "7a8b691e-58e0-544b-881c-7e79147e37d4",
+     "operation": "Converse",
+     "modelId": "global.openai.gpt-6.1-terra",
+     "requestMetadata": {
+      "interaction_id": "e0b890f4-b02e-4afb-a6c1-c81df9c6fb8a",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "tools",
+      "conversation_id": "df8ca2f3-53a5-4005-a6f5-bb2d3d359b0b"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 57,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "redactedContent": "cnNuX2V5SmhiR2NpT2lKRlV6STFOaUlzSW5SNWNDSTZJbUZ5WTJncmFuZHpJaXdpY0hKdlptbHNaU0k2SW1GeVkyZ3RNU0lzSW1semN5STZJbUYzY3lJc0ltdHBaQ0k2SW10SWNYQlRaalZTVlZwcGNGUTBUbFZpUkc5U00xWnpTRUYxWlZSSGVHOXJlRFJITXpKMmVtTnVTMVVpTENKalpYSjBhV1pwWTJGMFpTSTZJbVY1U21oaVIyTnBUMmxLUmxWNlNURk9hVWx6U1c1U05XTkRTVFpKYlVaNVdUSm5kR015Ykc1aWJWWjVTekp3TTJONVNYTkpia0o1WWpKYWNHSkhWV2xQYVVwb1kyMU9iMHhVUldsTVEwcHdZek5OYVU5cFNtaGtNMDFwVEVOS2NtRlhVV2xQYVVwelkwTXhibEV5TlVkVmVtaDBVekIwV1ZNelVqWldiVEZQWTJwb2FGZFdiREJqTVVJeVQxZFdRazFyVVRCVldHaFJXbnBDYTJNeU1EUkpiakF1WlhsS2NXUXljMmxQYm5OcFlUTlNOVWxxYjJsU1ZVMXBURU5LYW1OdVdXbFBhVXBSVEZSSk1VNXBTWE5KYm1kcFQybEtjRTFWTkhwalZURlVVMFprTldWSFl6TlJXRUpJVWpCb1IxbFZWbHBVV0d4WVVUTnNXR05GT1hGaVdGSmFVMVpXYjFZd2NHcGhSMnhTU1dsM2FXVlRTVFpKYkRsV1RYcHNVbEV4U1hoa1YwWlFZMnBDTWxRd01VVlZNRXBPV2xoU2VtSllhRTlUVlVwT1RtMUdOVTVVVWtKbFNFWkVWVlZvZVUxV1ZXbE1RMG94WXpKVmFVOXBTbnBoVjJOcFRFTkthR0pIWTJsUGFVcEdWWHBKTVU1cFNYTkpiWFJ3V2tOSk5rbHRkRWxqV0VKVVdtcFdVMVpXY0hCalJsRXdWR3hXYVZKSE9WTk5NVnA2VTBWR01WcFdVa2hsUnpseVpVUlNTRTE2U2pKbGJVNTFVekZWYVdaVGQybGpTRXAyWkcxc2ExcFlTbnBKYW5CaVNXMDVhR0ZUU21STVEwb3pZMjFzTUZwV09XMWpiVGwwU1dwdmVFNTZhekJPYW1zeFRXcE5ORXhEU2pOamJXd3dXbFk1TVdKdVVuQmlRMGsyVFZSak5VNUVZelJOVkZsNlQwTjNhV050Vm1oYVJqa3hZbTVTY0dKRFNUWk5WR2MwVDFSak1FMUVaM2ROU0RBdWNYWTVOa1J0U3pWME4zaFVOMGQ1TjNWbVFsQlVUbWh1UTBoNWIySjVjV2RZUVVkWmNrSnZiRnBtTjI1NGFVbEVTMXBIVEVkTWVEVkhObWx3V0hoZlVsVmFiVXA0YmpONVNHdGhkVkZRT1U5YVptVkRPSGNpTENKcGMzTmZiV1YwWVNJNmV5SnliM1YwYVc1bklqb2lTVUZFT0NKOWZRLmV5SndjbTkwWldOMFpXUWlPaUpsZVVwcFkyMUdkVmt5YUdaaFYxRnBUMmxLVUdJeWJGSlZNMXB1VFRGU00yRXdNWFZSYlZZMFdtdFdTVTE1TVVKSmFYZHBZekpHYzJSRFNUWkphbWgyVWtSb1ZtRkZhRmxhVkd4TVpXcG9SMWxXU2pGVWJYUlRVMjVuZWxveVNsZFhTRnBXV1Zka2NWRlViRkZSTTJ4NFpFVndkMlF4VldsTVEwcHFZakkxTUZwWE5UQllNalYyWW0xT2JFbHFiMmxWYm14RlkycEJNR1JWZEhSTk1qbHFWbFp3YmxOcFNYTkpia3BzV1RKc2QyRlhWblZrU0UxcFQyeDBOMGx1UW5OWldGSnRZak5LZEVscWIybFpXR1I2U1dsM2FXRXliR3RKYW05cFZHdFNSMUZyV25OaFJVcHNZbGN3ZWs5RE1XMVVla0pKVlVoS1JXUXdjM1JPVkZaTlpXdFdVazVYVm5CVk0wWjZWVVphVEdKRlVrVmhlVWx6U1cxV2RWa3pTalZqU0ZKc1drWTVhV050Um5WWk1tZHBUMmxLVEZJeWJFWmpiVkp2VkRGR2VtSlZWakZpUldScVpXdHNkVlJHYkhSWlZUbFpVbXhLV21ORk1VcFRSRXBtWTBWT2FsZEZNVXBUUkdoeFRrUldWbVZJWkZoUlZsSkxZakZTV2xGck5UQmlXR3hzWVZSV2VGZEdielJrVnpoNFVXcENjR05GU2xoWmJUVTFWVEI0V1dSc2NHOVRSbkJLVjJ4bk5GbDZXazFSTVZaRFdXMVNlbFZYYURWT2FscE5UakZHVGxZemNFeFhSemx2WkcwMGRFNUZUbmxsV0c5NlVsZFdTMlJZYURWYVdFVXhVbGhXY1dONlNuVk5NMEpTVFVWM2RHTlhXVEZUYkVZMVdEQlpNazVFWkVwWk1teE9VV3BTVTFScVp6UllNVTVJVDFoR2JsSXdWbWhqUkVJelVWVnpNV0Y2VW1wUk1sbDBWRlpTUlV4VmNGTmhWRVp6VTBoR2MxSlVhSHBOUjFwRFkyMVNVRTFZVlRSVFNFWnBZakZDYTJWWVJsSmFSV2gyWTIxd2NsZFdTbWhUUmxaaFdWZFNTbUpJYkdwUFZFcEpVVlpDYWxSVlpEVmlibEY2VGtWR1dGZEdTbGxSYW1kMFUwVTFiVlpXUmtoamEyaDNaV3R3VTFSdVZuRlNSMmhNVGpKS1ZVOVZkREppU0U1d1pWUnNTMkZWT1c5VGJUbFBVbGRvVVdGdFdsWlhSbHAwVWtWSmQySXpRa2RsYTNCNFdWWkdjR1J0TVVSaVJWWjZWakpHYkZZelFUQlZhMnhOVXpKc1dWWldTbUZTYlVwU1lVVldVV0ZWVlRCa1ZGcFpZMVpzVG1Kc1VsaGFNbWh4VVd4Qk1GUkZOVEZsVjBVelpWY3hUMlZwTVhkT1JUQjVVMGhvZDFKdFpHeGtNRXBaVVd0d1JXVnJiSFZWYkRrd1QxZHZNMDVVWXpCT1JXeDJUa2QwYWsxdE1URmhTR2hoWkZWT2JGRnVSbGhoYmtwMVQwWkdiR1JYZUZCV1NGSjFVV3RTU2s1dGJ6RlJibXhDVlVWYWNtRlVaSGxoUjFKSVdqQmFSbFpwTURSaVYxSnVVMWRrVEZaSVVrdGpla0pzVjBVME5HSnVRbXhYYmtFeVZFYzVTRlZJUmpCUmExSXlUMFZyZDFsc2NGUmtSa0l5VDFoT1RGbFhNRE5YUjAwd1QxVk5NR1JyT1ZOTk0xcHFaVU5LT1ZoWU1DSXNJbU5wY0dobGNuUmxlSFFpT2lKbFdrcEplbTVNZDBORVRWOUtja3BIYWt0YWIwcDBiMHh0YVZabFdqVlJWMVJyUTJGdGRqVTVhVFE0ZWt4RVZIcERUSGxyYmxRd1VXSk5iRE50VEhsbFowOVJSMWhrYzBSNFZXRjJOWE5vTkV3emMyaFpiMmRJUnpWSldFdzRXRGxvVlZWVFNFbGFhVGs0U0VaVVNITXhSa2x3UTNFNFJsRmxRMlpyU2pWUGNtTmtjVTVrTVZsWWIzRkpTalJzVHpsc2QwaEJOVU5zU1dGaVF6TXdka2x6Y2psSFdGVlFXbXh5VHpOaGJHbzBUMDgwUzBwdE5sa3hZVGg2ZGtoRVJ6WTBORkZRTFVKTFpIWXlSMmh3WlZGVFRXeFhUREJwYmswMlVGSnNNMnBOTm05SWJUaElkbTk2U25wTkxXdFZaMDlpWjFkTFZXOXBkMHN0UlVGd1pURkpZbU5yUVZSS04zWm1MV1ZTZW1SUGJuQmtkM0ZxZERaVE9XSlNiemg2VW1oMWJETjZObmRrWkhSM2NWaDVWazh0TkhKTFNuRkhNVWszVVY5NE5UWmthbFI0WjA5c2RGQXhjR3AxWDBkRlRXOUJlVmhUVGtsTVJUQjNURGxxWVZkUU1XMDVPVnBGVGpOdWRrUlNjbFU1UkZwcFZWRTNTbUp3TW1kMlYwRnpSMU5ZUzNSRWRVTndWVzlaWmxSS2ExTlNjMlJDVmtaTmNWVTVOVWRuVkVFMUxUVlVSR3hPU2twMFNXTXROVzlpUWxOVWVqUTVkRnBKWjFOV1JHcFpaMUpQY0ZCUU5GTnZNVzlLY0c1a0xXOXRXVFZmYTBwQlJVbERUSGx0TTFaMGVsbExRbkJyTW5neE5XZDBWM1JoUVhsUFEydEZZMU5PZHkxWE1uaElaUzAwVW1WRlVWQXdiR2hTU0dSRFRXMTRXVnA2UzJOTmVrbHViREJrZGtWbVEzaDRjMVIzV205U2RFbHFWVFY1YzFCM1N6Sm5jMU10TmtKUGFYZG1lRk53UW5SeVJFVkpSblpNTkVKbFQyOVlVWEpsTkZsSWNrSmZVbEU0VVVaWFJUUnlkbXR2YlhGYWF6WmlWRXg1UVZSVmFrVjFZVzB0Vm5aa09YUXRTV0ZxY0ZWRGFGUnNjMDlVWkdwclJETjFNbWRyV0V4a1FWOURNa1k1Y2pNM01VWjRkMFZJV0RGalQzZEROMFpIWW1sdmRqVlNMVmN0ZEc5WkxUaHNiaTFFUVVObWIySkVYM0JZUVRVNGJFMVllRE00U21sUE1HWnRaVVYxU0ZORU1WazBRWFk0ZDJZMVNFaHBZalZYY1hrdFJuVTVVVTlMWlUxdlFsWmtORkZLTUVjelRGcEZkMHR4WWpSbWRYZDNlWGhwUW1admNFNHRhRloxU0RscmNuZFlYMk5DU2xkaGNuUlBWbFYyY0ZGd2FHMDFXUzFZZGxWSVZUZ3dhVzlUUVRSdGJFNTRjbVp6TFV4WFR5MWllVFo2ZUROYWMzZEdjRGREZFUwM1ZUWnJTalppV0d0RVgwMVJlVmx6UVdSRFlWTkNRakZzU21aT1psUnNWM1Y1U0RkRmExRTRaVnBzVGxWc1IyMUNibFI1VjBJek5UQkdkRlJZWW5FMU1VNW9PV2hsVWpObk5XSm5kR0pJVVZGMGNHZEdiRE50U1hSVlNWVTRhakI1VUU0MGJFVjBhMjVTVTB0M1VESnZiVXR3VVRVMlVrRnlVVkpGYmxoUE1reDRia1ZVTUZRd05YWklTVU56UjNsRFNrSjBiR055T1RCeFFWRTBVV3B4VGpCSFdGRnBhV1pFYTJSMFFWb3hWVEJrTWtOVVEweFlSMFJRVERSNVZrUXpObkZLTFdkdlRtTjJkbWh5UjI5SFNISlRNM1ZVYnpsU2RVY3hjek4yZFVwa1RVVXpTVzlRZGxGR2NsaFdSR0ZXZERWUmN6RnVZbGsxU21vd1RubE9aRkJWVW5sMWRXaFZPVUYzTW14WlkzbzBVVlZ4Wm5saWQwbElNMGxGVlRSc09GazBZbFJSUTNWYVJXOUhRbmhaVUcxVlQyZHJWa0pPVkhOcFprZFJTVXhOYjJWMmVHSlJhRUYyVkV4RGFUaGFaRVY2YWpCQ1ZHRmxUMGRmYVRScVQwNWhMWHBQV0V4bFpEUkJWVzVOVm1Rd1pIbzBZemROTld4SVJYUjZTak5SVUhwWlIyOUdTR3R3WXpNdFFtWjZXa2R0YVRsNWNsbFhUWHB6UWtsVVZHbHpVVTU2YXpKRmNFTm5kRnBGZWtkTFlpMXRkelptWjBWTmVFTTNORWR6UVdwU1dWZEdYMDA1WW1wMVprczJkMlpNVFdneE5GRmlTbVowUVhkUWVVRkxkRjl0VjFNNFdqaFdhekZHTW5BeWEyeEpMWEExUVZSUFkwMXBOekpPWld4ZlJqZGpTMU16T1Uxd1NtZHFiRzg0Y0VGUGRsTmFSVEJRYlVrdGVHNDVjRlJXYUVsQ1FqWTVXV2xMVUhVNWJUTTNkR1V4TjFoUFdscHJjRjh6V0VoUVVrTlhZbnB6Tm5OSFRtOXFOR3RrZDFWVmN6ZGFUekowWmw5SVNrMUNaVmcyU0hNNVoydE9OazlFV1d4cU1tOW5TR0paZEdKdVJWTnZUVVZ0WlRnelRrSlVSVmhtVm0xeE0wdGpiMUZFVGtwWVUzZ3hkMmhvZDFOQlZuVlNSRE14VVZwTFpHUm1kM1JpYnpOR1NscGhVWGRHTWxGbFQzUnpibnBVVEV0UlNFY3lNVmRKVEZkWVRtSXhURE5JV1dWVWFWODNaWFV4WDJoWVpFd3hWVzVQVERnek0yazJkR3hqZGpRMU1Fb3plVFpFYzBGSGFXSmtYMDFPVDJzeVVGSmtTbXgzWlUxRFNUWXpNR1kxVlZsR1dGWnlVekV4ZDBvek1ubzJVWE5KTVV3NVozWmlObGhxVEU5UWJqVkZPR1J1YlRsT1pUUjBiMkZCV0hWT1dWUXdaVlJZVDFndE9YcElWMUJFYUcwdFowTmxWVlJEVmtzNFJXdHhSVFZ2YVhjeldXdGpkQzF3ZFZNNE1YY3laak5sZHpZNVdGODBWRk5sU0hCdFdWVkdNM0JKUmxCVVJVZFZVMlkyY2tkTk1GbGtka2d3UVd0UWMyNUZSRTVNZEc5RGJIWTFZMUIxV1dscllXOTJlREV3YkU0MVJGTk9Zak00YUhsbU9HUjViVkpCZGtkWlV6VkxkVFJpUVNKOS5oRmZjZXpkeWk0YTJFSDVzT2JWQmg1M2FPVFMyTHFZY3FRTkxnMUo4UEJXdWFrb19hUlZHOHoxd2xoaGlsdmxuUXJPSHRGN2kwS3VISERDSmRoQ096Zw=="
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_950bea7785345ac49901c5369ba74a33",
+            "name": "lookup",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "call_ee21d51808ae5ad7986fc7d43d385d0f",
+            "name": "lookup",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 838
+       },
+       "usage": {
+        "inputTokens": 57,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 57,
+        "totalTokens": 114
+       }
+      },
+      "outputTokenCount": 57
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-east-1",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "88846c99-0276-464b-ac23-4c532fb75b62",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "Both lookups returned the same value, `fixture-value-42`:\n\n- **alpha:** `fixture-value-42`\n- **beta:** `fixture-value-42`\n\nThe two keys are indistinguishable in this result. The value looks like a placeholder, so the lookup may be returning fixture data rather than real values for these keys.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 1066,
+      "output_tokens": 218,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": [
+     "lookup",
+     "lookup"
+    ]
+   },
+   {
+    "conversation_id": "da103baa-5ed3-471b-a8be-c2df896aec81",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "On the retry, both lookups succeeded and returned the same value.\n\n- **alpha:** `fixture-value-42`\n- **beta:** `fixture-value-42`\n\nThe two keys returned identical values. The first attempt failed with a synthetic error for both, so I retried once.",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 1914,
+      "output_tokens": 424,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": [
+     "lookup",
+     "lookup",
+     "lookup",
+     "lookup"
+    ]
+   },
+   {
+    "conversation_id": "8911bb3e-087e-437d-b042-56e3f979fcd1",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 511,
+      "output_tokens": 84,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "0ece05f2-aca6-4ade-b834-0e6886b3beaa",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "- **Alpha:** fixture-value-42\n- **Beta:** fixture-value-42\n\nBoth returned the same value.",
+    "tokens": {
+     "gpt-6.1-terra": {
+      "input_tokens": 186,
+      "output_tokens": 74,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": [
+     "lookup",
+     "lookup"
+    ]
+   },
+   {
+    "conversation_id": "df8ca2f3-53a5-4005-a6f5-bb2d3d359b0b",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "Both lookups returned errors, so I couldn\u2019t retrieve or summarize alpha and beta.",
+    "tokens": {
+     "gpt-6.1-terra": {
+      "input_tokens": 201,
+      "output_tokens": 99,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": [
+     "lookup",
+     "lookup"
+    ]
+   },
+   {
+    "conversation_id": "4b6acb94-fec6-40c0-9ba1-a0288859b3d1",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "",
+    "tokens": {
+     "gpt-6.1-terra": {
+      "input_tokens": 57,
+      "output_tokens": 46,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 11,
+   "closed_idle": 6
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}

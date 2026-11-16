@@ -1,0 +1,324 @@
+{
+ "schema_version": 1,
+ "provenance": {
+  "kind": "sanitized_real",
+  "archive": "bedrock_runtime_cases.zip",
+  "source_case": "continuation",
+  "transformations": [
+   "Account id, bucket, caller ARN, request ids and provider message ids replaced with synthetic values.",
+   "Log timestamps and keys shifted by 14 days; delivery order and latencies preserved.",
+   "Long repeated filler text cut to 20 repetitions; token counters left as logged.",
+   "Prompts were written by the collection script; outputs are the models' real answers."
+  ]
+ },
+ "notes": "The tool result was sent 31 minutes after the tool request, past the 30 minute idle limit: the interaction closes on inactivity with an empty output and the late call is counted as calls_for_closed_interaction.",
+ "source": {
+  "account_id": "123456789012",
+  "region": "eu-north-1",
+  "bucket": "synthetic-bedrock-logs"
+ },
+ "run": {
+  "from_date": "2026-11-01T13:00:00+00:00",
+  "now": "2026-11-01T16:00:00+00:00"
+ },
+ "objects": [
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/13/20261101T132925818Z_290096218b77e2cf.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:28:35Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "f6639a4f-605f-5f97-b8f2-99af8f908f55",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "a2ca5102-f8f0-4c21-b6a9-aaba9e906147",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "continuation",
+      "conversation_id": "4ddf004c-7615-493a-b679-1dd69ab65a08"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ],
+        "toolChoice": {
+         "any": {}
+        }
+       }
+      },
+      "inputTokenCount": 511,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_qreqWZkbfXXJbVkTJX7jUH",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_rZUlP3xG5QAVtL4Cn9F8N3",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "stopReason": "tool_use",
+       "metrics": {
+        "latencyMs": 1476
+       },
+       "usage": {
+        "inputTokens": 511,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 84,
+        "totalTokens": 595
+       }
+      },
+      "outputTokenCount": 84
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  },
+  {
+   "key": "AWSLogs/123456789012/BedrockModelInvocationLogs/eu-north-1/2026/11/01/14/20261101T140011848Z_e43d0c33530733ee.json.gz",
+   "records": [
+    {
+     "timestamp": "2026-11-01T13:59:17Z",
+     "accountId": "123456789012",
+     "region": "eu-north-1",
+     "requestId": "91895715-e09e-5fae-882c-968847f981dc",
+     "operation": "Converse",
+     "modelId": "global.anthropic.claude-haiku-5-5",
+     "requestMetadata": {
+      "interaction_id": "a2ca5102-f8f0-4c21-b6a9-aaba9e906147",
+      "user_id": "fixture_d4165046263c_alice",
+      "scenario": "continuation",
+      "conversation_id": "4ddf004c-7615-493a-b679-1dd69ab65a08"
+     },
+     "input": {
+      "inputContentType": "application/json",
+      "inputBodyJson": {
+       "messages": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "text": "Use lookup twice to get alpha and beta. Then summarize both."
+          }
+         ]
+        },
+        {
+         "role": "assistant",
+         "content": [
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_qreqWZkbfXXJbVkTJX7jUH",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "alpha"
+            }
+           }
+          },
+          {
+           "toolUse": {
+            "toolUseId": "tooluse_rZUlP3xG5QAVtL4Cn9F8N3",
+            "name": "lookup",
+            "type": "tool_use",
+            "input": {
+             "key": "beta"
+            }
+           }
+          }
+         ]
+        },
+        {
+         "role": "user",
+         "content": [
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_qreqWZkbfXXJbVkTJX7jUH",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          },
+          {
+           "toolResult": {
+            "toolUseId": "tooluse_rZUlP3xG5QAVtL4Cn9F8N3",
+            "content": [
+             {
+              "text": "fixture-value-42"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       ],
+       "inferenceConfig": {
+        "maxTokens": 512
+       },
+       "toolConfig": {
+        "tools": [
+         {
+          "toolSpec": {
+           "name": "lookup",
+           "description": "Get a synthetic value for a named key.",
+           "inputSchema": {
+            "json": {
+             "type": "object",
+             "properties": {
+              "key": {
+               "type": "string"
+              }
+             },
+             "required": [
+              "key"
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "inputTokenCount": 555,
+      "cacheReadInputTokenCount": 0,
+      "cacheWriteInputTokenCount": 0
+     },
+     "output": {
+      "outputContentType": "application/json",
+      "outputBodyJson": {
+       "output": {
+        "message": {
+         "role": "assistant",
+         "content": [
+          {
+           "reasoningContent": {
+            "reasoningText": {
+             "text": "",
+             "signature": "CAQSxQQKEggTEAEYAjgBQgh0aGlua2luZxIM8Y92bkBpVfzqUfKYGgyKmw3N2mjYJ/+9avgiMHIU9zoXTcMDBuYKB+qYIXmWfFoEiavLFdceF0O5IaAVZOrxBkofViX9rdESoUGxtSrgA9kcO4fDl1LenPr7q6iRZng5xIPqBhPygYlml73d7zJNxZGwCX5RYGQa7Hjpe2oX5a/qeHzQvGuKqmHign9X3ntFUi/t9q2+ZDm8BYfnJpJ4mRaAjMoJocTXLq7qvYizyiZerayty155NM55IZ4HoTju+R/6CwYWziH0nY4lfNFNBEZVAB9cqclDYrphOpDcQiQ7PrNV7cggyi1aINxMZBR+u/ly9oVTo81XF/27wVjp1RSy026deXbiqxX+QJaAIEphFWzRFDRObP8uNzi3RvLJ6ygRbHb7gUHcd++y48j6HCF+VIKnbq04Cz7KgOtmqlcGiH5cdU3752GcTHBQ8KhnEsukI+ZRvUhQxhz2BUaJ2CN+1i5XkJUBxkovBcBm9FK1Xeua6jVdgdiWF1yLYM087FesOgYJDgxExosVvvaTnm5TlINMuqnRSb2jxkopgihdVJ4pqCh9LGDkDsW9Qh+4KqzSMs/WcqP01kCmbmSTCYrIjkywcpI86W0U6mAI5CJjAUApde3S6J0pY0hBmejIdZ4BXjjzAT+YSqFUwnaJX7mRRrh9vCWfVraqAE9uYvMMDl8tra9aC98LQ+TvtLxbNcMsYs/SvjXlnI2t8UYJfFIejEWExnTpQwFpDTDaAxgB"
+            }
+           }
+          },
+          {
+           "text": "Both lookups returned the same value, `fixture-value-42`.\n\n- **alpha:** `fixture-value-42`\n- **beta:** `fixture-value-42`\n\nThe identical results could mean the lookup returns placeholder data for any key, which \"fixture\" suggests. If you expected different values, it's worth checking the lookup source."
+          }
+         ]
+        }
+       },
+       "stopReason": "end_turn",
+       "metrics": {
+        "latencyMs": 1865
+       },
+       "usage": {
+        "inputTokens": 555,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 144,
+        "totalTokens": 699
+       }
+      },
+      "outputTokenCount": 144
+     },
+     "identity": {
+      "arn": "arn:aws:sts::123456789012:assumed-role/synthetic-role/synthetic-session"
+     },
+     "inferenceRegion": "us-west-2",
+     "schemaVersion": "1.0",
+     "schemaType": "ModelInvocationLog"
+    }
+   ]
+  }
+ ],
+ "bodies": [],
+ "expected": {
+  "interactions": [
+   {
+    "conversation_id": "4ddf004c-7615-493a-b679-1dd69ab65a08",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Use lookup twice to get alpha and beta. Then summarize both.",
+    "output": "",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 511,
+      "output_tokens": 84,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   }
+  ],
+  "grouping": {
+   "accepted": 1,
+   "calls_for_closed_interaction": 1,
+   "closed_idle": 1
+  },
+  "records_skipped": {},
+  "interactions_skipped": {},
+  "open_interactions": 0
+ }
+}
