@@ -97,7 +97,7 @@ def _ts(value: datetime) -> str:
 class RuntimeState(Store):
     LABEL = "runtime"
     APPLICATION_ID = 0x42525431
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 1
 
     def __init__(
         self,

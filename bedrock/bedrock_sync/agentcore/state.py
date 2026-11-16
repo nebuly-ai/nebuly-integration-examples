@@ -131,7 +131,7 @@ def _receipt(values: tuple[object, ...]) -> str:
 class AgentCoreState(Store):
     LABEL = "AgentCore"
     APPLICATION_ID = 0x41474331
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 1
 
     def __init__(
         self,
