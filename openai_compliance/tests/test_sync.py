@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import types
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -36,6 +37,7 @@ def _config(
     sources: tuple[str, ...] = ("chats",),
     codex_cost_wait_hours: int = 4,
     interaction_idle_minutes: int = 30,
+    csv_export: bool = False,
 ) -> Config:
     return Config(
         nebuly_api_key="nebuly-key",
@@ -54,6 +56,8 @@ def _config(
         interaction_idle_minutes=interaction_idle_minutes,
         codex_cost_wait_hours=codex_cost_wait_hours,
         entra_directory=None,
+        csv_export=csv_export,
+        csv_export_path=tmp_path / "interactions.csv",
     )
 
 
@@ -225,6 +229,93 @@ def test_second_run_sends_nothing(
     assert summary2.sources["chats"].sent == 0
 
 
+def _closed_chat_transport() -> httpx.MockTransport:
+    user = _chat_row(
+        "u1",
+        author_type="user",
+        text="hi",
+        created_at=datetime_to_timestamp_str(_ago(hours_ago=2)),
+    )
+    assistant = _chat_row(
+        "a1",
+        author_type="assistant",
+        text="hey",
+        previous_message_id="u1",
+        created_at=datetime_to_timestamp_str(_ago(hours_ago=1, minutes_ago=55)),
+    )
+    closer = _chat_row(
+        "u2",
+        author_type="user",
+        text="next",
+        previous_message_id="a1",
+        created_at=datetime_to_timestamp_str(_ago(hours_ago=1, minutes_ago=50)),
+    )
+    return _make_transport(
+        pages={
+            EVENT_CONVERSATION_MESSAGE: {
+                "data": [{"id": "file-1"}],
+                "has_more": False,
+                "last_end_time": datetime_to_timestamp_str(
+                    _ago(hours_ago=1, minutes_ago=45)
+                ),
+            }
+        },
+        files={"file-1": [user, assistant, closer]},
+    )
+
+
+def test_csv_export_writes_rows_instead_of_posting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    RecordingNebuly.all_sent.clear()
+    _patch_run(monkeypatch, _closed_chat_transport())
+    config = _config(tmp_path, csv_export=True)
+
+    summary = run_sync(config)
+
+    assert summary.sources["chats"].sent == 1
+    assert RecordingNebuly.all_sent == []
+    with config.csv_export_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    assert reader.fieldnames == [
+        "conversation_id",
+        "end_user",
+        "team",
+        "market",
+        "tenure",
+        "time_start",
+        "time_end",
+        "input",
+        "output",
+        "hide_content",
+        "tags",
+        "traces",
+        "user_feedback",
+        "anonymize",
+    ]
+    assert len(rows) == 1
+    assert rows[0]["input"] == "hi"
+    assert rows[0]["output"] == "hey"
+    assert rows[0]["hide_content"] == "False"
+    assert isinstance(json.loads(rows[0]["tags"]), dict)
+    assert isinstance(json.loads(rows[0]["traces"]), list)
+    assert [p.parent.name for p in tmp_path.glob("*/compliance_store.db")] == [
+        _config(tmp_path, csv_export=True).cache_key
+    ]
+
+
+def test_csv_export_dry_run_writes_no_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_run(monkeypatch, _closed_chat_transport())
+    config = _config(tmp_path, csv_export=True, dry_run=True)
+
+    run_sync(config)
+
+    assert not config.csv_export_path.exists()
+
+
 def test_reply_in_later_file_emits_on_next_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -317,7 +408,7 @@ def test_transient_failure_keeps_cursor(
     )
     _patch_run(monkeypatch, transport)
     run_sync(_config(tmp_path))
-    store = ComplianceStore(tmp_path / "compliance_store.db", "ws-demo", dry_run=False)
+    store = ComplianceStore(_config(tmp_path).store_path, "ws-demo", dry_run=False)
     assert store.get_cursor(EVENT_CONVERSATION_MESSAGE) is None
 
 
@@ -361,9 +452,7 @@ def test_permanent_rejection_is_recorded(
             _config(tmp_path, sources=("codex",), codex_cost_wait_hours=0)
         )
         assert summary.sources["codex"].rejected == 1
-        store = ComplianceStore(
-            tmp_path / "compliance_store.db", "ws-demo", dry_run=False
-        )
+        store = ComplianceStore(_config(tmp_path).store_path, "ws-demo", dry_run=False)
         assert store.is_emitted("codex", "codex-p1")
     finally:
         RecordingNebuly.reject_all = False
@@ -503,7 +592,7 @@ def test_codex_waits_for_turn_record_then_sends_with_cost(
     RecordingNebuly.all_sent.clear()
     second = run_sync(_config(tmp_path, sources=("codex",), codex_cost_wait_hours=4))
     assert second.sources["codex"].sent == 1
-    assert RecordingNebuly.all_sent[-1]["interaction"]["cost"] == 10_000
+    assert RecordingNebuly.all_sent[-1]["traces"][-1]["cost"] == 10_000
 
 
 def test_codex_sent_without_cost_after_wait(
@@ -703,4 +792,4 @@ def test_dry_run_writes_nothing(
     )
     _patch_run(monkeypatch, transport)
     run_sync(_config(tmp_path, dry_run=True))
-    assert not (tmp_path / "compliance_store.db").exists()
+    assert not list(tmp_path.glob("**/compliance_store.db"))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -69,6 +70,25 @@ class Config:
     interaction_idle_minutes: int = 30
     codex_cost_wait_hours: int = 4
     entra_directory: EntraDirectory | None = None
+    csv_export: bool = False
+    csv_export_path: Path = Path("./interactions.csv")
+
+    @property
+    def cache_key(self) -> str:
+        """Fingerprint of the source workspace and the destination, so changing
+        any of them starts from a fresh store instead of skipping logs that were
+        only sent somewhere else."""
+        destination = (
+            f"csv|{self.csv_export_path.resolve()}"
+            if self.csv_export
+            else f"nebuly|{self.nebuly_endpoint}|{self.nebuly_api_key}"
+        )
+        raw = f"{self.compliance_base_url}|{self.compliance_workspace_id}|{destination}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    @property
+    def store_path(self) -> Path:
+        return self.cache_dir / self.cache_key / "compliance_store.db"
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:
@@ -102,18 +122,17 @@ class Config:
         args = parser.parse_args(argv)
 
         nebuly_api_key = os.environ.get("NEBULY_API_KEY")
+        csv_export = _parse_bool(os.environ.get("CSV_EXPORT", "false"))
         compliance_api_key = os.environ.get("COMPLIANCE_API_KEY")
         compliance_workspace_id = os.environ.get("COMPLIANCE_WORKSPACE_ID")
 
-        missing = [
-            name
-            for name, val in [
-                ("NEBULY_API_KEY", nebuly_api_key),
-                ("COMPLIANCE_API_KEY", compliance_api_key),
-                ("COMPLIANCE_WORKSPACE_ID", compliance_workspace_id),
-            ]
-            if not val
+        required = [
+            ("COMPLIANCE_API_KEY", compliance_api_key),
+            ("COMPLIANCE_WORKSPACE_ID", compliance_workspace_id),
         ]
+        if not csv_export:
+            required.insert(0, ("NEBULY_API_KEY", nebuly_api_key))
+        missing = [name for name, val in required if not val]
         if missing:
             raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
 
@@ -133,7 +152,7 @@ class Config:
             entra_directory = None
 
         return cls(
-            nebuly_api_key=cast(str, nebuly_api_key),
+            nebuly_api_key=nebuly_api_key or "",
             nebuly_endpoint=os.environ.get(
                 "NEBULY_ENDPOINT",
                 "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction",
@@ -158,4 +177,8 @@ class Config:
             ),
             codex_cost_wait_hours=int(os.environ.get("CODEX_COST_WAIT_HOURS", "4")),
             entra_directory=entra_directory,
+            csv_export=csv_export,
+            csv_export_path=Path(
+                os.environ.get("CSV_EXPORT_PATH", "./interactions.csv")
+            ),
         )

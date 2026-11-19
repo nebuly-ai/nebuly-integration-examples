@@ -391,9 +391,6 @@ def codex_turn_to_payload(
         "hide_content": False,
         "tags": tags,
     }
-    cost = _micro_cost(turn_record)
-    if cost is not None:
-        interaction["cost"] = cost
     apply_directory_segments(interaction, directory, email)
 
     return {
@@ -404,6 +401,7 @@ def codex_turn_to_payload(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             output_text=output,
+            cost=_micro_cost(turn_record),
         ),
         "user_feedback": user_defined.build_codex_user_feedback(turn),
         "anonymize": anonymize,

@@ -292,8 +292,9 @@ def test_turn_record_cost_and_classification_tags() -> None:
     )
     payload = codex_turn_to_payload(turn, turn_record, anonymize=False)
     assert payload is not None
-    assert payload["interaction"]["cost"] == 10_000
+    assert "cost" not in payload["interaction"]
     llm = payload["traces"][-1]
+    assert llm["cost"] == 10_000
     assert llm["input_tokens"] == 7
     assert llm["output_tokens"] == 11
     assert payload["interaction"]["tags"]["codex category"] == "code"
@@ -317,6 +318,7 @@ def test_without_turn_record_no_cost_uses_summed_tokens() -> None:
     assert payload is not None
     assert "cost" not in payload["interaction"]
     llm = payload["traces"][-1]
+    assert "cost" not in llm
     assert llm["input_tokens"] == 2
     assert llm["output_tokens"] == 3
 
