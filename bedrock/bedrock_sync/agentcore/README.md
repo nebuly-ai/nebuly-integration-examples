@@ -15,7 +15,7 @@ Assembler (spans of one trace → one interaction: input, answer, model calls, t
 Nebuly trace_interaction
 ```
 
-One agent invocation is one trace: the agent span, its model calls, its tools and its sub-agents. The connector sends a trace as soon as its agent span has ended, with what has been read so far. Until then the trace waits in the state, also across runs.
+One agent invocation is one trace: the agent span, its model calls, its tools and its sub-agents. The connector sends a trace once its agent span has ended and its parents up to `POST /invocations` were read, or after `--root-wait-seconds` without them (see [How reading works](#how-reading-works)), with what has been read so far. Until then the trace waits in the state, also across runs.
 
 ## Prerequisites
 
@@ -50,7 +50,7 @@ Besides the [shared settings](../../README.md#settings-shared-by-both-connectors
 | `--actor-namespace-template` | no | harness and AWS default layouts | Memory namespace with the actor id, for the fallback; repeat for each layout |
 | `--state-db` | no | `.cache/agentcore/state.db` | State file |
 
-Run one connector per runtime endpoint, each with its own `--state-db`.
+Run one connector per runtime endpoint, each with its own `--state-db`. The state is bound to `--source-id` and to the set of `--log-group` values: pass the same groups on every run, in any order. A run with another source or another set of groups is refused (`Database source or log-group configuration differs`). To change them, for example to add `aws/spans` later, start with a new `--state-db` and a `--from-date`.
 
 ### AWS access
 
@@ -61,7 +61,7 @@ The identity needs `logs:FilterLogEvents` on each configured log group. Nothing 
 - The first run reads from `--from-date`. Each later run reads from where the previous one stopped, minus `--overlap-seconds`. The connector skips records explicitly marked as belonging to another source or region before storing their contents. A window counts as read only when every log group was read in full.
 - Once a day by default, a **reconciliation** reads from the end of the previous reconciliation minus `--reconciliation-seconds`, within the covered range. The first run establishes the initial reference point. This catches late events even when intermediate runs have already advanced the regular checkpoint. Use `--from-date` for events before that window.
 - A long trace may have started before the window read. For each trace it sees, the connector reads back that trace's earlier spans with a filter on its trace id, without counting it as coverage.
-- A turn is sent once its agent span has ended and its parents up to `POST /invocations` were read. A sub-agent ends, and reaches CloudWatch, before the agent that called it: a run in between sees it without its caller and would send it as a turn of its own. So an agent span whose parents are not all read waits (`waiting_for_parent` in the summary), until they arrive or for `--root-wait-seconds` (20 minutes: a synchronous AgentCore request lasts at most 15). After the wait it is sent with `missing_parent`, so an agent without `POST /invocations` is only delayed. If the caller arrives even later (an asynchronous job), the turn is sent too, with a warning (`sub_agent_sent_as_turn`): Nebuly then also shows the sub-agent as an interaction.
+- A turn is sent once its agent span has ended and its parents up to `POST /invocations` were read. A sub-agent ends, and reaches CloudWatch, before the agent that called it: a run in between sees it without its caller and would send it as a turn of its own. So an agent span whose parents are not all read waits (`waiting_for_parent` in the summary), until they arrive or for `--root-wait-seconds` (20 minutes: a synchronous AgentCore request lasts at most 15). The wait counts up to the end of what the run read: with `--to-date`, the span waits until `--to-date` is `--root-wait-seconds` past its end, so a backfill in chunks never sends a sub-agent whose caller falls in the next chunk. After the wait it is sent with `missing_parent`, so an agent without `POST /invocations` is only delayed. If the caller arrives even later (an asynchronous job), the turn is sent too, with a warning (`sub_agent_sent_as_turn`): Nebuly then also shows the sub-agent as an interaction.
 - While the trace content is retained, a late model or tool span can produce a corrected POST that updates the Nebuly interaction (`updated_after_delivery`). A correction waits at least a minute after the previous delivery. The trace stays available while a correction is in progress, until it either completes or expires. For a completed trace, content retention runs from its latest finalized delivery. After any POST attempt, the connector keeps the earlier payload if the input, end user or start time changes (`late_delivery_discrepancy`). If automatic delivery was given up, use the shared [recovery command](../../README.md#delivery) to retry the retained payload.
 
 ### Warnings and blocked traces
@@ -80,7 +80,7 @@ Nebuly needs a user and some content, so only these stop a trace: no actor or tw
 
 Each trace sent with warnings logs one line with its codes, and `degraded` in the summary counts them by code. Warnings do not change the exit code.
 
-A blocked trace waits in the state and is checked again on every run. If it is still blocked `--reconciliation-seconds` plus `--content-retention-seconds` after it started, it is dropped and counted as `expired_trace`. The run logs the reasons (`expired_reasons` in the summary) and exits with code `1`. Fixing the cause before then (for example `--actor-namespace-template`) still sends it. Routine infrastructure traces without an agent span, Strands evidence, or actor retrieval are counted as `ignored_rootless_trace` on expiry and leave the exit code unchanged.
+A blocked trace waits in the state and is checked again on every run. So does a trace still open because its agent span has not ended. If either is still waiting `--reconciliation-seconds` plus `--content-retention-seconds` after it started, it is dropped and counted as `expired_trace`, with the reason `agent_span_not_ended` for an open trace. The run logs the reasons (`expired_reasons` in the summary) and exits with code `1`. Fixing the cause before then (for example `--actor-namespace-template`) still sends it. Routine infrastructure traces without an agent span, Strands evidence, or actor retrieval are counted as `ignored_rootless_trace` on expiry and leave the exit code unchanged.
 
 ## Field mapping
 
@@ -91,11 +91,27 @@ A blocked trace waits in the state and is checked again on every run. If it is s
 | `interaction.output` | The final answer of the agent span (may be empty for an invocation that ended in error) |
 | `interaction.time_start` / `time_end` | Start and end of the agent span |
 | `interaction.end_user` | The actor id, or its pseudonym ([End user](../../README.md#end-user)) |
-| `interaction.tags` | `agentcore.status` (`ok` or `error`), `tools used` |
+| `interaction.tags` | `agentcore.status` (`ok`, `error`, or `unknown` when the agent span has no final status), `tools used` |
 | LLM traces | One per model, with the tokens of every model call (sub-agents included), counted once. `input_tokens` excludes cached prompt tokens, sent as `cache_read_input_tokens` and `cache_write_input_tokens` |
 | Tool traces | One per tool call of the main agent, with its input and result. Tools a sub-agent calls stay inside the tool call that launched it |
 
 The model is the one recorded on the model call spans, not the agent configuration. Texts (input, output, model outputs, tool inputs and results) are cut at 8000 characters (`MAX_CONTENT_CHARS` in `user_defined.py`).
+
+## Run summary
+
+The main keys of the JSON summary:
+
+| Key | Meaning |
+| --- | ------- |
+| `records_read`, `new_records` | Log records read in this run, and those not seen before |
+| `ready`, `open`, `blocked` | Traces assembled in this run, by status: ready to send, still waiting (agent span not ended, or `waiting_for_parent`), blocked (see [Warnings and blocked traces](#warnings-and-blocked-traces)) |
+| `sent`, `rejected`, `retryable` | Delivery results of this run |
+| `delivery_paused`, `delivery_waiting_for_retry` | A payload waits for a later retry; the run exits with code 1 |
+| `expired`, `expired_reasons` | Traces dropped on expiry, and why; the run exits with code 1 |
+| `degraded` | Traces sent with warnings, by warning code |
+| `sessions_with_several_actors` | See [Several actors in a session](#actor) |
+| `diagnostics` | Counts by code, for example `waiting_for_parent`, `updated_after_delivery`, `late_delivery_discrepancy`, `sub_agent_sent_as_turn`, `conversion_failed`, `expired_trace`, `ignored_rootless_trace` |
+| `outbox_statuses` | Payloads in the state by delivery status |
 
 ## Customizing the payload
 

@@ -86,7 +86,7 @@ Logs go to stderr. When the run completes, its summary is printed on stdout as o
 | Code | Meaning |
 | ---- | ------- |
 | `0` | Everything closed was delivered (or nothing to do) |
-| `1` | The run failed, payloads of this run were rejected, deliveries wait for a retry (also one asked by an earlier run), an interaction could not be converted (for example an error in a `user_defined.py` hook), a runtime log file or line could not be read, or AgentCore traces expired before they could be sent |
+| `1` | The run failed, payloads of this run were rejected, deliveries wait for a retry (also one asked by an earlier run), an interaction could not be converted (for example an error in a `user_defined.py` hook), a runtime log file or line could not be read, saved calls of open runtime turns could not be read again from S3 (`restore_missing_calls`), or AgentCore traces expired before they could be sent |
 | `130` | Interrupted (Ctrl-C) |
 
 If the run fails with an unexpected error, the log shows its type and where it happened, for example `Sync failed (KeyError at bedrock_sync/runtime/parser.py:142 in _usage)`. The error message is never logged, because it may hold conversation text or secrets. With `--verbose` the log also shows the full stack (files, lines and functions only): include it when you contact support.
@@ -115,7 +115,7 @@ A payload that was not confirmed stays `pending`:
 
 After resolving the failure, run the connector with the same state file and `--retry-given-up INTERACTION_KEY` using the key from the warning. This attempts only the original retained payload and skips reading the source. Run it without `--from-date`, `--to-date`, or `--dry-run`. If the item needs another retry, the regular schedule picks it up. Ordinary 4xx rejections and compacted payloads are ineligible. A regular backfill leaves these rejections in place while their delivery history is retained.
 
-A connection failure, a 429 or a wrong setting stops the run at once, and no payload is sent until the delay has passed: an outage costs one attempt. A timeout or a 5xx may come from one bad payload, so the run goes on with the next one and stops at the second failure in a row; payloads that keep failing go after the others, so one of them never holds the rest.
+A connection failure or a 429 stops the run at once, and no payload is sent until the delay has passed: an outage costs one attempt. A wrong setting also stops the run at once, with no delay: the next run tries again once the setting is fixed. A timeout or a 5xx may come from one bad payload, so the run goes on with the next one and stops at the second failure in a row; payloads that keep failing go after the others, so one of them never holds the rest.
 
 ## Customizing the payload
 

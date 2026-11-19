@@ -1393,22 +1393,86 @@ def test_root_without_its_http_parent_is_sent_after_the_wait(tmp_path: Path) -> 
     assert sent[0]["interaction"]["input"] == case["expected"]["input"]
 
 
-def test_historical_to_date_does_not_freeze_parent_wait(tmp_path: Path) -> None:
+def test_to_date_before_the_wait_keeps_the_root_open_days_later(
+    tmp_path: Path,
+) -> None:
+    """The parent wait is measured against --to-date, not the wall clock."""
     case = load(DEFAULT_CASE)
     records = _without_http_parent(case)
-    config, now = settings(tmp_path, case)
-    config = replace(config, to_date=now)
+    config, end = settings(tmp_path, case)
+    config = replace(config, to_date=end)
+    sent: list[dict[str, Any]] = []
+    for days in (2, 3):
+        report = sync.run_sync(
+            config,
+            logs_client=Logs(records),
+            transport=recorder(sent),
+            now=end + timedelta(days=days),
+        )
+        assert (report.open, report.sent) == (1, 0)
+        assert report.diagnostics["waiting_for_parent"] == 1
+    assert sent == []
+
+
+@pytest.mark.parametrize("later_to_date", [None, "past_the_wait"])
+def test_later_horizon_past_the_wait_sends_with_missing_parent(
+    tmp_path: Path, later_to_date: str | None
+) -> None:
+    case = load(DEFAULT_CASE)
+    records = _without_http_parent(case)
+    config, end = settings(tmp_path, case)
+    now = end + timedelta(days=2)
+    sent: list[dict[str, Any]] = []
     first = sync.run_sync(
-        config, logs_client=Logs(records), transport=recorder([]), now=now
-    )
-    assert first.open == 1
-    later = sync.run_sync(
-        config,
+        replace(config, to_date=end),
         logs_client=Logs(records),
-        transport=recorder([]),
-        now=now + timedelta(days=2),
+        transport=recorder(sent),
+        now=now,
+    )
+    assert (first.open, first.sent) == (1, 0)
+    horizon = (
+        end + timedelta(seconds=config.root_wait_seconds + 60)
+        if later_to_date
+        else None
+    )
+    later = sync.run_sync(
+        replace(config, from_date=None, to_date=horizon),
+        logs_client=Logs(records),
+        transport=recorder(sent),
+        now=now,
     )
     assert (later.open, later.sent) == (0, 1)
+    assert later.degraded["missing_parent"] == 1
+    assert [p["interaction"]["input"] for p in sent] == [case["expected"]["input"]]
+
+
+def test_backfill_split_between_sub_agent_and_caller_sends_one_turn(
+    tmp_path: Path,
+) -> None:
+    """A chunk ending after the sub-agent but before its caller must not send
+    the sub-agent as the turn, even when the wall clock is days later."""
+    case = load("subagent_usage")
+    config, end = settings(tmp_path, case)
+    split = date(_sub_agent_exported_ms(case) + 1)
+    now = end + timedelta(days=2)
+    sent: list[dict[str, Any]] = []
+    first = sync.run_sync(
+        replace(config, to_date=split),
+        logs_client=Logs(case["records"]),
+        transport=recorder(sent),
+        now=now,
+    )
+    assert (first.sent, first.open) == (0, 1)
+    assert first.diagnostics["waiting_for_parent"] == 1
+    second = sync.run_sync(
+        replace(config, from_date=split, to_date=end),
+        logs_client=Logs(case["records"]),
+        transport=recorder(sent),
+        now=now,
+    )
+    assert second.sent == 1
+    assert "sub_agent_sent_as_turn" not in second.diagnostics
+    assert [p["interaction"]["input"] for p in sent] == [case["expected"]["input"]]
 
 
 def test_root_without_a_parent_is_sent_at_once(tmp_path: Path) -> None:

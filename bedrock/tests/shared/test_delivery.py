@@ -143,6 +143,34 @@ def test_unexpected_transport_error_is_sanitized_and_retried_later(
         assert state.get(key).status == "pending"
 
 
+def test_unexpected_transport_error_does_not_hold_the_others(tmp_path: Path) -> None:
+    """A payload that always breaks the client backs off alone, like a 5xx:
+    the source is not paused and the next run sends the others first."""
+    requests: list[bytes] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.content)
+        if b'"bad"' in request.content:
+            raise RuntimeError("private-response-body")
+        return httpx.Response(200)
+
+    transport = httpx.MockTransport(respond)
+    with OutboxStore(tmp_path / "db", now_ms=1000) as state:
+        state.put("bad", _payload("bad", 0))
+        state.put("good", _payload("good", 1))
+        with (
+            SafeNebulyClient("key", "https://example.test", transport=transport) as c,
+            pytest.raises(DeliveryError),
+        ):
+            deliver_pending(state, c)
+        assert not state.delivery_paused()
+        state.now_ms = 1000 + 61_000
+        assert [d.interaction_key for d in state.pending_deliveries()] == [
+            "good",
+            "bad",
+        ]
+
+
 def test_auth_failure_stops_before_other_pending_deliveries(tmp_path: Path) -> None:
     requests = []
 

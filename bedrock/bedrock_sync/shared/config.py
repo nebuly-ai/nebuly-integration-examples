@@ -113,6 +113,10 @@ def load_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
     if env is not None:
         return env
     load_dotenv()
+    # An empty AWS_PROFILE (a blank line copied from .env.example) makes boto3
+    # look for a profile named "": drop it so the default chain applies.
+    if not os.environ.get("AWS_PROFILE", "x").strip():
+        del os.environ["AWS_PROFILE"]
     return os.environ
 
 

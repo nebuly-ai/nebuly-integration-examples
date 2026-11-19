@@ -292,8 +292,14 @@ def deliver(
         try:
             result = client.send(request)
         except Exception:  # noqa: BLE001 - persist the attempt at the transport boundary
+            # Nebuly may have received it, and the cause may be this payload:
+            # back off this item only, so it goes after the others next time.
             store.finish_attempt(
-                attempt, "retryable", retry_after_seconds=MIN_LATER_RETRY_SECONDS
+                attempt,
+                "retryable",
+                retry_after_seconds=MIN_LATER_RETRY_SECONDS,
+                finished_ms=clock_ms() if clock_ms else None,
+                maybe_received=True,
             )
             raise DeliveryError(
                 "Unexpected transport failure; a later run sends the item again"

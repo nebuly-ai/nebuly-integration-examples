@@ -61,6 +61,17 @@ def test_injected_environment_does_not_read_dotenv(env: dict[str, str]) -> None:
     dotenv.assert_not_called()
 
 
+@pytest.mark.parametrize(("value", "kept"), [("", False), ("  ", False), ("dev", True)])
+def test_blank_aws_profile_from_dotenv_is_dropped(
+    monkeypatch: pytest.MonkeyPatch, value: str, *, kept: bool
+) -> None:
+    """boto3 reads AWS_PROFILE="" as a profile named "" and fails."""
+    monkeypatch.setenv("AWS_PROFILE", value)
+    with patch("bedrock_sync.shared.config.load_dotenv"):
+        loaded = load_env(None)
+    assert ("AWS_PROFILE" in loaded) is kept
+
+
 def test_dates_are_utc_and_ordered(env: dict[str, str]) -> None:
     config = read(
         ["--from-date", "2026-11-13T01:00:00+01:00", "--to-date", "2026-11-14"], env

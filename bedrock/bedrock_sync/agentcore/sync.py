@@ -462,10 +462,12 @@ def _assemble_candidates(
             and not interaction.anchored
             and interaction.end_ns is not None
             and interaction.end_ns
-            > (state.now_ms - config.root_wait_seconds * 1000) * 1_000_000
+            > (min(state.now_ms, end_ms) - config.root_wait_seconds * 1000) * 1_000_000
         ):
             # Maybe a sub-agent whose caller is not exported yet: wait for the
-            # spans above it, or for --root-wait-seconds, before sending.
+            # spans above it, or for --root-wait-seconds, before sending. The
+            # wait is measured against the end of what this run read, not the
+            # wall clock: with --to-date the caller may end after the read stops.
             state.save_trace(
                 trace_id,
                 "open",

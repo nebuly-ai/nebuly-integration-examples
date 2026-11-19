@@ -104,7 +104,7 @@ Time is the delivery time of the files read, never the clock, so a backfill beha
 
 Incremental runs re-list the delivery margin before the last checkpoint to find newly visible keys. The state remembers which files in that interval were processed, so the overlapping listing does not fetch their contents again. Files that appear outside the margin require a backfill, and calls for already closed turns still cannot be added.
 
-While an interaction is open, the state keeps its calls' S3 keys and request IDs, along with an opaque turn key. If a previously read call cannot be restored, the connector holds that turn and preserves its references while continuing to process other turns. Restore the original log file or external body, then run the connector again.
+While an interaction is open, the state keeps its calls' S3 keys and request IDs, along with an opaque turn key. If a previously read call cannot be read again, because its S3 log or `data/` body was deleted (for example by a lifecycle rule while the connector was not running) or is no longer readable, the turn goes on without that call: it closes as usual and is sent with the calls that are left, so its input, output or tokens may be incomplete. The run logs a warning, counts it in `totals.restore_missing_calls` and exits with code 1, once. Keep the logs at least as long as an interaction can stay open plus the time between runs.
 
 Nebuly matches interactions on input, end user, and start time. Identical requests from the same user with the same logged start time can update the same interaction even when their conversation IDs differ.
 
@@ -135,6 +135,7 @@ Besides delivery (`delivery`, `outbox`), the JSON summary counts:
 | --- | ------- |
 | `totals.records_skipped` | Records the parser could not use: `error_record` (failed call), `missing_body`, `unsupported_format`, `invalid_body` |
 | `grouping.missing_triplet` | Calls without the three ids |
+| `grouping.duplicates` | Calls of a turn not yet closed whose request id was already read in this run or restored from the state, for example in a backfill over open turns. They are used once |
 | `grouping.conversations_with_several_users`, `grouping.interactions_with_several_users` | Conversations and turns with calls of several users in this run, each sent as one per user; see [Several users in a conversation](#several-users-in-a-conversation) |
 | `grouping.calls_for_closed_interaction` | Calls that arrived too late, see [How interactions close](#how-interactions-close) |
 | `grouping.closed_next_interaction`, `grouping.closed_idle` | Interactions closed by each rule |
@@ -142,8 +143,9 @@ Besides delivery (`delivery`, `outbox`), the JSON summary counts:
 | `totals.conversion_errors` | Closed interactions whose payload could not be built (for example an error in a `user_defined.py` hook); see [Customizing the payload](#customizing-the-payload) |
 | `totals.unreadable_files` | Log files skipped because they are corrupt or not UTF-8: their calls are lost. The run logs the S3 key and exits with code 1 |
 | `totals.unreadable_lines` | Log lines skipped because they are not JSON: their calls are lost. The run logs the S3 key and line and exits with code 1 |
-| `totals.restore_missing_calls` | Previously read calls that could not be restored for open turns. Affected turns are held, and the run exits with code 1 |
+| `totals.restore_missing_calls` | Previously read calls of open turns whose S3 record is gone or unreadable. Their turns are sent without them, and the run exits with code 1 |
 | `totals.open_interactions` | Interactions still open, finished by a later run |
+| `waiting_for_retry` | `true` if a payload waits for a later retry (also one asked by an earlier run); the run exits with code 1, see [Delivery](../../README.md#delivery) |
 
 ## Customizing the payload
 

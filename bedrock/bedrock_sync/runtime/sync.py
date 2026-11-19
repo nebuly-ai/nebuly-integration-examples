@@ -197,8 +197,6 @@ class _Run:
         self._totals = summary.totals
         self._context = context
         self._read_objects: list[tuple[str, datetime]] = []
-        self._held_calls: dict[str, CallRef] = {}
-        self._held_turns: set[str] = set()
         self._reopened_turns: set[str] = set()
         self._replay_keys: set[str] = set()
         self._before_failed_start: dict[str, dict[CallRef, list[Invocation]]] = {}
@@ -221,45 +219,37 @@ class _Run:
                     parsed
                 )
         missing = set(calls) - restored.keys()
-        self._held_turns = {call.turn_key for call in missing}
-        self._held_calls = {
-            call.request_id: call for call in calls if call.turn_key in self._held_turns
-        }
         self._totals.restore_missing_calls = len(missing)
         if missing:
+            # The S3 record is gone (deleted, expired by a lifecycle rule) or no
+            # longer readable: waiting would not bring it back. The turn goes
+            # on with the calls that are left, and the pointers are dropped at
+            # the next checkpoint, so this is reported once.
             logger.warning(
-                "%d stored call(s) could not be restored; holding %d open "
-                "interaction(s) until their S3 records are available",
+                "%d stored call(s) of %d open interaction(s) could not be "
+                "restored from S3: those interactions are sent without them",
                 len(missing),
-                len(self._held_turns),
+                len({call.turn_key for call in missing}),
             )
-        self.grouper.restore(
-            restored[call] for call in calls if call.turn_key not in self._held_turns
-        )
+        self.grouper.restore(restored[call] for call in calls if call in restored)
 
     @property
     def open_count(self) -> int:
-        return self.grouper.open_count + len(self._held_turns)
+        return self.grouper.open_count
 
     def start_reading(self, objects: list[LogObject]) -> None:
         if self._config.from_date is not None:
             self._replay_keys = {obj.key for obj in objects}
 
     def _add(self, invocation: Invocation) -> None:
-        if invocation.request_id in self._held_calls:
-            return
-        if (self._held_turns or self._config.from_date is not None) and (
-            triplet := triplet_of(invocation)
-        ) is not None:
+        if (
+            self._config.from_date is not None
+            and (triplet := triplet_of(invocation)) is not None
+        ):
             ref = CallRef(
                 invocation.request_id, invocation.source_key, triplet.turn_key
             )
-            if ref.turn_key in self._held_turns:
-                self._held_calls[ref.request_id] = ref
-                return
-            if self._config.from_date is not None and self._retry_failed_turn(
-                ref, invocation
-            ):
+            if self._retry_failed_turn(ref, invocation):
                 return
         self.grouper.add(invocation)
 
@@ -302,7 +292,7 @@ class _Run:
         closures = [self._closure(i) for i in self.grouper.drain_closed()]
         self._state.checkpoint(
             cursor,
-            [*self.grouper.open_refs(), *self._held_calls.values()],
+            list(self.grouper.open_refs()),
             closures,
             read_objects=self._read_objects,
             forget_objects_before=cursor.coverage_until

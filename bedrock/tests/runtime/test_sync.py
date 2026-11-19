@@ -680,16 +680,17 @@ def test_backfill_inside_the_synced_range_rebuilds_a_conversion_error(
 
 
 @pytest.mark.parametrize("bad_file", [None, b"{}", b'{"requestId":"a1"}'])
-def test_restore_holds_only_turns_with_unavailable_saved_calls(
+def test_turn_with_a_saved_call_gone_from_s3_goes_on_without_it(
     tmp_path: Path, bad_file: bytes | None
 ) -> None:
+    """A deleted or unreadable S3 record does not come back: the turn is not
+    held, it closes as usual with the calls that are left, reported once."""
     api = FakeNebuly()
     _call(tmp_path, "a1", 0, "i-a", "original input")
     _call(tmp_path, "a2", 1, "i-a", "intermediate step")
     first = _run(tmp_path, api, START + timedelta(minutes=10))
     assert first.totals.open_interactions == 1
     path = next((tmp_path / "logs").rglob("*_a1.json.gz"))
-    original = path.read_bytes()
     if bad_file is None:
         path.unlink()
     else:
@@ -697,21 +698,25 @@ def test_restore_holds_only_turns_with_unavailable_saved_calls(
     _call(tmp_path, "a3", 12, "i-a", "last step")
     _call(tmp_path, "b1", 13, "i-b", "other turn", conversation="c-2")
 
-    held = _run(tmp_path, api, START + timedelta(minutes=55), from_date=None)
-    assert held.incomplete
-    assert held.totals.restore_missing_calls == 1
-    assert held.totals.open_interactions == 1
-    assert api.inputs == ["other turn"]
+    restored = _run(tmp_path, api, START + timedelta(minutes=20), from_date=None)
+    assert restored.incomplete
+    assert restored.totals.restore_missing_calls == 1
+    assert restored.totals.open_interactions == 2
     with _saved_state(tmp_path) as state:
-        assert [ref.request_id for ref in state.pending_calls()] == ["a1", "a2", "a3"]
+        assert {ref.request_id for ref in state.pending_calls()} == {
+            "a2",
+            "a3",
+            "b1",
+        }
 
-    path.write_bytes(original)
-    recovered = _run(tmp_path, api, START + timedelta(hours=2), from_date=None)
-    assert not recovered.incomplete
-    assert recovered.totals.open_interactions == 0
-    assert api.inputs == ["other turn", "original input"]
-    assert api.payloads[-1]["interaction"]["output"] == "answer to last step"
-    assert sum(t["input_tokens"] for t in api.payloads[-1]["traces"]) == 30
+    closed = _run(tmp_path, api, START + timedelta(hours=2), from_date=None)
+    assert not closed.incomplete
+    assert closed.totals.restore_missing_calls == 0
+    assert closed.totals.open_interactions == 0
+    assert sorted(api.inputs) == ["intermediate step", "other turn"]
+    sent = next(p for p in api.payloads if p["interaction"]["input"] != "other turn")
+    assert sent["interaction"]["output"] == "answer to last step"
+    assert sum(t["input_tokens"] for t in sent["traces"]) == 20
 
 
 def test_backfill_requires_the_original_first_call_to_reopen_failed_conversion(
