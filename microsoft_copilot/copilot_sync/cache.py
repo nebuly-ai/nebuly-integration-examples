@@ -94,6 +94,9 @@ def _row_ts(value: str | None) -> datetime | None:
     return timestamp_str_to_datetime(value)
 
 
+_DENIED_RECHECK = timedelta(days=7)
+
+
 def _now_ts() -> str:
     return datetime_to_timestamp_str(datetime.now(tz=UTC))
 
@@ -224,12 +227,15 @@ class SyncCache:
     def is_interaction_denied(self, user_id: str) -> bool:
         row = self._conn.execute(
             """
-            SELECT 1 FROM sync_user_interaction_denied
+            SELECT updated_at FROM sync_user_interaction_denied
             WHERE tenant_id = ? AND user_id = ?
             """,
             (self._tenant_id, user_id),
         ).fetchone()
-        return row is not None
+        if row is None:
+            return False
+        denied_at = timestamp_str_to_datetime(row[0])
+        return datetime.now(tz=UTC) - denied_at < _DENIED_RECHECK
 
     def mark_interaction_denied(self, user_id: str, *, reason: str) -> None:
         self._conn.execute(
@@ -297,7 +303,9 @@ class SyncCache:
                     ),
                 )
 
-    def find_audit_record(self, message_ids: list[str]) -> CopilotAuditRecord | None:
+    def find_audit_records(self, message_ids: list[str]) -> list[CopilotAuditRecord]:
+        """Distinct records matching any message id, oldest first."""
+        records: dict[str, CopilotAuditRecord] = {}
         for message_id in message_ids:
             if not message_id:
                 continue
@@ -310,8 +318,9 @@ class SyncCache:
             ).fetchone()
             if row is None:
                 continue
-            return CopilotAuditRecord.model_validate(json.loads(row[0]))
-        return None
+            record = CopilotAuditRecord.model_validate(json.loads(row[0]))
+            records.setdefault(record.id, record)
+        return sorted(records.values(), key=lambda r: (r.created_datetime, r.id))
 
     def close(self) -> None:
         self._conn.close()

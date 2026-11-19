@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -7,6 +8,7 @@ if TYPE_CHECKING:
     from .converter import InteractionTurn
     from .models import (
         AiInteraction,
+        AISystemPlugin,
         CopilotAuditRecord,
         CopilotUser,
         ModelTransparencyDetail,
@@ -15,6 +17,11 @@ if TYPE_CHECKING:
 _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
 _PLACEHOLDER_ATTACHMENT_NAME = "unknown-file-name"
 _PLACEHOLDER_ATTACHMENT_URL = "file:///unknown-url"
+_TOOL_DENIED_EVENT = "approvalDenied"
+_MCP_TOOL_RE = re.compile(r"^mcp__(?P<server>.+?)__(?P<tool>.+)$")
+_CORE_TOOL_RE = re.compile(r"^core-(?P<tool>.+)$")
+# Forward-compatible guess: today the Skill entry carries no skill name.
+_SKILL_RE = re.compile(r"^Skill[:/](?P<name>.+)$")
 
 
 def _non_empty_tags(fields: dict[str, str | None]) -> dict[str, str]:
@@ -63,7 +70,14 @@ def _audit_tags(audit: CopilotAuditRecord) -> dict[str, str]:
         tags["xpia_detected"] = "true"
     if _sensitive_resource_accessed(audit):
         tags["sensitive_resource_accessed"] = "true"
+    if any(events[-1] == _TOOL_DENIED_EVENT for _, events in _tool_calls(audit)):
+        tags["tool_approval_denied"] = "true"
     return tags
+
+
+def _context_types(prompt: AiInteraction) -> str | None:
+    types = {c.context_type for c in prompt.contexts if c.context_type}
+    return ",".join(sorted(types)) or None
 
 
 def build_tags(
@@ -77,6 +91,7 @@ def build_tags(
         "app_class": prompt.app_class,
         "conversation_type": prompt.conversation_type,
         "locale": prompt.locale,
+        "context_type": _context_types(prompt),
         "session_id": prompt.session_id,
         "request_id": prompt.request_id,
         "copilot_app": effective.sender_model_name if effective else None,
@@ -91,6 +106,18 @@ def build_tags(
     if audit is not None:
         raw.update(_audit_tags(audit))
     return {key: value for key, value in raw.items() if value is not None}
+
+
+def build_segments(user: CopilotUser) -> dict[str, str]:
+    """Nebuly ``team``/``market``/``tenure`` fields from the Entra profile,
+    omitted when the profile field is empty."""
+    return _non_empty_tags(
+        {
+            "team": user.department,
+            "market": user.country or user.usage_location,
+            "tenure": _format_hire_date(user.employee_hire_date),
+        },
+    )
 
 
 def build_traces(
@@ -109,6 +136,7 @@ def build_traces(
         traces.extend(
             _audit_retrieval_traces(audit, skip_sources=graph_sources),
         )
+        traces.extend(_tool_traces(audit))
         model = audit.primary_model
         if model is not None and model.model_name:
             traces.append(
@@ -166,6 +194,8 @@ def _audit_retrieval_traces(
 ) -> list[dict[str, Any]]:
     traces: list[dict[str, Any]] = []
     for resource in audit.accessed_resources:
+        if resource.is_tool_call_event:
+            continue
         name = resource.name or resource.resource_id or "resource"
         site = resource.site_url or name
         if site in skip_sources or name in skip_sources:
@@ -177,6 +207,58 @@ def _audit_retrieval_traces(
                 "outputs": [name],
             },
         )
+    return traces
+
+
+def _tool_calls(audit: CopilotAuditRecord) -> list[tuple[str, list[str]]]:
+    """Tool calls as (name, approval event types in order), by first appearance."""
+    calls: dict[str, tuple[str, list[str]]] = {}
+    for resource in audit.accessed_resources:
+        if not resource.is_tool_call_event:
+            continue
+        call_id = resource.resource_id or resource.name or ""
+        _, events = calls.setdefault(call_id, (resource.name or call_id, []))
+        events.append(resource.resource_type or "")
+    return list(calls.values())
+
+
+def _tool_source(plugin: AISystemPlugin) -> str | None:
+    """Normalize a plugin entry to the `<server>/<tool>` name used by call events.
+
+    Agent bookkeeping (TaskCreate, TaskUpdate, a bare Skill) and non-tool
+    plugins such as BuiltIn match no pattern and yield None.
+    """
+    for label in (plugin.name, plugin.plugin_id):
+        if not label:
+            continue
+        if match := _MCP_TOOL_RE.match(label):
+            server = match["server"].removesuffix("_deferred")
+            return f"{server}/{match['tool']}"
+        if match := _CORE_TOOL_RE.match(label):
+            return f"core/{match['tool']}"
+        if match := _SKILL_RE.match(label):
+            return f"skill/{match['name']}"
+    return None
+
+
+def _tool_traces(audit: CopilotAuditRecord) -> list[dict[str, Any]]:
+    """Retrieval traces for agent tool calls.
+
+    One trace per approval-tracked call with its last event as output, then one
+    per plugin-declared tool that has no call trace. The audit log has no tool
+    inputs or outputs.
+    """
+    traces: list[dict[str, Any]] = []
+    call_sources: set[str] = set()
+    for source, events in _tool_calls(audit):
+        call_sources.add(source)
+        traces.append({"source": source, "input": "", "outputs": [events[-1]]})
+    for plugin in audit.ai_system_plugins:
+        tool_source = _tool_source(plugin)
+        if tool_source is None or tool_source in call_sources:
+            continue
+        call_sources.add(tool_source)
+        traces.append({"source": tool_source, "input": "", "outputs": []})
     return traces
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import timedelta
@@ -29,21 +31,26 @@ class InteractionTurn:
     request_id: str | None
     prompt: AiInteraction
     responses: tuple[AiInteraction, ...]
+    followups: tuple[AiInteraction, ...] = ()
 
     @property
     def final_response(self) -> AiInteraction | None:
         return self.responses[-1] if self.responses else None
 
     @property
+    def text_responses(self) -> tuple[AiInteraction, ...]:
+        """Responses carrying user-facing text, in chronological order."""
+        return tuple(
+            response
+            for response in self.responses
+            if (text := parser.parse_interaction_text(response))
+            and not parser.is_warmup_response_text(text)
+        )
+
+    @property
     def effective_response(self) -> AiInteraction | None:
-        for response in reversed(self.responses):
-            text = parser.parse_interaction_text(response)
-            if not text:
-                continue
-            if parser.is_warmup_response_text(text):
-                continue
-            return response
-        return None
+        text_responses = self.text_responses
+        return text_responses[-1] if text_responses else None
 
     @property
     def time_start(self) -> datetime:
@@ -126,6 +133,80 @@ def _process_session_interactions(
     return turns, dangling
 
 
+_COWORK_APP_CLASS_SUFFIX = ".CoworkChat"
+# Cowork stores several visible messages in one record with no separator,
+# e.g. "...was declined.Moved the meeting...".
+_GLUED_MESSAGES_RE = re.compile(r"(?<=[a-zà-ÿ0-9*)\]])([.!?])(?=[A-ZÀ-Þ][a-zà-ÿ])")
+_SENTENCE_END_RE = re.compile(r"[.!?:][*_)\]]*$")
+# Cowork reasoning summaries open with a bold heading, e.g.
+# "**Finding an efficient solution** ...".
+_REASONING_RE = re.compile(r"^\*\*[^*\n]+\*\*")
+
+
+def _is_cowork(interaction: AiInteraction) -> bool:
+    return interaction.app_class.endswith(_COWORK_APP_CLASS_SUFFIX)
+
+
+def _merge_cowork_followups(turns: list[InteractionTurn]) -> list[InteractionTurn]:
+    """Fold Cowork steering prompts into the task they were sent during.
+
+    Cowork runs a long agent task. While it works it exports aiResponse
+    records with no text, and a prompt sent meanwhile steers the same task.
+    The task's text answers arrive after that prompt, with nothing linking
+    them to a specific prompt, so a prompt arriving before the current turn
+    has produced any text is merged into it.
+    """
+    merged: list[InteractionTurn] = []
+    for turn in turns:
+        previous = merged[-1] if merged else None
+        if (
+            previous is not None
+            and _is_cowork(previous.prompt)
+            and previous.effective_response is None
+        ):
+            merged[-1] = InteractionTurn(
+                previous.request_id,
+                previous.prompt,
+                previous.responses + turn.responses,
+                (*previous.followups, turn.prompt, *turn.followups),
+            )
+        else:
+            merged.append(turn)
+    return merged
+
+
+def _cowork_response_text(response: AiInteraction) -> str:
+    text = html.unescape(parser.parse_interaction_text(response))
+    return _GLUED_MESSAGES_RE.sub(r"\1\n\n", text)
+
+
+def _join_cowork_responses(responses: tuple[AiInteraction, ...]) -> str:
+    """Join Cowork records: chunks of one message split mid-sentence get a
+    space, records after a finished sentence start a new paragraph.
+    Reasoning summaries are dropped unless they are the final record."""
+    texts = [_cowork_response_text(response) for response in responses]
+    kept = [
+        text
+        for index, text in enumerate(texts)
+        if index == len(texts) - 1 or not _REASONING_RE.match(text)
+    ]
+    output = ""
+    for text in kept:
+        if not output:
+            output = text
+        elif _SENTENCE_END_RE.search(output):
+            output = f"{output}\n\n{text}"
+        else:
+            output = f"{output} {text}"
+    return output
+
+
+def _turn_input(turn: InteractionTurn) -> str:
+    prompts = (turn.prompt, *turn.followups)
+    texts = [text for p in prompts if (text := parser.parse_interaction_text(p))]
+    return "\n\n".join(texts)
+
+
 _DUPLICATE_WINDOW = timedelta(seconds=5)
 
 
@@ -190,6 +271,8 @@ def group_interactions(
         session_turns, session_dangling = _process_session_interactions(
             session_interactions
         )
+        if session_turns and _is_cowork(session_turns[0].prompt):
+            session_turns = _merge_cowork_followups(session_turns)
         turns.extend(session_turns)
         dangling.extend(session_dangling)
 
@@ -201,6 +284,8 @@ def group_interactions(
 def _assistant_output_for_turn(turn: InteractionTurn) -> tuple[str, SkipReason | None]:
     effective = turn.effective_response
     if effective is not None:
+        if _is_cowork(turn.prompt):
+            return _join_cowork_responses(turn.text_responses), None
         return parser.parse_interaction_text(effective), None
     for response in turn.responses:
         text = parser.parse_interaction_text(response)
@@ -216,7 +301,7 @@ def turn_to_payload(
     anonymize: bool,
     audit: CopilotAuditRecord | None = None,
 ) -> dict[str, Any] | SkipReason:
-    user_input = parser.parse_interaction_text(turn.prompt)
+    user_input = _turn_input(turn)
     if not user_input:
         return SkipReason.EMPTY_INPUT
 
@@ -237,6 +322,7 @@ def turn_to_payload(
         "end_user": user.id,
         "hide_content": False,
         "tags": user_defined.build_tags(turn, user, audit=audit),
+        **user_defined.build_segments(user),
     }
 
     return {

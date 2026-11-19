@@ -84,6 +84,26 @@ def test_extract_multiple_textblocks_joined_by_newline() -> None:
     assert extract_adaptive_card_text(card) == "First\nSecond"
 
 
+def test_extract_strips_citation_markers() -> None:
+    card = _card(
+        {
+            "type": "TextBlock",
+            "text": "See [the doc](https://x) 【1-abc123】 for details. 【2-0f9e8d】",
+        }
+    )
+    assert extract_adaptive_card_text(card) == "See [the doc](https://x) for details."
+
+
+def test_extract_strips_citation_markers_with_letter_prefix() -> None:
+    card = _card({"type": "TextBlock", "text": "Done 【xyz-0a1b2c】."})
+    assert extract_adaptive_card_text(card) == "Done."
+
+
+def test_extract_keeps_cjk_lenticular_brackets() -> None:
+    card = _card({"type": "TextBlock", "text": "【注意】 see 【2024】"})
+    assert extract_adaptive_card_text(card) == "【注意】 see 【2024】"
+
+
 def test_extract_richtextblock_concatenates_inlines() -> None:
     card = _card(
         {

@@ -10,6 +10,9 @@ if TYPE_CHECKING:
 _ATTACHMENT_TAG_RE = re.compile(r'<attachment id="[^"]*"></attachment>')
 _POINTER_ID_RE = re.compile(r'<attachment id="([^"]+)"></attachment>')
 _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
+# Copilot citation markers such as 【1-abc123】. Graph exports no mapping from
+# the marker to its source, so they are unreadable outside Copilot.
+_CITATION_MARKER_RE = re.compile(r"[ \t]*【[A-Za-z0-9]+-[0-9a-f]+】")
 
 
 def _unwrap_final_response(text: str) -> str:
@@ -52,7 +55,7 @@ def extract_adaptive_card_text(card_content: str) -> str:
         if element.get("type") == "TextBlock":
             text = element.get("text")
             if text:
-                parts.append(_unwrap_final_response(text))
+                parts.append(_CITATION_MARKER_RE.sub("", _unwrap_final_response(text)))
         elif element.get("type") == "RichTextBlock":
             joined = "".join(
                 inline.get("text", "")

@@ -11,15 +11,26 @@ import httpx
 import pytest
 from copilot_sync.cache import SyncCache
 from copilot_sync.config import Config
+from copilot_sync.converter import InteractionTurn
 from copilot_sync.graph_client import AuditQueryError
-from copilot_sync.models import CopilotAuditRecord, CopilotUser
+from copilot_sync.models import (
+    AiInteraction,
+    CopilotAuditRecord,
+    CopilotUser,
+    InteractionBody,
+)
 from copilot_sync.sync import (
+    Counts,
     FirstRunRequiresFromDateError,
     _audit_chunks_to_fetch,
     _audit_day_chunks,
     _plan_audit_window,
+    _send_turns,
+    _turn_audit_message_ids,
     run_sync,
 )
+
+from tests.test_audit_tools import record_a, record_b
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -178,10 +189,28 @@ def test_csv_export_writes_rows_instead_of_posting(tmp_path: Path) -> None:
     assert [row["end_user"] for row in rows] == ["user_a", "user_b"]
     assert rows[0]["conversation_id"] == "sess_1"
     assert rows[0]["input"] == "hello"
+    assert list(rows[0]) == [
+        "conversation_id",
+        "end_user",
+        "team",
+        "market",
+        "tenure",
+        "time_start",
+        "time_end",
+        "input",
+        "output",
+        "hide_content",
+        "tags",
+        "traces",
+        "user_feedback",
+        "anonymize",
+    ]
+    assert rows[0]["hide_content"] == "False"
     assert isinstance(json.loads(rows[0]["tags"]), dict)
     assert isinstance(json.loads(rows[0]["traces"]), list)
-    assert (tmp_path / "sync_state_csv.db").exists()
-    assert not (tmp_path / "sync_state.db").exists()
+    assert [p.parent.name for p in tmp_path.glob("*/sync_state.db")] == [
+        config.cache_key
+    ]
 
 
 def test_failed_user_does_not_advance_coverage_earlier_user_committed(
@@ -216,7 +245,7 @@ def test_failed_user_does_not_advance_coverage_earlier_user_committed(
         summary = asyncio.run(run_sync(config))
 
     assert summary.totals.users_failed == 1
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         user_a = cache.get_user_coverage("user_a")
         user_b = cache.get_user_coverage("user_b")
@@ -257,7 +286,7 @@ def test_403_skips_user_without_advancing_coverage(tmp_path: Path) -> None:
         nebuly.send_interaction = AsyncMock()
         asyncio.run(run_sync(config))
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         assert cache.get_user_coverage("user_a") is not None
         assert cache.get_user_coverage("user_b") is None
@@ -328,7 +357,7 @@ def test_in_flight_turn_deferred_then_sent(tmp_path: Path) -> None:
         asyncio.run(run_sync(run1_config))
 
     nebuly.send_interaction.assert_not_called()
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -374,7 +403,7 @@ def test_split_pair_watermark_holds_back_coverage(tmp_path: Path) -> None:
         asyncio.run(run_sync(run1_config))
 
     nebuly.send_interaction.assert_called_once()
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -399,7 +428,7 @@ def test_split_pair_watermark_holds_back_coverage(tmp_path: Path) -> None:
         asyncio.run(run_sync(run2_config))
 
     nebuly.send_interaction.assert_called_once()
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -431,7 +460,7 @@ def test_failed_turn_holds_back_coverage_then_resent(tmp_path: Path) -> None:
 
     assert summary.totals.failed == 1
     assert summary.totals.sent == 0
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -450,7 +479,7 @@ def test_failed_turn_holds_back_coverage_then_resent(tmp_path: Path) -> None:
         asyncio.run(run_sync(run2_config))
 
     nebuly.send_interaction.assert_called_once()
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -486,7 +515,7 @@ def test_one_failed_turn_does_not_abort_interval(tmp_path: Path) -> None:
 
     assert summary.totals.sent == 1
     assert summary.totals.failed == 1
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -518,7 +547,7 @@ def test_earliest_hold_back_wins_across_categories(tmp_path: Path) -> None:
         summary = asyncio.run(run_sync(config))
 
     assert summary.totals.failed == 1
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -569,7 +598,7 @@ def test_backfill_failure_does_not_mask_gap_when_tail_succeeds(tmp_path: Path) -
     mock_graph.list_copilot_users = AsyncMock(return_value=user)
     mock_graph.close = AsyncMock()
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     cache.save_user_coverage("user_a", _ts(8), _ts(12))
     cache.commit()
     cache.close()
@@ -605,7 +634,7 @@ def test_backfill_failure_does_not_mask_gap_when_tail_succeeds(tmp_path: Path) -
     assert summary.totals.failed == 1
     assert summary.totals.sent == 1
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -622,7 +651,7 @@ def test_backfill_and_tail_clean_merges_coverage(tmp_path: Path) -> None:
     mock_graph.list_copilot_users = AsyncMock(return_value=user)
     mock_graph.close = AsyncMock()
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     cache.save_user_coverage("user_a", _ts(8), _ts(12))
     cache.commit()
     cache.close()
@@ -653,7 +682,7 @@ def test_backfill_and_tail_clean_merges_coverage(tmp_path: Path) -> None:
         nebuly.send_interaction = AsyncMock()
         asyncio.run(run_sync(config))
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -669,7 +698,7 @@ def test_tail_hold_back_with_clean_backfill(tmp_path: Path) -> None:
     mock_graph.list_copilot_users = AsyncMock(return_value=user)
     mock_graph.close = AsyncMock()
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     cache.save_user_coverage("user_a", _ts(8), _ts(12))
     cache.commit()
     cache.close()
@@ -700,7 +729,7 @@ def test_tail_hold_back_with_clean_backfill(tmp_path: Path) -> None:
         nebuly.send_interaction = AsyncMock()
         asyncio.run(run_sync(config))
 
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     try:
         coverage = cache.get_user_coverage("user_a")
         assert coverage is not None
@@ -803,6 +832,75 @@ def test_audit_enrichment_adds_model_tag_to_payload(tmp_path: Path) -> None:
     assert summary.totals.sent == 1
 
 
+def _cowork_interaction(
+    interaction_id: str,
+    kind: str,
+    second: int,
+    content: str,
+) -> AiInteraction:
+    return AiInteraction(
+        id=interaction_id,
+        request_id=None,
+        session_id="19:synthetic@thread.v2",
+        interaction_type=kind,
+        app_class="IPM.SkypeTeams.Message.Copilot.CoworkChat",
+        conversation_type="coworkchat",
+        locale="en-us",
+        created_datetime=_ts(10, 0, second),
+        body=InteractionBody(
+            content_type="text" if kind == "userPrompt" else "html",
+            content=content,
+        ),
+    )
+
+
+def _cowork_turn_with_followup() -> InteractionTurn:
+    return InteractionTurn(
+        None,
+        _cowork_interaction("p1", "userPrompt", 0, "first prompt"),
+        (_cowork_interaction("r1", "aiResponse", 5, "final answer"),),
+        (_cowork_interaction("p2", "userPrompt", 3, "second prompt"),),
+    )
+
+
+def test_turn_audit_message_ids_include_followup_prompts() -> None:
+    ids = _turn_audit_message_ids(_cowork_turn_with_followup())
+    assert ids == ["r1", "p1", "p2"]
+
+
+def test_send_turns_merges_all_audit_records_of_a_turn(tmp_path: Path) -> None:
+    config = _config(tmp_path, audit_enrichment=True)
+    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=True)
+    cache.upsert_audit_records([record_b(), record_a()])
+    sink = MagicMock()
+    sink.send_interaction = AsyncMock()
+    counts = Counts()
+
+    asyncio.run(
+        _send_turns(
+            [_cowork_turn_with_followup()],
+            user=CopilotUser(id="user_a", mail="a@example.com"),
+            sink=sink,
+            config=config,
+            cache=cache,
+            counts=counts,
+            is_tail=False,
+            settle_edge=_ts(23),
+        ),
+    )
+
+    assert counts.enriched == 1
+    assert counts.sent == 1
+    payload = sink.send_interaction.call_args.args[0]
+    tags = payload["interaction"]["tags"]
+    assert tags["tool_approval_denied"] == "true"
+    assert tags["model_name"] == "gpt-synthetic"
+    sources = [t["source"] for t in payload["traces"] if "source" in t]
+    assert sources.count("m365_teams/PostMessage") == 2
+    assert "outlook_calendar/UpdateEvent" in sources
+    assert "core/RunScript" in sources
+
+
 def test_audit_settle_lag_holds_back_recent_tail_turn(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
@@ -837,7 +935,7 @@ def test_audit_settle_lag_holds_back_recent_tail_turn(tmp_path: Path) -> None:
 
 
 def test_audit_skips_cached_settled_chunks(tmp_path: Path) -> None:
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     gte = _ts(8)
     lte = _ts(12)
     for chunk_gte, chunk_lte in _audit_day_chunks(gte, lte):
@@ -854,7 +952,7 @@ def test_audit_skips_cached_settled_chunks(tmp_path: Path) -> None:
 
 
 def test_plan_audit_window_ignores_denied_user(tmp_path: Path) -> None:
-    cache = SyncCache(tmp_path / "sync_state.db", "tenant_1", dry_run=False)
+    cache = SyncCache(_config(tmp_path).cache_path, "tenant_1", dry_run=False)
     config = _config(tmp_path, from_date=_ts(8), to_date=_ts(12))
     users = _users()
     cache.mark_interaction_denied("user_b", reason="interaction_403")

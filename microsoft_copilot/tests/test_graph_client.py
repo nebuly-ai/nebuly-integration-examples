@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -395,3 +396,103 @@ def test_user_has_usable_copilot_license_requires_success_service_plan() -> None
         ),
     ):
         assert asyncio.run(client._user_has_usable_copilot_license("user-1")) is False
+
+
+def test_list_copilot_users_queries_each_sku_and_dedupes_by_user_id() -> None:
+    sku_a = "639dec6b-bb19-468b-871c-c5c441c4b0cb"
+    sku_b = "AD9C22B3-52D7-4E9E-AD2D-5EE0C6B53AA7"
+
+    def graph_user(user_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=user_id,
+            mail=f"{user_id}@contoso.com",
+            user_principal_name=f"{user_id}@contoso.com",
+            department=None,
+            job_title=None,
+            office_location=None,
+            city=None,
+            country=None,
+            usage_location=None,
+            company_name=None,
+            employee_hire_date=None,
+        )
+
+    users_by_sku = {
+        sku_a: ["both", "only-a"],
+        sku_b.lower(): ["both", "only-b"],
+    }
+    filters: list[str] = []
+
+    async def fake_get(*, request_configuration: object) -> SimpleNamespace:
+        flt = request_configuration.query_parameters.filter  # type: ignore[attr-defined]
+        filters.append(flt)
+        sku = flt.rsplit(" ", 1)[-1].rstrip(")").lower()
+        return SimpleNamespace(
+            odata_next_link=None,
+            value=[graph_user(uid) for uid in users_by_sku[sku]],
+        )
+
+    mock_graph = AsyncMock()
+    mock_graph.users.get = fake_get
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku=f"{sku_a}, {sku_b}",
+    )
+
+    with (
+        patch(
+            "copilot_sync.graph_client.ClientSecretCredential",
+            return_value=AsyncMock(),
+        ),
+        patch(
+            "copilot_sync.graph_client.GraphServiceClient",
+            return_value=mock_graph,
+        ),
+        patch.object(
+            client,
+            "_user_has_usable_copilot_license",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        users = asyncio.run(client.list_copilot_users())
+
+    assert len(filters) == 2
+    assert [u.id for u in users] == ["both", "only-a", "only-b"]
+
+
+def test_user_has_usable_copilot_license_accepts_any_configured_sku() -> None:
+    sku_a = "639dec6b-bb19-468b-871c-c5c441c4b0cb"
+    sku_b = "ad9c22b3-52d7-4e9e-ad2d-5ee0c6b53aa7"
+    client = GraphClient(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        client_id="00000000-0000-0000-0000-000000000002",
+        client_secret="secret_1",
+        copilot_sku=f"{sku_a},{sku_b.upper()}",
+    )
+
+    async def fake_fetch(*, url: str, headers: dict[str, str]) -> dict[str, Any]:
+        if url.endswith("licenseDetails"):
+            return {
+                "value": [
+                    {
+                        "skuId": sku_b,
+                        "servicePlans": [
+                            {
+                                "servicePlanId": "p1",
+                                "servicePlanName": "M365_COPILOT_BUSINESS_CHAT",
+                                "provisioningStatus": "Success",
+                            }
+                        ],
+                    }
+                ]
+            }
+        return {"assignedLicenses": [{"skuId": sku_b, "disabledPlans": []}]}
+
+    with (
+        patch.object(client, "_get_token", new=AsyncMock(return_value="t")),
+        patch.object(client, "_fetch_page", new=fake_fetch),
+    ):
+        assert asyncio.run(client._user_has_usable_copilot_license("u1")) is True
