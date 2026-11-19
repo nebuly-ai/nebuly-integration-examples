@@ -53,17 +53,19 @@ def test_assembly_matches_reusable_oracles(agentcore_case: dict[str, Any]) -> No
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("mutation", "warning"),
     [
-        "missing_parent",
-        "cycle",
-        "alias_conflict",
-        "negative_usage",
-        "reasoning_output",
-        "missing_tool",
+        ("missing_parent", "missing_parent"),
+        ("cycle", "ancestry_cycle"),
+        ("alias_conflict", "conflicting_usage_aliases"),
+        ("negative_usage", "invalid_usage"),
+        ("reasoning_output", "missing_output"),
+        ("missing_tool", "missing_tool_span"),
     ],
 )
-def test_damaged_trace_is_never_ready(mutation: str) -> None:
+def test_damaged_trace_is_sent_without_the_damaged_part(
+    mutation: str, warning: str
+) -> None:
     source, records = parse_case(load("principal_tools"))
     root = next(
         item
@@ -97,11 +99,15 @@ def test_damaged_trace_is_never_ready(mutation: str) -> None:
             if not (isinstance(item, Span) and item.name.startswith("execute_tool "))
         ]
     records = [replacement if item is chat else item for item in records]
-    result = assemble(source, records)
-    assert result.interactions[0].readiness == "blocked"
+    snapshot = assemble(source, records).interactions[0]
+    assert snapshot.readiness == "ready"
+    assert warning in snapshot.warnings
+    assert snapshot.output != "private"
+    if replacement is not chat:
+        assert chat.span_id not in {call.span_id for call in snapshot.model_calls}
 
 
-def test_conflicting_span_is_blocked_but_cross_group_duplicate_is_not() -> None:
+def test_conflicting_span_is_a_warning_but_cross_group_duplicate_is_not() -> None:
     source, records = parse_case(load())
     chat = next(
         item for item in records if isinstance(item, Span) and item.name == "chat"
@@ -113,9 +119,9 @@ def test_conflicting_span_is_blocked_but_cross_group_duplicate_is_not() -> None:
         == "ready"
     )
     conflicting = replace(chat, end_ns=chat.end_ns + 1)  # type: ignore[operator]
-    assert (
-        assemble(source, [*records, conflicting]).interactions[0].readiness == "blocked"
-    )
+    snapshot = assemble(source, [*records, conflicting]).interactions[0]
+    assert snapshot.readiness == "ready"
+    assert "conflicting_span" in snapshot.warnings
 
 
 def test_missing_root_and_multiple_roots_are_diagnosed() -> None:
@@ -157,7 +163,7 @@ def test_source_isolation_and_exact_case_sensitive_identity() -> None:
     assert snapshot.readiness == "ready"
 
 
-def test_known_malformed_child_diagnostic_blocks_parent() -> None:
+def test_known_malformed_child_diagnostic_is_a_warning() -> None:
     source, records = parse_case(load())
     trace_id = records[0].trace_id
     snapshot = assemble(
@@ -165,7 +171,8 @@ def test_known_malformed_child_diagnostic_blocks_parent() -> None:
         records,
         parse_diagnostics=[Diagnostic("malformed_record", trace_id, "child")],
     ).interactions[0]
-    assert snapshot.readiness == "blocked"
+    assert snapshot.readiness == "ready"
+    assert snapshot.warnings == ("malformed_record",)
 
 
 def test_root_agent_may_have_any_name() -> None:
@@ -237,8 +244,9 @@ def test_reasoning_or_unsupported_blocks_do_not_become_final_text(
         replace(item, events=events) if item is root else item for item in records
     ]
     snapshot = assemble(source, records).interactions[0]
-    assert snapshot.readiness == "blocked"
-    assert snapshot.output != "private"
+    assert snapshot.readiness == "ready"
+    assert snapshot.warnings
+    assert snapshot.output in {None, "visible"}
 
 
 @pytest.mark.parametrize(
@@ -261,7 +269,7 @@ def test_explicit_empty_or_scalar_text_output_is_preserved(output: str) -> None:
     assert snapshot.output == output
 
 
-def test_malformed_tool_identifiers_are_blocked_without_crash() -> None:
+def test_malformed_tool_identifiers_are_left_out_without_crash() -> None:
     source, records = parse_case(load("principal_tools"))
     tool = next(
         item
@@ -274,10 +282,13 @@ def test_malformed_tool_identifiers_are_blocked_without_crash() -> None:
         else item
         for item in records
     ]
-    assert assemble(source, records).interactions[0].readiness == "blocked"
+    snapshot = assemble(source, records).interactions[0]
+    assert snapshot.readiness == "ready"
+    assert "incomplete_tool" in snapshot.warnings
+    assert tool.span_id not in {item.span_id for item in snapshot.tools}
 
 
-def test_incremental_root_requires_reading_its_earlier_history() -> None:
+def test_incremental_root_warns_about_its_unread_earlier_history() -> None:
     source, records = parse_case(load("principal_tools"))
     root = next(
         item
@@ -297,8 +308,8 @@ def test_incremental_root_requires_reading_its_earlier_history() -> None:
     ]
     result = assemble(source, last_only, read_start_ms=prefix_cutoff)
     snapshot = result.interactions[0]
-    assert snapshot.readiness == "blocked"
-    assert "unread_trace_history" in {item.code for item in snapshot.diagnostics}
+    assert snapshot.readiness == "ready"
+    assert "unread_trace_history" in snapshot.warnings
     assert (
         assemble(source, records, read_start_ms=root.start_ns // 1_000_000)
         .interactions[0]
@@ -334,8 +345,8 @@ def test_terminal_export_cannot_change_open_operation_identity() -> None:
     )
     wrong_operation = replace(chat, end_ns=None, start_ns=chat.start_ns - 1)
     actual = assemble(source, [*records, wrong_operation]).interactions[0]
-    assert actual.readiness == "blocked"
-    assert "conflicting_span" in {issue.code for issue in actual.diagnostics}
+    assert actual.readiness == "ready"
+    assert "conflicting_span" in actual.warnings
 
 
 def test_optional_cache_counters_may_be_absent_without_losing_model_calls() -> None:
@@ -370,4 +381,7 @@ def test_present_but_invalid_cache_counter_is_not_defaulted(value: object) -> No
     updated = [
         replace(item, attributes=attrs) if item is chat else item for item in records
     ]
-    assert assemble(source, updated).interactions[0].readiness == "blocked"
+    snapshot = assemble(source, updated).interactions[0]
+    assert snapshot.readiness == "ready"
+    assert snapshot.warnings
+    assert chat.span_id not in {call.span_id for call in snapshot.model_calls}

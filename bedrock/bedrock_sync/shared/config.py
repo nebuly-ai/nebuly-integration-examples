@@ -27,6 +27,7 @@ DEFAULT_NEBULY_ENDPOINT = (
     "https://backend.nebuly.com/event-ingestion/api/v3/events/trace_interaction"
 )
 DEFAULT_CONTENT_RETENTION_SECONDS = 7 * 86400
+DEFAULT_HISTORY_RETENTION_SECONDS = 30 * 86400
 _TRUE = {"true", "1", "yes", "on"}
 _FALSE = {"false", "0", "no", "off", ""}
 
@@ -83,18 +84,24 @@ def add_common_arguments(
         help="Keep sent or rejected payloads this long (default 7 days)",
     )
     parser.add_argument(
+        "--history-retention-seconds",
+        type=nonnegative_int_arg,
+        default=DEFAULT_HISTORY_RETENTION_SECONDS,
+        help="Keep the record of finished interactions this long, to recognize "
+        "logs read again (default 30 days)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Build the payloads without sending them or saving the state",
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="Debug logs (never HTTP bodies)"
+        "--retry-given-up",
+        metavar="INTERACTION_KEY",
+        help="Retry one delivery abandoned after repeated ambiguous failures",
     )
     parser.add_argument(
-        "--no-retry-http-429",
-        action="store_false",
-        dest="retry_http_429",
-        help="Treat a 429 as uncertain (never sent again) instead of retrying it",
+        "--verbose", action="store_true", help="Debug logs (never HTTP bodies)"
     )
 
 
@@ -171,15 +178,16 @@ class CommonConfig:
     nebuly_api_key: str = field(repr=False)
     nebuly_endpoint: str
     user_hash_secret: str = field(repr=False)
-    send_plain_end_user: bool
+    pseudonymize_end_user: bool
     anonymize: bool
     from_date: datetime | None
     to_date: datetime | None
     state_db: Path
     content_retention_seconds: int
+    history_retention_seconds: int = DEFAULT_HISTORY_RETENTION_SECONDS
     dry_run: bool
     verbose: bool
-    retry_http_429: bool
+    retry_given_up: str | None = None
 
     @staticmethod
     def common_values(
@@ -193,16 +201,28 @@ class CommonConfig:
         external_id = env_str(env, "AWS_EXTERNAL_ID") or None
         if external_id and not role:
             raise ConfigError("AWS_EXTERNAL_ID requires AWS_ROLE_ARN")
-        send_plain_end_user = env_bool(env, "SEND_PLAIN_END_USER")
+        pseudonymize_end_user = env_bool(env, "PSEUDONYMIZE_END_USER")
         user_hash_secret = env.get("USER_HASH_SECRET", "")
-        if not send_plain_end_user and not user_hash_secret.strip():
+        if pseudonymize_end_user and not user_hash_secret.strip():
             raise ConfigError(
-                "USER_HASH_SECRET is required unless SEND_PLAIN_END_USER is true"
+                "USER_HASH_SECRET is required when PSEUDONYMIZE_END_USER is true"
             )
         api_key = env_str(env, "NEBULY_API_KEY")
         if not args.dry_run and not api_key:
             raise ConfigError("NEBULY_API_KEY is required outside dry-run")
         check_date_range(args.from_date, args.to_date)
+        if args.retry_given_up is not None and (
+            args.from_date is not None or args.to_date is not None or args.dry_run
+        ):
+            raise ConfigError(
+                "--retry-given-up cannot be combined with --from-date, --to-date "
+                "or --dry-run"
+            )
+        if args.history_retention_seconds < args.content_retention_seconds:
+            raise ConfigError(
+                "--history-retention-seconds must not be shorter than "
+                "--content-retention-seconds"
+            )
         return {
             "account_id": account_id,
             "region": region,
@@ -211,13 +231,14 @@ class CommonConfig:
             "nebuly_api_key": api_key,
             "nebuly_endpoint": _endpoint(env),
             "user_hash_secret": user_hash_secret,
-            "send_plain_end_user": send_plain_end_user,
+            "pseudonymize_end_user": pseudonymize_end_user,
             "anonymize": env_bool(env, "ANONYMIZE"),
             "from_date": args.from_date,
             "to_date": args.to_date,
             "state_db": args.state_db,
             "content_retention_seconds": args.content_retention_seconds,
+            "history_retention_seconds": args.history_retention_seconds,
             "dry_run": args.dry_run,
             "verbose": args.verbose,
-            "retry_http_429": args.retry_http_429,
+            "retry_given_up": args.retry_given_up,
         }

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bedrock_sync.runtime.grouping import (
     AddResult,
@@ -14,6 +15,9 @@ from bedrock_sync.runtime.grouping import (
 from bedrock_sync.runtime.models import Invocation
 from bedrock_sync.runtime.parser import parse_record
 from tests.runtime.records import converse_record, user
+
+if TYPE_CHECKING:
+    import pytest
 
 START = datetime(2026, 11, 11, 10, tzinfo=UTC)
 IDLE = timedelta(minutes=30)
@@ -54,17 +58,9 @@ def call(
     return parsed
 
 
-def grouper(
-    closed: dict[str, str] | None = None, conversations: dict[str, str] | None = None
-) -> Grouper:
-    closed = closed or {}
-    conversations = conversations or {}
-    return Grouper(
-        idle=IDLE,
-        delivery_margin=MARGIN,
-        closed_owner=closed.get,
-        conversation_owner=conversations.get,
-    )
+def grouper(closed: set[str] | None = None) -> Grouper:
+    closed = closed or set()
+    return Grouper(idle=IDLE, delivery_margin=MARGIN, is_closed=closed.__contains__)
 
 
 def at(minutes: float) -> datetime:
@@ -112,37 +108,24 @@ def test_duplicate_request_id_is_dropped() -> None:
     assert g.stats.duplicates == 1
 
 
-def test_reused_interaction_id_in_another_conversation_is_dropped() -> None:
+def test_same_interaction_id_in_two_conversations_is_two_turns() -> None:
+    """Turns may be numbered per conversation: the key is the pair."""
     g = grouper()
-    g.add(call("r1", 0, triplet()))
+    g.add(call("r1", 0, triplet(), question="first chat"))
 
-    result = g.add(call("r2", 5, triplet(conversation="c-2")))
+    result = g.add(call("r2", 5, triplet(conversation="c-2"), question="second chat"))
 
-    assert result is AddResult.CONFLICT
-    assert g.stats.interaction_id_conflicts == 1
+    assert result is AddResult.ACCEPTED
     g.advance(at(40))
-    [interaction] = g.drain_closed()
-    assert interaction.triplet.conversation_id == "c-1"
-    assert len(interaction.invocations) == 1
+    closed = g.drain_closed()
+    assert [i.triplet.conversation_id for i in closed] == ["c-1", "c-2"]
+    assert [len(i.invocations) for i in closed] == [1, 1]
 
 
-def test_another_user_in_the_conversation_wins_over_the_id_check() -> None:
-    """Conversation = one user comes first: a newer call of another user with
-    the same ids is a conversation conflict."""
-    g = grouper()
-    g.add(call("r1", 0, triplet()))
+def test_turn_closed_in_an_earlier_run_is_closed_only_in_its_conversation() -> None:
+    g = grouper({Triplet("i-1", "c-1", "u-1").turn_key})
 
-    assert g.add(call("r2", 5, triplet(user_id="u-2"))) is (
-        AddResult.CONVERSATION_CONFLICT
-    )
-    assert g.stats.interaction_id_conflicts == 0
-
-
-def test_reused_interaction_id_of_an_earlier_run_is_a_conflict() -> None:
-    owner = Triplet("i-1", "c-1", "u-1").owner
-    g = grouper({"i-1": owner})
-
-    assert g.add(call("r1", 0, triplet(conversation="c-2"))) is AddResult.CONFLICT
+    assert g.add(call("r1", 0, triplet(conversation="c-2"))) is AddResult.ACCEPTED
     assert g.add(call("r2", 0, triplet())) is AddResult.CLOSED
     assert g.stats.calls_for_closed_interaction == 1
 
@@ -173,7 +156,12 @@ def test_call_after_the_idle_time_is_dropped_whenever_it_is_read() -> None:
 
     one_run = grouper()
     one_run.add(call("r1", 0, triplet()))
-    assert one_run.add(call("r2", late, triplet())) is AddResult.CLOSED
+    one_run.add(call("r2", late, triplet()))
+    one_run.advance(at(36))
+    [closed] = one_run.drain_closed()
+    assert [item.request_id for item in closed.invocations] == ["r1"]
+    assert one_run.stats.calls_for_closed_interaction == 1
+    assert one_run.stats.accepted == 1
 
     two_runs = grouper()
     two_runs.add(call("r1", 0, triplet()))
@@ -181,6 +169,22 @@ def test_call_after_the_idle_time_is_dropped_whenever_it_is_read() -> None:
     two_runs.drain_closed()
     assert two_runs.add(call("r2", late, triplet())) is AddResult.CLOSED
     assert two_runs.stats.calls_for_closed_interaction == 1
+
+
+def test_out_of_order_call_can_bridge_an_apparent_idle_gap() -> None:
+    g = grouper()
+    g.add(call("r1", 0, triplet()))
+    g.add(call("r3", 60 * 31, triplet()))
+    g.advance(at(32))
+    assert g.drain_closed() == []
+
+    g.add(call("r2", 60 * 29, triplet()))
+    g.advance(at(33))
+    assert g.drain_closed() == []
+    g.advance(at(67))
+    [closed] = g.drain_closed()
+    assert [item.request_id for item in closed.invocations] == ["r1", "r2", "r3"]
+    assert g.stats.calls_for_closed_interaction == 0
 
 
 def test_next_interaction_closes_the_previous_after_the_delivery_margin() -> None:
@@ -191,7 +195,7 @@ def test_next_interaction_closes_the_previous_after_the_delivery_margin() -> Non
     g.advance(at(1) + MARGIN - timedelta(seconds=1))
     assert g.drain_closed() == []
 
-    g.advance(at(1) + MARGIN)
+    g.advance(START + timedelta(seconds=80) + MARGIN)
     [closed] = g.drain_closed()
     assert closed.triplet.interaction_id == "i-a"
     assert closed.close_reason is CloseReason.NEXT_INTERACTION
@@ -205,25 +209,40 @@ def test_late_last_call_of_previous_turn_within_the_margin_still_joins() -> None
     g.add(call("b1", 60, triplet("i-b")))
     g.advance(at(2))
     g.add(call("a2", 50, triplet("i-a"), answer="final A"))
-    g.advance(at(1) + MARGIN)
+    g.advance(START + timedelta(seconds=80) + MARGIN)
 
     [closed] = g.drain_closed()
     assert [i.request_id for i in closed.invocations] == ["a1", "a2"]
 
 
-def test_a_call_still_running_after_the_next_turn_does_not_delay_closure() -> None:
-    """A background call of turn A starts after turn B: A still closes after
-    B's start plus the margin, whether or not that call was read first."""
+def test_turn_still_working_after_the_next_message_stays_open() -> None:
+    """The user writes again while the agent still works on turn A: A closes
+    only once it is quiet for the margin, with its final answer."""
     g = grouper()
     g.add(call("a1", 0, triplet("i-a")))
-    g.add(call("b1", 60, triplet("i-b")))
-    g.add(call("a2", 70, triplet("i-a"), answer="final A"))
-    g.advance(at(1) + MARGIN)
+    g.add(call("b1", 120, triplet("i-b")))
+    g.add(call("a2", 420, triplet("i-a"), answer="final A"))
+    g.advance(at(2) + MARGIN)
+    assert g.drain_closed() == []
 
+    g.advance(at(8) + MARGIN)
     [closed] = g.drain_closed()
     assert closed.triplet.interaction_id == "i-a"
     assert closed.close_reason is CloseReason.NEXT_INTERACTION
     assert [i.request_id for i in closed.invocations] == ["a1", "a2"]
+    assert closed.final is not None
+    assert closed.final.request_id == "a2"
+
+
+def test_finished_turn_closes_at_the_next_turn_plus_the_margin() -> None:
+    g = grouper()
+    g.add(call("a1", 0, triplet("i-a")))
+    g.add(call("b1", 120, triplet("i-b")))
+    g.advance(at(2) + MARGIN)
+
+    [closed] = g.drain_closed()
+    assert closed.triplet.interaction_id == "i-a"
+    assert closed.close_reason is CloseReason.NEXT_INTERACTION
 
 
 def test_other_conversations_do_not_close_an_interaction() -> None:
@@ -284,84 +303,39 @@ def test_open_refs_and_restore_round_trip() -> None:
     assert restored.stats.accepted == 1
 
 
-def test_conversation_of_another_user_is_dropped() -> None:
+def test_another_user_in_the_conversation_has_their_own_turns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nebuly keys a conversation by id and end user: so does the grouper."""
     g = grouper()
-    g.add(call("r1", 0, triplet("i-1", "c-1", "u-1")))
-
-    result = g.add(call("r2", 60, triplet("i-2", "c-1", "u-2")))
-
-    assert result is AddResult.CONVERSATION_CONFLICT
-    assert g.stats.conversation_user_conflicts == 1
-    assert g.open_count == 1
-    assert g.add(call("r3", 90, triplet("i-3", "c-1", "u-1"))) is AddResult.ACCEPTED
-
-
-def test_conversation_owner_of_an_earlier_run_is_respected() -> None:
-    owner = Triplet("i-0", "c-1", "u-1")
-    g = grouper(conversations={owner.conversation_key: owner.owner})
-
-    assert g.add(call("r1", 0, triplet("i-1", "c-1", "u-2"))) is (
-        AddResult.CONVERSATION_CONFLICT
-    )
-    assert g.add(call("r2", 0, triplet("i-2", "c-1", "u-1"))) is AddResult.ACCEPTED
-    assert g.conversation_owners() == {}  # nothing closed in this run
+    g.add(call("a1", 0, triplet("i-1", "c-1", "u-alice"), question="alice"))
+    with caplog.at_level(logging.WARNING):
+        assert g.add(call("b1", 60, triplet("i-2", "c-1", "u-bob"))) is (
+            AddResult.ACCEPTED
+        )
+        g.add(call("b2", 70, triplet("i-3", "c-1", "u-bob")))
+        g.add(call("a2", 80, triplet("i-4", "c-1", "u-alice")))
+    assert g.stats.conversations_with_several_users == 1
+    assert caplog.text.count("several user_id values") == 1
+    # Bob's next turn does not close Alice's: only her own next turn does.
+    g.advance(START + timedelta(seconds=80) + MARGIN)
+    closed = g.drain_closed()
+    assert [(i.triplet.user_id, i.triplet.interaction_id) for i in closed] == [
+        ("u-alice", "i-1"),
+        ("u-bob", "i-2"),
+    ]
 
 
-def test_older_call_of_another_user_read_later_takes_the_conversation() -> None:
-    """S3 delivered the wrong (newer) calls first: the oldest call decides."""
+def test_same_interaction_id_of_two_users_is_one_interaction_per_user(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     g = grouper()
-    g.add(call("bob", 2, triplet("i-bob", "c-1", "u-bob")))
-    g.add(call("bob2", 3, triplet("i-bob2", "c-1", "u-bob")))
-
-    assert g.add(call("alice", 0, triplet("i-a", "c-1", "u-alice"))) is (
-        AddResult.ACCEPTED
-    )
-    assert g.add(call("alice2", 60, triplet("i-a2", "c-1", "u-alice"))) is (
-        AddResult.ACCEPTED
-    )
-    assert (g.stats.conversation_user_conflicts, g.stats.accepted) == (2, 2)
+    g.add(call("a1", 0, triplet("i-1", "c-1", "u-alice")))
+    with caplog.at_level(logging.WARNING):
+        g.add(call("b1", 5, triplet("i-1", "c-1", "u-bob")))
+    assert g.stats.interactions_with_several_users == 1
+    assert "one interaction per user" in caplog.text
     g.advance(at(40))
-    assert [i.triplet.interaction_id for i in g.drain_closed()] == ["i-a", "i-a2"]
-
-
-def test_take_over_wins_over_a_reused_interaction_id() -> None:
-    """The conversation rule comes first: the older user takes the
-    conversation even when the newer one used the same interaction_id."""
-    g = grouper()
-    g.add(call("bob", 2, triplet("i-1", "c-1", "u-bob")))
-
-    assert g.add(call("alice", 0, triplet("i-1", "c-1", "u-alice"))) is (
-        AddResult.ACCEPTED
-    )
-    assert g.stats.interaction_id_conflicts == 0
-
-
-def test_take_over_does_not_uncount_calls_restored_from_an_earlier_run() -> None:
-    g = grouper()
-    g.restore([call("bob", 2, triplet("i-bob", "c-1", "u-bob"))])
-
-    g.add(call("alice", 0, triplet("i-a", "c-1", "u-alice")))
-
-    assert (g.stats.accepted, g.stats.conversation_user_conflicts) == (1, 1)
-
-
-def test_owner_is_final_once_an_interaction_closed() -> None:
-    g = grouper()
-    g.add(call("r1", 0, triplet("i-1", "c-1", "u-1")))
-    g.advance(at(40))
-    [closed] = g.drain_closed()
-
-    older = call("r0", -60, triplet("i-0", "c-1", "u-2"))
-    assert g.add(older) is AddResult.CONVERSATION_CONFLICT
-    assert g.conversation_owners() == {
-        closed.triplet.conversation_key: closed.triplet.owner
-    }
-
-
-def test_same_second_keeps_the_user_read_first() -> None:
-    g = grouper()
-    g.add(call("r1", 0, triplet("i-1", "c-1", "u-1")))
-
-    assert g.add(call("r2", 0, triplet("i-2", "c-1", "u-2"))) is (
-        AddResult.CONVERSATION_CONFLICT
-    )
+    closed = g.drain_closed()
+    assert sorted(i.triplet.user_id for i in closed) == ["u-alice", "u-bob"]
+    assert closed[0].triplet.turn_key != closed[1].triplet.turn_key

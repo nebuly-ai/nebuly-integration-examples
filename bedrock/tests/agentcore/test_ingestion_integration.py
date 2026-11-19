@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from dataclasses import asdict
 from typing import TYPE_CHECKING
@@ -40,7 +41,6 @@ def test_cloudwatch_to_durable_assembly_survives_restart(
         env={
             "BEDROCK_ACCOUNT_ID": case["source"]["account_id"],
             "BEDROCK_REGION": case["source"]["region"],
-            "SEND_PLAIN_END_USER": "true",
         },
     )
     source = SourceScope(config.account_id, config.region, config.source_id)
@@ -99,10 +99,11 @@ def test_cloudwatch_to_durable_assembly_survives_restart(
     with AgentCoreState(db, source, groups) as state:
         delivery = state.find_delivery(key)
         assert delivery is not None
-        assert delivery.status == "uncertain"
-        assert not state.pending_deliveries()
-        with pytest.raises(StateError):
-            state.begin_attempt(key)
+        assert delivery.status == "pending"
+        assert not state.pending_deliveries()  # Nebuly may have it: wait
+    later = int(time.time() * 1000) + 61_000
+    with AgentCoreState(db, source, groups, now_ms=later) as state:
+        assert len(state.pending_deliveries()) == 1
 
 
 def test_long_trace_recovers_earlier_children_without_claiming_old_coverage(

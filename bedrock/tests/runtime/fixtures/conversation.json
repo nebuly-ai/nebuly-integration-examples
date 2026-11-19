@@ -188,7 +188,7 @@
          "role": "assistant",
          "content": [
           {
-           "text": "7 \u00d7 8 = **56**"
+           "text": "7 × 8 = **56**"
           }
          ]
         }
@@ -253,7 +253,7 @@
            }
           },
           {
-           "text": "I\u2019ll remember CODE-42."
+           "text": "I’ll remember CODE-42."
           }
          ]
         },
@@ -376,7 +376,7 @@
            }
           },
           {
-           "text": "I\u2019ll remember CODE-42."
+           "text": "I’ll remember CODE-42."
           }
          ]
         }
@@ -533,7 +533,7 @@
            }
           },
           {
-           "text": "I\u2019ll remember CODE-42."
+           "text": "I’ll remember CODE-42."
           }
          ]
         },
@@ -628,7 +628,7 @@
     "conversation_id": "29c3a145-9786-4001-9dd5-3590fb47b624",
     "end_user": "fixture_d4165046263c_alice",
     "input": "What is 7*8?",
-    "output": "7 \u00d7 8 = **56**",
+    "output": "7 × 8 = **56**",
     "tokens": {
      "claude-haiku-5-5": {
       "input_tokens": 178,
@@ -643,26 +643,11 @@
     "conversation_id": "0d11a74e-d17d-4245-9b7f-dc5499158ea9",
     "end_user": "fixture_d4165046263c_alice",
     "input": "Remember CODE-42.",
-    "output": "I\u2019ll remember CODE-42.",
+    "output": "I’ll remember CODE-42.",
     "tokens": {
      "gpt-6.1-terra": {
       "input_tokens": 11,
       "output_tokens": 39,
-      "cache_read_input_tokens": 0,
-      "cache_write_input_tokens": 0
-     }
-    },
-    "tools": []
-   },
-   {
-    "conversation_id": "0d11a74e-d17d-4245-9b7f-dc5499158ea9",
-    "end_user": "fixture_d4165046263c_alice",
-    "input": "What is 7*8?",
-    "output": "56.",
-    "tokens": {
-     "gpt-6.1-terra": {
-      "input_tokens": 84,
-      "output_tokens": 6,
       "cache_read_input_tokens": 0,
       "cache_write_input_tokens": 0
      }
@@ -678,6 +663,21 @@
      "gpt-6.1-terra": {
       "input_tokens": 63,
       "output_tokens": 8,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "0d11a74e-d17d-4245-9b7f-dc5499158ea9",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "What is 7*8?",
+    "output": "56.",
+    "tokens": {
+     "gpt-6.1-terra": {
+      "input_tokens": 84,
+      "output_tokens": 6,
       "cache_read_input_tokens": 0,
       "cache_write_input_tokens": 0
      }

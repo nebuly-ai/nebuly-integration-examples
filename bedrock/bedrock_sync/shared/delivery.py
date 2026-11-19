@@ -1,29 +1,42 @@
-"""Durable delivery with retries only for connection failure and rate limiting.
+"""Durable delivery: retry unconfirmed POSTs and record terminal outcomes.
 
-Shared by the AgentCore and runtime connectors. Nebuly does not deduplicate,
-so a POST whose outcome is unknown is never replayed automatically:
+Shared by the AgentCore and runtime connectors. Nebuly updates the existing
+interaction when one with the same input, end user and start time arrives
+again, and a payload changes only to be completed with those values kept (an
+AgentCore late span), so sending it twice is safe. The outcomes:
 
 - ``sent``: confirmed 2xx;
-- ``rejected``: explicit permanent 4xx;
-- ``uncertain``: Nebuly may have accepted it (read errors, 3xx, 408, 5xx, a
-  crash while ``sending``); left for an operator. The run stops there, so an
-  outage or a redirecting endpoint costs one item, not the whole outbox;
-- ``retryable``: connection failure or 429, rejected before ingestion; the
-  item stays ``pending`` for a later attempt. 401/403 (bad key) and 404/405
-  (wrong endpoint) are never ingested either: the item stays ``pending`` and
-  the run stops with an error to fix first.
+- ``rejected``: permanent 4xx, or ambiguous failures spanning at least 7
+  days. The latter can be retried explicitly while the payload is retained.
+- ``retryable``: anything else; the item goes back to ``pending``.
+  - Not received (connection failure, 429): short waits are retried in the
+    same run, longer ones by a later run after the ``Retry-After`` delay.
+  - Maybe received (timeout after sending, 408, 5xx): retried by a later run,
+    at least a minute later, never at once, so the two copies do not reach
+    Nebuly at the same time. Each failure of the same item waits longer (up
+    to 6 hours), and after 7 days of failures the item is given up as
+    ``rejected``.
+  - Wrong setting (3xx, 401/403 bad key, 404/405 wrong endpoint): the run
+    stops with an error to fix first.
 
-The store (an outbox in SQLite) commits ``sending`` before each POST.
+A 429, a connection failure or a wrong setting stops the run at once, so an
+outage costs one attempt, not the whole outbox. A 5xx or a timeout may come
+from one bad payload: the run goes on with the next item, which goes first
+from then on, and stops at the second such failure in a row. The store (an outbox in
+SQLite) commits ``sending`` before each POST; a ``sending`` left by a crash
+goes back to ``pending``.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 import httpx
@@ -34,8 +47,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from types import TracebackType
 
-DeliveryStatus = Literal["pending", "sending", "sent", "rejected", "uncertain"]
-Outcome = Literal["sent", "rejected", "uncertain", "retryable"]
+DeliveryStatus = Literal["pending", "sending", "sent", "rejected"]
+Outcome = Literal["sent", "rejected", "retryable"]
 
 
 @dataclass(frozen=True)
@@ -63,7 +76,8 @@ class DeliveryStore(Protocol):
         http_status: int | None = None,
         retry_after_seconds: int = 60,
         finished_ms: int | None = None,
-    ) -> None: ...
+        maybe_received: bool = False,
+    ) -> DeliveryStatus: ...
 
 
 class DeliveryError(ConnectorError):
@@ -79,20 +93,34 @@ class SendResult:
     outcome: Outcome
     http_status: int | None = None
     retry_after_seconds: int | None = None
+    maybe_received: bool = False
+    """Nebuly may have the payload: retry it only in a later run."""
 
 
 @dataclass(frozen=True)
 class DeliveryReport:
     sent: int = 0
     rejected: int = 0
-    uncertain: int = 0
     retryable: int = 0
     paused: bool = False
     """Deliveries wait for an earlier Retry-After, from this run or a previous one."""
 
 
-NOT_INGESTED_STATUSES = frozenset({401, 403, 404, 405})
-"""Wrong key or endpoint: nothing was ingested, so the item stays pending."""
+logger = logging.getLogger(__name__)
+
+RETRYABLE_4XX = frozenset({401, 403, 404, 405, 408, 429})
+"""4xx statuses that do not reject the payload itself."""
+
+MIN_LATER_RETRY_SECONDS = 60
+"""A payload Nebuly may have received waits at least this long."""
+
+
+def needs_fix(status: int | None) -> bool:
+    """Wrong key or endpoint: nothing was ingested, the setting must change."""
+    return status is not None and (
+        300 <= status < 400 or status in {401, 403, 404, 405}
+    )
+
 
 MAX_RETRY_AFTER_SECONDS = 86400
 """A longer Retry-After is capped, so one bad header cannot stop delivery."""
@@ -124,13 +152,11 @@ class SafeNebulyClient:
         transport: httpx.BaseTransport | None = None,
         max_attempts: int = 3,
         sleep: Callable[[float], None] = time.sleep,
-        retry_http_429: bool = True,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("At least one delivery attempt is required")
         self._max_attempts = max_attempts
         self._sleep = sleep
-        self._retry_http_429 = retry_http_429
         self._endpoint = endpoint
         self._headers = {
             "Authorization": f"Bearer {api_key}",
@@ -170,18 +196,24 @@ class SafeNebulyClient:
     def send(self, request: httpx.Request) -> SendResult:
         for index in range(self._max_attempts):
             result = self._send_once(request)
-            if (
-                result.outcome != "retryable"
-                or result.http_status in NOT_INGESTED_STATUSES
-            ):
+            if result.outcome != "retryable" or needs_fix(result.http_status):
                 return result
+            if result.maybe_received:
+                return SendResult(
+                    "retryable",
+                    result.http_status,
+                    max(MIN_LATER_RETRY_SECONDS, result.retry_after_seconds or 0),
+                    maybe_received=True,
+                )
             delay = (
                 result.retry_after_seconds
                 if result.retry_after_seconds is not None
                 else 2**index
             )
             if index + 1 == self._max_attempts or delay > 5:
-                return SendResult("retryable", result.http_status, max(60, delay))
+                return SendResult(
+                    "retryable", result.http_status, max(MIN_LATER_RETRY_SECONDS, delay)
+                )
             self._sleep(delay)
         raise AssertionError("Unreachable delivery retry state")
 
@@ -191,7 +223,7 @@ class SafeNebulyClient:
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
             return SendResult("retryable")
         except httpx.TransportError:
-            return SendResult("uncertain")
+            return SendResult("retryable", maybe_received=True)
         try:
             status = response.status_code
             retry_after = _retry_after(response.headers.get("Retry-After"))
@@ -199,13 +231,47 @@ class SafeNebulyClient:
             response.close()
         if 200 <= status < 300:
             return SendResult("sent", status)
-        if status == 429 and self._retry_http_429:
+        if status == 429:
             return SendResult("retryable", status, retry_after)
-        if status in NOT_INGESTED_STATUSES:
+        if needs_fix(status):
             return SendResult("retryable", status, 0)
-        if 400 <= status < 500 and status not in {408, 429}:
+        if 400 <= status < 500 and status not in RETRYABLE_4XX:
             return SendResult("rejected", status)
-        return SendResult("uncertain", status)
+        return SendResult("retryable", status, retry_after, maybe_received=True)
+
+
+def _log_given_up(delivery: Delivery, status: int | None) -> None:
+    logger.warning(
+        "Delivery %s was given up and counted as rejected after ambiguous failures "
+        "spanning at least 7 days (last HTTP %s). Once the cause is fixed, use "
+        "--retry-given-up %s with the same state file while it retains the payload",
+        delivery.interaction_key,
+        status if status is not None else "none, timeout",
+        delivery.interaction_key,
+    )
+
+
+def _log_rejected(
+    delivery: Delivery, request: httpx.Request, status: int | None
+) -> None:
+    """One line per rejected interaction, with what finds it in the logs."""
+    interaction = delivery.payload.get("interaction")
+    found = interaction if isinstance(interaction, dict) else {}
+    where = (delivery.interaction_key, found.get("time_start"))
+    if status == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+        logger.warning(
+            "Nebuly refused delivery %s at %s as too large "
+            "(%d bytes, HTTP 413): it is not sent again; lower MAX_CONTENT_CHARS "
+            "in user_defined.py to send interactions this big",
+            *where,
+            len(request.content),
+        )
+    else:
+        logger.warning(
+            "Nebuly rejected delivery %s at %s (HTTP %s): it is not sent again",
+            *where,
+            status,
+        )
 
 
 def deliver(
@@ -215,41 +281,55 @@ def deliver(
     *,
     clock_ms: Callable[[], int] | None = None,
 ) -> DeliveryReport:
-    """Persist sending before HTTP; never turn uncertainty into an automatic retry."""
+    """Persist sending before HTTP; stop at an outage or a wrong setting."""
     if store.dry_run:
         raise DeliveryError("Dry-run state cannot deliver interactions")
-    counts: dict[str, int] = {"sent": 0, "rejected": 0, "uncertain": 0, "retryable": 0}
+    counts: dict[str, int] = {"sent": 0, "rejected": 0, "retryable": 0}
+    failed_in_row = 0
     for delivery in deliveries:
         request = client.prepare(delivery.payload)
         attempt = store.begin_attempt(delivery.interaction_key)
         try:
             result = client.send(request)
-        except Exception:  # noqa: BLE001 - persist ambiguity at the transport boundary
-            store.finish_attempt(attempt, "uncertain")
+        except Exception:  # noqa: BLE001 - persist the attempt at the transport boundary
+            store.finish_attempt(
+                attempt, "retryable", retry_after_seconds=MIN_LATER_RETRY_SECONDS
+            )
             raise DeliveryError(
-                "Unexpected transport failure; delivery is uncertain"
+                "Unexpected transport failure; a later run sends the item again"
             ) from None
-        store.finish_attempt(
+        status = store.finish_attempt(
             attempt,
             result.outcome,
             http_status=result.http_status,
-            retry_after_seconds=60
+            retry_after_seconds=MIN_LATER_RETRY_SECONDS
             if result.retry_after_seconds is None
             else result.retry_after_seconds,
             finished_ms=clock_ms() if clock_ms else None,
+            maybe_received=result.maybe_received,
         )
-        counts[result.outcome] += 1
+        if result.outcome == "retryable" and status == "rejected":
+            counts["rejected"] += 1
+            _log_given_up(delivery, result.http_status)
+        else:
+            counts[result.outcome] += 1
+        if result.outcome == "rejected":
+            _log_rejected(delivery, request, result.http_status)
         if result.http_status in {401, 403}:
             raise AuthenticationError(
                 "Nebuly authentication failed; correct credentials before another run"
             )
-        if result.http_status in NOT_INGESTED_STATUSES:
+        if needs_fix(result.http_status):
             raise DeliveryError(
-                f"Nebuly endpoint not found (HTTP {result.http_status}); "
+                f"Nebuly endpoint not found or redirected (HTTP {result.http_status}); "
                 "check NEBULY_ENDPOINT before another run"
             )
-        if result.outcome in {"retryable", "uncertain"}:
-            # Preserve the remainder: a throttled, unreachable or failing API
-            # must not turn the whole outbox retryable or uncertain in one run.
+        if result.outcome != "retryable":
+            failed_in_row = 0
+            continue
+        failed_in_row += 1
+        # An unreachable or throttling API, or a second failure in a row,
+        # costs one more attempt, not one per queued item.
+        if not result.maybe_received or failed_in_row == 2:
             break
     return DeliveryReport(**counts, paused=store.delivery_paused())

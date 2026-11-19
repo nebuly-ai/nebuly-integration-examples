@@ -1,4 +1,9 @@
-"""Convert complete interactions without inference, price lookup or truncation."""
+"""Convert assembled interactions without inference or price lookup; every
+text is cut with ``user_defined.truncate``.
+
+An interaction may be sent with warnings (``assembler.BLOCKING``): the parts
+that could not be read are left out, never invented.
+"""
 
 from __future__ import annotations
 
@@ -37,6 +42,7 @@ def pseudonymize_actor(actor: str, secret: str) -> str:
 def _model_traces(
     interaction: InteractionSnapshot,
 ) -> list[dict[str, Any]]:
+    input_text = interaction.input or ""
     by_model: dict[str, list[ModelCall]] = defaultdict(list)
     for call in interaction.model_calls:
         by_model[call.model_id].append(call)
@@ -73,8 +79,10 @@ def _model_traces(
         traces.append(
             {
                 "model": observed_model_name(model),
-                "messages": [{"role": "user", "content": interaction.input}],
-                "output": output,
+                "messages": [
+                    {"role": "user", "content": user_defined.truncate(input_text)}
+                ],
+                "output": user_defined.truncate(output),
                 "input_tokens": totals["input_tokens"],
                 "output_tokens": totals["output_tokens"],
                 "cache_read_input_tokens": totals["cache_read_input_tokens"],
@@ -107,19 +115,14 @@ def snapshot_to_payload(
         interaction.readiness != "ready"
         or interaction.end_ns is None
         or interaction.actor_id is None
-        or interaction.session_id is None
-        or interaction.input is None
-        or interaction.terminal_status not in {"OK", "ERROR"}
     ):
-        raise ValueError("Only complete, identified interactions can be converted")
+        raise ValueError("Only ended, identified interactions can be converted")
     if interaction.interaction_key != source.interaction_key(
         interaction.trace_id, interaction.root_span_id
     ):
         raise ValueError("Interaction belongs to a different source")
     if interaction.end_ns < interaction.start_ns:
         raise ValueError("Invalid interaction interval")
-    if interaction.output is None and interaction.terminal_status != "ERROR":
-        raise ValueError("Successful interaction requires final output")
     if not interaction.input and not interaction.output:
         raise ValueError("Interaction must contain input or output")
     actor = user_defined.end_user_id(interaction, context)
@@ -130,7 +133,11 @@ def snapshot_to_payload(
         isinstance(key, str) and isinstance(value, str) for key, value in tags.items()
     ):
         raise ValueError("Tags must be strings")
-    tags = {**tags, "agentcore.status": interaction.terminal_status.lower()}
+    status = interaction.terminal_status
+    tags = {
+        **tags,
+        "agentcore.status": status.lower() if status in {"OK", "ERROR"} else "unknown",
+    }
     segments = user_defined.build_segments(interaction, context)
     if any(key not in {"team", "market", "tenure"} for key in segments):
         raise ValueError("Unsupported segment field")
@@ -143,8 +150,10 @@ def snapshot_to_payload(
     traces.extend(
         {
             "source": tool.name,
-            "input": _tool_text(tool.input),
-            "outputs": [] if tool.output is None else [_tool_text(tool.output)],
+            "input": user_defined.truncate(_tool_text(tool.input)),
+            "outputs": []
+            if tool.output is None
+            else [user_defined.truncate(_tool_text(tool.output))],
         }
         for tool in sorted(
             interaction.tools, key=lambda tool: (tool.start_ns, tool.span_id)
@@ -153,14 +162,14 @@ def snapshot_to_payload(
     traces = user_defined.customize_traces(interaction, traces, context)
     return {
         "interaction": {
-            "conversation_id": interaction.session_id,
-            "input": interaction.input,
-            "output": interaction.output or "",
+            "conversation_id": interaction.conversation_id,
+            "input": user_defined.truncate(interaction.input or ""),
+            "output": user_defined.truncate(interaction.output or ""),
             "time_start": _time(interaction.start_ns),
             "time_end": _time(interaction.end_ns),
-            "end_user": actor
-            if config.send_plain_end_user
-            else pseudonymize_actor(actor, config.user_hash_secret),
+            "end_user": pseudonymize_actor(actor, config.user_hash_secret)
+            if config.pseudonymize_end_user
+            else actor,
             "hide_content": False,
             "tags": tags,
             **{key: value for key, value in segments.items() if value is not None},

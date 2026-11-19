@@ -5,7 +5,15 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-DEFAULT_ACTOR_NAMESPACE = "/actors/{actorId}/"
+# AgentCore harnesses create Memory under /actors/{actorId}/...; the
+# built-in strategies created through the API default to
+# /strategy/{memoryStrategyId}/actors/{actorId}/ (semantic, user preference,
+# episodic) or /strategy/{memoryStrategyId}/actor/{actorId}/ (summary).
+DEFAULT_ACTOR_NAMESPACES = (
+    "/actors/{actorId}/",
+    "/strategy/{memoryStrategyId}/actors/{actorId}/",
+    "/strategy/{memoryStrategyId}/actor/{actorId}/",
+)
 _RETRIEVAL = re.compile(r"^Retrieved \d+ memories from namespace: (.+)$")
 _VARIABLE = re.compile(r"\{[A-Za-z][A-Za-z0-9_]*\}")
 
@@ -32,10 +40,14 @@ def namespace_pattern(template: str) -> re.Pattern[str]:
 
 
 def actor_from_message(
-    message: str, template: str = DEFAULT_ACTOR_NAMESPACE
+    message: str, templates: tuple[str, ...] = DEFAULT_ACTOR_NAMESPACES
 ) -> str | None:
+    """Return the actor of the first template that matches the namespace."""
     retrieval = _RETRIEVAL.fullmatch(message)
     if retrieval is None:
         return None
-    match = namespace_pattern(template).match(retrieval[1])
-    return match["actor"] if match is not None else None
+    for template in templates:
+        match = namespace_pattern(template).match(retrieval[1])
+        if match is not None:
+            return match["actor"]
+    return None

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from bedrock_sync.agentcore.config import AgentCoreConfig
+from bedrock_sync.agentcore.identity import DEFAULT_ACTOR_NAMESPACES
 from bedrock_sync.shared.errors import ConfigError
 
 
@@ -29,7 +30,9 @@ def test_defaults(env: dict[str, str]) -> None:
     assert config.from_date is None  # the state checks first-run coverage later
     assert config.state_db == Path(".cache/agentcore/state.db")
     assert config.actor_id_attribute == "actor.id"
+    assert config.actor_namespace_templates == DEFAULT_ACTOR_NAMESPACES
     assert (config.overlap_seconds, config.reconciliation_seconds) == (300, 86400)
+    assert config.root_wait_seconds == 1200
 
 
 def test_groups_and_overrides(env: dict[str, str]) -> None:
@@ -45,16 +48,24 @@ def test_groups_and_overrides(env: dict[str, str]) -> None:
             "customer.actor_id",
             "--actor-namespace-template",
             "/facts/{actorId}/",
+            "--actor-namespace-template",
+            "/users/{actorId}/",
             "--reconciliation-interval-seconds",
             "3600",
+            "--root-wait-seconds",
+            "0",
         ),
         env=env,
     )
     assert config.log_groups == ("/test/runtime", "aws/spans")
     assert config.overlap_seconds == 0
     assert config.actor_id_attribute == "customer.actor_id"
-    assert config.actor_namespace_template == "/facts/{actorId}/"
+    assert config.actor_namespace_templates == (
+        "/facts/{actorId}/",
+        "/users/{actorId}/",
+    )
     assert config.reconciliation_interval_seconds == 3600
+    assert config.root_wait_seconds == 0
 
 
 @pytest.mark.parametrize(

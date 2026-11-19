@@ -39,7 +39,7 @@
       "name": "missing_model_usage",
       "base": "text_cache_read",
       "mutation": "remove_input_usage_aliases",
-      "expected": {"readiness": "blocked", "diagnostic": "missing_usage"}
+      "expected": {"readiness": "ready", "diagnostic": "missing_usage", "usage_by_model": {}}
     }
   ]
 }

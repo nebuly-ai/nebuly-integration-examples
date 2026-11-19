@@ -10,6 +10,7 @@ import pytest
 
 from bedrock_sync.agentcore import user_defined
 from bedrock_sync.agentcore.converter import pseudonymize_actor, snapshot_to_payload
+from bedrock_sync.agentcore.models import ToolCall
 from bedrock_sync.agentcore.records import SourceScope
 from bedrock_sync.shared.model_names import observed_model_name
 from tests.agentcore.cases import config, load, snapshot
@@ -21,13 +22,20 @@ def test_payload_matches_case_usage_and_visibility(
     case = agentcore_case
     source, item = snapshot(case)
     if item.readiness != "ready":
-        with pytest.raises(ValueError, match="Only complete"):
+        with pytest.raises(ValueError, match="Only ended"):
             snapshot_to_payload(item, source=source, config=config(), context={})
         return
     payload = snapshot_to_payload(item, source=source, config=config(), context={})
     assert payload["interaction"]["input"] == case["expected"]["input"]
     assert payload["interaction"]["output"] == (case["expected"]["output"] or "")
-    assert payload["interaction"]["end_user"] != item.actor_id
+    assert payload["interaction"]["end_user"] == item.actor_id
+    pseudonymized = snapshot_to_payload(
+        item, source=source, config=config(PSEUDONYMIZE_END_USER="true"), context={}
+    )
+    assert item.actor_id is not None
+    assert pseudonymized["interaction"]["end_user"] == pseudonymize_actor(
+        item.actor_id, "test-secret"
+    )
     llms = [trace for trace in payload["traces"] if "model" in trace]
     usage = case["expected"]["usage_by_model"]
     assert len(llms) == len(usage)
@@ -89,7 +97,7 @@ def test_hooks_receive_native_identity_and_none_segments_are_omitted() -> None:
         payload = snapshot_to_payload(
             item,
             source=source,
-            config=config(SEND_PLAIN_END_USER="true"),
+            config=config(),
             context=context,
         )
     segments.assert_called_once_with(item, context)
@@ -102,7 +110,7 @@ def test_hooks_receive_native_identity_and_none_segments_are_omitted() -> None:
     assert payload["user_feedback"] == []
 
 
-def test_content_is_not_cleaned_or_truncated_and_models_keep_their_own_output() -> None:
+def test_content_is_not_cleaned_and_models_keep_their_own_output() -> None:
     source, item = snapshot(load())
     call = item.model_calls[0]
     alternate = replace(
@@ -110,7 +118,7 @@ def test_content_is_not_cleaned_or_truncated_and_models_keep_their_own_output() 
     )
     item = replace(
         item,
-        input="<system-reminder>user text</system-reminder>" + "x" * 9000,
+        input="<system-reminder>user text</system-reminder>",
         output="final",
         model_calls=(call, alternate),
     )
@@ -122,6 +130,30 @@ def test_content_is_not_cleaned_or_truncated_and_models_keep_their_own_output() 
     assert payload["interaction"]["output"] == "final"
 
 
+def test_every_text_is_cut_at_the_content_limit() -> None:
+    source, item = snapshot(load())
+    long = "x" * (user_defined.MAX_CONTENT_CHARS + 500)
+    tool = ToolCall(
+        "t1", "c1", "read_pdf", item.start_ns, item.start_ns, long, long, "OK"
+    )
+    item = replace(
+        item,
+        input=long,
+        output=long,
+        model_calls=(replace(item.model_calls[0], output=long),),
+        tools=(tool,),
+    )
+    payload = snapshot_to_payload(item, source=source, config=config(), context={})
+    texts = [payload["interaction"]["input"], payload["interaction"]["output"]]
+    for trace in payload["traces"]:
+        if "messages" in trace:
+            texts += [trace["messages"][0]["content"], trace["output"]]
+        else:
+            texts += [trace["input"], *trace["outputs"]]
+    assert len(texts) == 6
+    assert all(len(text) == user_defined.MAX_CONTENT_CHARS for text in texts)
+
+
 @pytest.mark.parametrize(("field", "value"), [("team", " "), ("other", "value")])
 def test_invalid_segments_fail_before_delivery(field: str, value: str) -> None:
     source, item = snapshot(load())
@@ -130,3 +162,19 @@ def test_invalid_segments_fail_before_delivery(field: str, value: str) -> None:
         pytest.raises(ValueError, match=r"[Ss]egment"),
     ):
         snapshot_to_payload(item, source=source, config=config(), context={})
+
+
+def test_interaction_with_warnings_is_sent_with_what_could_be_read() -> None:
+    source, item = snapshot(load())
+    degraded = replace(
+        item, session_id=None, terminal_status="UNSET", output=None, input="question"
+    )
+    payload = snapshot_to_payload(degraded, source=source, config=config(), context={})
+    interaction = payload["interaction"]
+    assert interaction["conversation_id"] == item.trace_id
+    assert interaction["output"] == ""
+    assert interaction["tags"]["agentcore.status"] == "unknown"
+    with pytest.raises(ValueError, match="input or output"):
+        snapshot_to_payload(
+            replace(degraded, input=None), source=source, config=config(), context={}
+        )

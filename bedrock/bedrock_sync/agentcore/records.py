@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bedrock_sync.shared.keys import canonical_key
+from bedrock_sync.shared.keys import canonical_key, digest
 
 __all__ = ["LogPage", "RawLogRecord", "SourceScope"]
 
@@ -25,7 +25,7 @@ class SourceScope:
         return canonical_key(self.key, log_group, event_id)
 
     def interaction_key(self, trace_id: str, root_span_id: str) -> str:
-        return canonical_key(self.key, trace_id, root_span_id)
+        return digest("agentcore.interaction", 1, self.key, trace_id, root_span_id)
 
     def conversation_key(self, session_id: str) -> str:
         return canonical_key(self.key, session_id)

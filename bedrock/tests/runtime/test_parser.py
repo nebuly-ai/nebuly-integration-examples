@@ -132,15 +132,26 @@ def test_adapter_bug_skips_the_record_instead_of_crashing(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     def broken(*_: object) -> None:
-        raise RuntimeError("boom")
+        raise RuntimeError("private adapter body")
 
     monkeypatch.setattr(converse, "parse", broken)
 
-    with caplog.at_level(logging.WARNING, logger="bedrock_sync.runtime.parser"):
+    with caplog.at_level(logging.DEBUG, logger="bedrock_sync.runtime.parser"):
         result = parse_record(converse_record([user("Q")], "A"), source_key="key")
 
-    assert result == Skipped("req-1", RecordSkip.INVALID_BODY, "RuntimeError: boom")
+    assert result == Skipped("req-1", RecordSkip.INVALID_BODY, "RuntimeError")
     assert caplog.records[0].levelno == logging.ERROR
+    assert "private adapter body" not in caplog.text
+    assert "in broken" in caplog.text
+
+
+def test_malformed_timestamp_is_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+    record = converse_record([user("Q")], "A", timestamp="private timestamp")
+    assert parse_record(record) == Skipped(
+        "req-1", RecordSkip.INVALID_BODY, "invalid timestamp"
+    )
+    assert "invalid timestamp" in caplog.text
+    assert "private timestamp" not in caplog.text
 
 
 def test_envelope_token_counts_win_and_keep_cache_apart() -> None:

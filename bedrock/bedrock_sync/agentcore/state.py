@@ -7,12 +7,11 @@ set of log groups. It keeps:
   full for every log group;
 - the raw records read, until their trace is delivered and the content
   retention has passed; then only a digest stays, so a record read again is
-  recognized;
+  recognized. After the history retention the digest and the trace are
+  deleted too;
 - the traces being assembled, with their status: ``open`` (spans may still
-  arrive), ``blocked`` (something is missing), ``ready`` (staged for
-  delivery) or ``dropped`` (its session belongs to another actor);
-- the owner (actor) of every session, as digests, with the owner's traces:
-  the session is free again if none of them is delivered or still staged;
+  arrive), ``blocked`` (no actor, no content or no single root), ``ready`` (staged for
+  delivery) or ``dropped`` (expired before it could be sent);
 - the outbox, shared with the runtime connector (``shared/outbox.py``), with a
   link from each interaction to its trace.
 
@@ -25,17 +24,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from bedrock_sync.shared import outbox
-from bedrock_sync.shared.keys import digest
 from bedrock_sync.shared.store import StateError, Store, validate_ms
 
+from .assembler import BLOCKING
+from .parser import explicitly_foreign
 from .records import LogPage, RawLogRecord, SourceScope
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
     from bedrock_sync.shared.delivery import Delivery
@@ -44,6 +45,12 @@ TraceStatus = Literal["open", "blocked", "ready", "dropped"]
 __all__ = ["AgentCoreState", "StateError", "TraceRow", "TraceStatus"]
 
 _RECONCILIATION = "reconciliation"
+_DELIVERABLE_TRACE = (
+    "EXISTS (SELECT 1 FROM trace_outbox l JOIN traces t "
+    "USING(trace_id) WHERE l.interaction_key=outbox.interaction_key "
+    "AND t.status='ready' "
+    "AND CAST(COALESCE(l.end_ns,json_extract(t.snapshot,'$.end_ns')) AS INTEGER) < ?)"
+)
 _SCHEMA = """
 CREATE TABLE metadata(
   singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -76,7 +83,9 @@ CREATE INDEX records_trace ON records(trace_id);
 CREATE INDEX records_unprocessed ON records(timestamp_ms) WHERE processed=0;
 CREATE TABLE record_receipts(
   record_key TEXT PRIMARY KEY,
-  digest TEXT NOT NULL);
+  digest TEXT NOT NULL,
+  timestamp_ms INTEGER NOT NULL);
+CREATE INDEX record_receipts_time ON record_receipts(timestamp_ms);
 CREATE TABLE traces(
   trace_id TEXT PRIMARY KEY,
   status TEXT NOT NULL CHECK(status IN ('open','blocked','ready','dropped')),
@@ -86,7 +95,8 @@ CREATE INDEX traces_status ON traces(status, earliest_ms);
 CREATE TABLE trace_outbox(
   interaction_key TEXT PRIMARY KEY REFERENCES outbox(interaction_key),
   trace_id TEXT NOT NULL,
-  root_span_id TEXT NOT NULL);
+  root_span_id TEXT NOT NULL,
+  end_ns INTEGER);
 CREATE INDEX trace_outbox_trace ON trace_outbox(trace_id);
 CREATE TABLE recovered_prefixes(
   trace_id TEXT PRIMARY KEY,
@@ -95,13 +105,6 @@ CREATE TABLE compacted_traces(trace_id TEXT PRIMARY KEY);
 CREATE TABLE parser_settings(
   name TEXT PRIMARY KEY,
   value TEXT NOT NULL);
-CREATE TABLE conversation_owner(
-  conversation TEXT PRIMARY KEY,
-  owner TEXT NOT NULL);
-CREATE TABLE conversation_trace(
-  conversation TEXT NOT NULL,
-  trace_id TEXT NOT NULL,
-  PRIMARY KEY(conversation, trace_id));
 """
 _RECORD_COLUMNS = "log_group,log_stream,event_id,timestamp_ms,ingestion_time_ms,message"
 
@@ -122,6 +125,23 @@ def _json(value: object) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _blocking_reasons(status: str, snapshot: dict[str, object]) -> set[str]:
+    """Why a trace still waits, from its snapshot, for the expiry warning."""
+    if snapshot.get("conversion_error"):
+        return {"conversion_failed"}
+    if snapshot.get("outside_run_end"):
+        return {"outside_run_end"}
+    diagnostics = snapshot.get("diagnostics")
+    codes = (
+        {str(item.get("code")) for item in diagnostics if isinstance(item, dict)}
+        if isinstance(diagnostics, list)
+        else set()
+    )
+    if blocking := codes & BLOCKING:
+        return blocking
+    return {"agent_span_not_ended" if status == "open" else "not_assembled"}
 
 
 def _receipt(values: tuple[object, ...]) -> str:
@@ -156,18 +176,20 @@ class AgentCoreState(Store):
             if row is None or tuple(row) != (self.source.key, _json(self.log_groups)):
                 raise StateError("Database source or log-group configuration differs")
             return
-        self._create_schema(_SCHEMA)
-        with self._transaction():
-            self._db.execute(
+        self._create_schema(
+            _SCHEMA,
+            initialize=(
                 "INSERT INTO metadata VALUES (1,?,?,NULL,NULL)",
                 (self.source.key, _json(self.log_groups)),
-            )
+            ),
+        )
 
     # Settings and bookkeeping ---------------------------------------------------
 
-    def configure_parser(self, namespace: str) -> None:
-        """Remember the actor namespace; when it changes, records skipped as
+    def configure_parser(self, namespaces: tuple[str, ...]) -> None:
+        """Remember the actor namespaces; when they change, records skipped as
         unsupported are parsed again, since they may now name the actor."""
+        namespace = "\n".join(namespaces)
         row = self._db.execute(
             "SELECT value FROM parser_settings WHERE name='namespace'"
         ).fetchone()
@@ -184,11 +206,11 @@ class AgentCoreState(Store):
                 (namespace,),
             )
 
-    def reconciliation_due(self, end_ms: int, interval_seconds: int) -> bool:
+    def last_reconciliation(self) -> int | None:
         row = self._db.execute(
             "SELECT value FROM operations WHERE name=?", (_RECONCILIATION,)
         ).fetchone()
-        return row is None or end_ms >= row[0] + interval_seconds * 1000
+        return None if row is None else int(row[0])
 
     def mark_reconciliation(self, end_ms: int) -> None:
         self._db.execute(
@@ -292,6 +314,8 @@ class AgentCoreState(Store):
                 or not page.start_ms <= record.timestamp_ms < page.end_ms
             ):
                 raise StateError("Record lies outside its page group or window")
+            if explicitly_foreign(record, self.source):
+                continue
             key = self.source.record_key(record.log_group, record.event_id)
             values = (
                 record.log_group,
@@ -367,6 +391,15 @@ class AgentCoreState(Store):
         )
         return tuple(RawLogRecord(*row) for row in rows)
 
+    def unprocessed_records(self) -> Iterator[RawLogRecord]:
+        """Read batches while the caller marks each returned record processed."""
+        while rows := self._db.execute(
+            f"SELECT {_RECORD_COLUMNS} FROM records WHERE processed=0 "  # noqa: S608
+            "ORDER BY timestamp_ms,log_group,event_id LIMIT 512"
+        ).fetchall():
+            for row in rows:
+                yield RawLogRecord(*row)
+
     def mark_processed(
         self,
         record: RawLogRecord,
@@ -423,7 +456,7 @@ class AgentCoreState(Store):
         """Ready snapshots, optionally only those no POST was attempted for.
 
         These are assembly results, not permission to send: the outbox stays
-        the authority on what was sent, rejected or is uncertain.
+        the authority on what was sent, rejected or waits for a retry.
         """
         condition = "status='ready'"
         if unattempted_only:
@@ -447,66 +480,66 @@ class AgentCoreState(Store):
             TraceRow(row[0], row[1], row[2], json.loads(row[3])) for row in rows
         )
 
-    def claim_conversation(self, session_id: str, actor_id: str, trace_id: str) -> bool:
-        """A conversation (session) belongs to one actor: the actor whose traces
-        are sent, may have been sent, or are staged to be sent.
-
-        Returns False when the session belongs to another actor. A session none
-        of whose traces still holds it (all rejected, expired or never staged)
-        goes to the next actor that claims it. Only digests are stored, never
-        the raw ids.
-        """
-        conversation = digest(self.source.conversation_key(session_id))
-        owner = digest("agentcore.conversation_owner", 1, conversation, actor_id)
-        with self._transaction():
-            row = self._db.execute(
-                "SELECT owner FROM conversation_owner WHERE conversation=?",
-                (conversation,),
-            ).fetchone()
-            if row is None or row[0] != owner:
-                if row is not None and self._held(conversation):
-                    return False
-                self._db.execute(
-                    "DELETE FROM conversation_trace WHERE conversation=?",
-                    (conversation,),
-                )
-                self._db.execute(
-                    "INSERT INTO conversation_owner VALUES (?,?) "
-                    "ON CONFLICT(conversation) DO UPDATE SET owner=excluded.owner",
-                    (conversation, owner),
-                )
-            self._db.execute(
-                "INSERT OR IGNORE INTO conversation_trace VALUES (?,?)",
-                (conversation, trace_id),
-            )
-        return True
-
-    def _held(self, conversation: str) -> bool:
-        """A trace of the owner keeps the session: delivered, maybe delivered,
-        or staged and not dropped (a blocked trace may become ready again)."""
-        row = self._db.execute(
-            "SELECT 1 FROM conversation_trace c JOIN trace_outbox l USING(trace_id) "
-            "JOIN outbox o USING(interaction_key) JOIN traces t USING(trace_id) "
-            "WHERE c.conversation=? AND "
-            "(o.status IN ('sending','sent','uncertain') "
-            "OR (o.status='pending' AND t.status!='dropped')) LIMIT 1",
-            (conversation,),
-        ).fetchone()
-        return row is not None
-
     # Outbox -----------------------------------------------------------------------
 
     def put_payload(
-        self, trace_id: str, root_span_id: str, payload: Mapping[str, object]
+        self,
+        trace_id: str,
+        root_span_id: str,
+        payload: Mapping[str, object],
+        *,
+        end_ns: int | None = None,
     ) -> str:
         key = self.source.interaction_key(trace_id, root_span_id)
         with self._transaction():
             outbox.put(self._db, key, payload)
             self._db.execute(
-                "INSERT OR IGNORE INTO trace_outbox VALUES (?,?,?)",
-                (key, trace_id, root_span_id),
+                "INSERT INTO trace_outbox VALUES (?,?,?,?) "
+                "ON CONFLICT(interaction_key) DO UPDATE SET end_ns=excluded.end_ns",
+                (key, trace_id, root_span_id, end_ns),
             )
         return key
+
+    def supersede_roots(self, trace_id: str, root_span_id: str) -> int:
+        """Another root of this trace was staged before: a sub-agent seen
+        before its caller. Pending or given-up payloads are removed; returns
+        how many Nebuly may already hold."""
+        with self._transaction():
+            rows = self._db.execute(
+                "SELECT l.interaction_key,o.status,EXISTS(SELECT 1 FROM attempts a "
+                "WHERE a.interaction_key=l.interaction_key), "
+                "o.status='rejected' AND p.failing_since_ms IS NOT NULL "
+                "FROM trace_outbox l JOIN outbox o USING(interaction_key) "
+                "JOIN delivery_policy p USING(interaction_key) "
+                "WHERE l.trace_id=? AND l.root_span_id!=?",
+                (trace_id, root_span_id),
+            ).fetchall()
+            pending = [
+                key
+                for key, status, _, gave_up in rows
+                if status == "pending" or gave_up
+            ]
+            self._db.executemany(
+                "DELETE FROM trace_outbox WHERE interaction_key=?",
+                [(key,) for key in pending],
+            )
+            outbox.delete(self._db, pending)
+        return sum(
+            1
+            for _, status, tried, gave_up in rows
+            if status == "sent" or gave_up or (status == "pending" and tried)
+        )
+
+    def requeue_payload(
+        self, interaction_key: str, payload: Mapping[str, object], *, end_ns: int | None
+    ) -> None:
+        """Send a delivered trace again with a corrected payload."""
+        with self._transaction():
+            outbox.requeue(self._db, interaction_key, payload)
+            self._db.execute(
+                "UPDATE trace_outbox SET end_ns=? WHERE interaction_key=?",
+                (end_ns, interaction_key),
+            )
 
     def pending_deliveries(
         self, *, ended_before_ns: int | None = None
@@ -518,26 +551,45 @@ class AgentCoreState(Store):
         return outbox.pending(
             self._db,
             self.now_ms,
-            where="EXISTS (SELECT 1 FROM trace_outbox l JOIN traces t "
-            "USING(trace_id) WHERE l.interaction_key=outbox.interaction_key "
-            "AND t.status='ready' "
-            "AND CAST(json_extract(t.snapshot,'$.end_ns') AS INTEGER) < ?)",
+            where=_DELIVERABLE_TRACE,
+            parameters=(ended_before_ns,),
+        )
+
+    def delivery_waiting_for_eligible_retry(self, *, ended_before_ns: int) -> bool:
+        return outbox.waiting_for_retry(
+            self._db,
+            self.now_ms,
+            where=_DELIVERABLE_TRACE,
             parameters=(ended_before_ns,),
         )
 
     # Retention --------------------------------------------------------------------
 
-    def expire_traces(self, before_ms: int) -> int:
+    def expire_traces(self, before_ms: int) -> tuple[int, Counter[str], int]:
         """Drop the open or blocked traces that started before ``before_ms``:
         no later read will complete them, so retention can erase them. Returns
-        how many were dropped."""
+        failures and reasons, and the count of unrelated rootless traces."""
         validate_ms(before_ms)
+        reasons: Counter[str] = Counter()
+        ignored = 0
         with self._transaction():
-            return self._db.execute(
+            rows = self._db.execute(
+                "SELECT status,snapshot FROM traces "
+                "WHERE status IN ('open','blocked') AND earliest_ms<?",
+                (before_ms,),
+            ).fetchall()
+            for status, snapshot in rows:
+                data = json.loads(snapshot)
+                if data.get("unrelated_rootless"):
+                    ignored += 1
+                else:
+                    reasons.update(_blocking_reasons(status, data))
+            self._db.execute(
                 "UPDATE traces SET status='dropped',snapshot='{\"expired\":true}' "
                 "WHERE status IN ('open','blocked') AND earliest_ms<?",
                 (before_ms,),
-            ).rowcount
+            )
+        return len(rows) - ignored, reasons, ignored
 
     def prune_content(self, retention_seconds: int) -> int:
         """Erase the content of traces done before the retention: delivered
@@ -547,15 +599,15 @@ class AgentCoreState(Store):
         cutoff = self._retention_cutoff(retention_seconds)
         with self._transaction():
             delivered = self._db.execute(
-                "SELECT DISTINCT l.trace_id FROM trace_outbox l "
+                "SELECT l.trace_id FROM trace_outbox l "
+                "JOIN traces t USING(trace_id) "
                 "JOIN outbox o USING(interaction_key) "
                 "JOIN delivery_policy p USING(interaction_key) "
-                "WHERE o.status IN ('sent','rejected') AND p.finalized_ms<=? "
+                "WHERE t.status='ready' "
                 "AND l.trace_id NOT IN (SELECT trace_id FROM compacted_traces) "
-                "AND NOT EXISTS (SELECT 1 FROM trace_outbox other "
-                "JOIN outbox oo USING(interaction_key) "
-                "WHERE other.trace_id=l.trace_id "
-                "AND oo.status NOT IN ('sent','rejected'))",
+                "GROUP BY l.trace_id HAVING COUNT(*)=COUNT(CASE "
+                "WHEN o.status IN ('sent','rejected') AND p.finalized_ms<=? "
+                "THEN 1 END)",
                 (cutoff,),
             ).fetchall()
             for (trace_id,) in delivered:
@@ -579,7 +631,73 @@ class AgentCoreState(Store):
                     "WHERE trace_id=?)",
                     (trace_id,),
                 )
+            # An expired correction can still have older finalized deliveries.
+            # Keep those payloads only until their own content retention ends.
+            self._db.execute(
+                "UPDATE outbox SET payload='{}' WHERE payload!='{}' "
+                "AND status IN ('sent','rejected') AND interaction_key IN ("
+                "SELECT l.interaction_key FROM trace_outbox l "
+                "JOIN traces t USING(trace_id) JOIN compacted_traces USING(trace_id) "
+                "JOIN delivery_policy p USING(interaction_key) "
+                "WHERE t.status='dropped' AND p.finalized_ms<=?)",
+                (cutoff,),
+            )
             return self._erase_records(cutoff)
+
+    def prune_history(self, retention_seconds: int) -> int:
+        """Forget compacted traces that started before the retention, with
+        their outbox rows, the digests of their records and the old reading
+        windows. A backfill over that time sends them again, and Nebuly
+        updates the same interaction. Returns how many traces."""
+        cutoff = self._retention_cutoff(retention_seconds)
+        with self._transaction():
+            traces = [
+                trace_id
+                for (trace_id,) in self._db.execute(
+                    "SELECT t.trace_id FROM traces t JOIN compacted_traces "
+                    "USING(trace_id) WHERE t.earliest_ms<=? AND NOT EXISTS "
+                    "(SELECT 1 FROM trace_outbox l JOIN outbox o "
+                    "USING(interaction_key) JOIN delivery_policy p "
+                    "USING(interaction_key) WHERE l.trace_id=t.trace_id AND "
+                    "(o.status='sending' "
+                    "OR (o.status='pending' AND t.status!='dropped') "
+                    "OR (o.status IN ('sent','rejected') AND p.finalized_ms>?)))",
+                    (cutoff, cutoff),
+                )
+            ]
+            for trace_id in traces:
+                keys = [
+                    key
+                    for (key,) in self._db.execute(
+                        "SELECT interaction_key FROM trace_outbox WHERE trace_id=?",
+                        (trace_id,),
+                    )
+                ]
+                self._db.execute(
+                    "DELETE FROM trace_outbox WHERE trace_id=?", (trace_id,)
+                )
+                outbox.delete(self._db, keys)
+                for table in (
+                    "recovered_prefixes",
+                    "compacted_traces",
+                    "traces",
+                ):
+                    self._db.execute(
+                        f"DELETE FROM {table} WHERE trace_id=?",  # noqa: S608
+                        (trace_id,),
+                    )
+            self._db.execute(
+                "DELETE FROM record_receipts WHERE timestamp_ms<=?", (cutoff,)
+            )
+            self._db.execute(
+                "DELETE FROM window_groups WHERE window_id IN "
+                "(SELECT id FROM windows WHERE completed=1 AND end_ms<=?)",
+                (cutoff,),
+            )
+            self._db.execute(
+                "DELETE FROM windows WHERE completed=1 AND end_ms<=?", (cutoff,)
+            )
+        return len(traces)
 
     def _compact_trace(self, trace_id: str, status: TraceStatus) -> None:
         self._db.execute(
@@ -603,8 +721,8 @@ class AgentCoreState(Store):
         ).fetchall()
         for row in rows:
             self._db.execute(
-                "INSERT OR IGNORE INTO record_receipts VALUES (?,?)",
-                (row[0], _receipt(tuple(row)[1:])),
+                "INSERT OR IGNORE INTO record_receipts VALUES (?,?,?)",
+                (row[0], _receipt(tuple(row)[1:]), row[4]),
             )
             self._db.execute("DELETE FROM records WHERE record_key=?", (row[0],))
         return len(rows)

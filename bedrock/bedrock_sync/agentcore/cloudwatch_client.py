@@ -6,9 +6,16 @@ and must never be stored as durable coverage. SDK retries are read-only and boun
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from botocore.config import Config as BotoConfig
+from botocore.exceptions import (
+    ClientError,
+    NoCredentialsError,
+    PartialCredentialsError,
+    UnauthorizedSSOTokenError,
+)
 
 from bedrock_sync.shared.aws import aws_session
 from bedrock_sync.shared.errors import ConnectorError
@@ -29,8 +36,56 @@ class PaginationError(ConnectorError):
     """CloudWatch did not provide a safely exhaustible window."""
 
 
-class InvalidLogResponseError(ValueError):
+class InvalidLogResponseError(ConnectorError, ValueError):
     """A response cannot be persisted without losing its record identity."""
+
+
+class LogsAccessError(ConnectorError):
+    """A CloudWatch read needs different credentials or source settings."""
+
+
+_CREDENTIAL_ERRORS = (
+    NoCredentialsError,
+    PartialCredentialsError,
+    UnauthorizedSSOTokenError,
+)
+_CREDENTIAL_GUIDANCE = (
+    "AWS credentials are unavailable or expired; check the configured profile "
+    "or role and refresh the AWS login"
+)
+
+
+def _access_error(error: ClientError) -> LogsAccessError | None:
+    code = error.response.get("Error", {}).get("Code")
+    if code in {"ExpiredToken", "ExpiredTokenException", "UnrecognizedClientException"}:
+        return LogsAccessError(_CREDENTIAL_GUIDANCE)
+    if code in {"AccessDenied", "AccessDeniedException", "UnauthorizedOperation"}:
+        if error.operation_name == "AssumeRole":
+            return LogsAccessError(
+                "AWS denied sts:AssumeRole; check the source credentials and "
+                "the configured role's trust policy"
+            )
+        return LogsAccessError(
+            "AWS denied logs:FilterLogEvents; check the role's permissions "
+            "for each configured --log-group"
+        )
+    if code == "ResourceNotFoundException":
+        return LogsAccessError(
+            "CloudWatch log group not found; check --log-group and BEDROCK_REGION"
+        )
+    return None
+
+
+@contextmanager
+def _explain_access_errors() -> Iterator[None]:
+    try:
+        yield
+    except _CREDENTIAL_ERRORS:
+        raise LogsAccessError(_CREDENTIAL_GUIDANCE) from None
+    except ClientError as exc:
+        if access_error := _access_error(exc):
+            raise access_error from None
+        raise
 
 
 def create_logs_client(config: AgentCoreConfig) -> LogsAPI:
@@ -40,10 +95,11 @@ def create_logs_client(config: AgentCoreConfig) -> LogsAPI:
         read_timeout=30,
         retries={"mode": "standard", "total_max_attempts": 5},
     )
-    session = aws_session(
-        config, session_name="nebuly-agentcore-reader", boto_config=sdk_config
-    )
-    return cast("LogsAPI", session.client("logs", config=sdk_config))
+    with _explain_access_errors():
+        session = aws_session(
+            config, session_name="nebuly-agentcore-reader", boto_config=sdk_config
+        )
+        return cast("LogsAPI", session.client("logs", config=sdk_config))
 
 
 class CloudWatchLogReader:
@@ -98,7 +154,8 @@ class CloudWatchLogReader:
             request["filterPattern"] = '{ $.traceId = "' + trace_id + '" }'
         seen_tokens: set[str] = set()
         for _ in range(self._max_pages):
-            response = self._client.filter_log_events(**request)
+            with _explain_access_errors():
+                response = self._client.filter_log_events(**request)
             events = response.get("events", [])
             if not isinstance(events, list):
                 raise InvalidLogResponseError("Expected a list of CloudWatch events")

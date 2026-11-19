@@ -40,8 +40,11 @@ class InteractionSkip(StrEnum):
     """No input and no output: the API accepts neither."""
 
 
-def _model_name(invocation: Invocation) -> str:
-    return nebuly_model_name(invocation.model) or "unknown"
+def _model_name(invocation: Invocation, context: Mapping[str, object]) -> str:
+    name = user_defined.model_name(nebuly_model_name(invocation.model), context)
+    if not isinstance(name, str):
+        raise TypeError("The model name hook must return a string")
+    return name.strip() or "unknown"
 
 
 def _user_input(invocation: Invocation) -> str:
@@ -50,10 +53,12 @@ def _user_input(invocation: Invocation) -> str:
     return "" if start is None else user_defined.truncate(join_text(start.blocks))
 
 
-def _llm_traces(interaction: Interaction, user_input: str) -> list[dict[str, Any]]:
+def _llm_traces(
+    interaction: Interaction, user_input: str, context: Mapping[str, object]
+) -> list[dict[str, Any]]:
     by_model: dict[str, list[Invocation]] = defaultdict(list)
     for invocation in interaction.invocations:
-        by_model[_model_name(invocation)].append(invocation)
+        by_model[_model_name(invocation, context)].append(invocation)
     traces = []
     for model, invocations in sorted(by_model.items()):
         output = next(
@@ -87,7 +92,7 @@ def interaction_to_payload(
     interaction: Interaction,
     *,
     anonymize: bool,
-    send_plain_end_user: bool,
+    pseudonymize_end_user: bool,
     user_hash_secret: str,
     context: Mapping[str, object] | None = None,
 ) -> dict[str, Any] | InteractionSkip:
@@ -104,13 +109,15 @@ def interaction_to_payload(
     if not isinstance(raw_user, str) or not raw_user.strip():
         raise ValueError("The end-user hook must return a nonblank string")
     end_user = (
-        raw_user
-        if send_plain_end_user
-        else pseudonymize(END_USER_NAMESPACE, raw_user, user_hash_secret)
+        pseudonymize(END_USER_NAMESPACE, raw_user, user_hash_secret)
+        if pseudonymize_end_user
+        else raw_user
     )
-    models = list(dict.fromkeys(_model_name(i) for i in interaction.invocations))
+    models = list(
+        dict.fromkeys(_model_name(i, context) for i in interaction.invocations)
+    )
     tags = user_defined.build_tags(
-        interaction, context, model=_model_name(final), models=models
+        interaction, context, model=_model_name(final, context), models=models
     )
     if not all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items()):
         raise ValueError("Tags must be strings")
@@ -118,7 +125,7 @@ def interaction_to_payload(
     if any(key not in {"team", "market", "tenure"} for key in segments):
         raise ValueError("Unsupported segment field")
 
-    traces = _llm_traces(interaction, user_input)
+    traces = _llm_traces(interaction, user_input, context)
     traces.extend(user_defined.build_retrieval_traces(interaction))
     traces = user_defined.customize_traces(interaction, traces, context)
     return {

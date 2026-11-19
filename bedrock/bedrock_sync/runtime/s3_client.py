@@ -22,6 +22,7 @@ import itertools
 import json
 import logging
 import re
+import threading
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -154,34 +155,58 @@ def _is_missing(exc: Exception) -> bool:
     return False
 
 
-def _decode_lines(raw: bytes, *, source: str) -> list[JsonDict]:
-    """A corrupt file is logged and skipped rather than blocking every
-    later run at the same cursor."""
+@dataclass
+class ReadProblems:
+    """Log content that could not be read, for the run summary."""
+
+    unreadable_files: int = 0
+    unreadable_lines: int = 0
+
+
+def _decode_lines(raw: bytes, *, source: str) -> tuple[list[JsonDict], ReadProblems]:
+    """A corrupt file is logged and skipped rather than blocking every later
+    run at the same cursor: S3 objects are written whole, so reading it again
+    would not help. The calls in it are lost, so it is an error."""
+    problems = ReadProblems()
     try:
         payload = gzip.decompress(raw)
     except gzip.BadGzipFile:
         payload = raw
     except (EOFError, zlib.error) as exc:
-        logger.warning("Skipping corrupt log file %s: %s", source, exc)
-        return []
+        logger.error(  # noqa: TRY400
+            "Corrupt log file %s skipped, its calls are lost: %s", source, exc
+        )
+        problems.unreadable_files += 1
+        return [], problems
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as exc:
-        logger.warning("Skipping undecodable log file %s: %s", source, exc)
-        return []
+        logger.error(  # noqa: TRY400
+            "Log file %s is not UTF-8 and was skipped, its calls are lost: %s",
+            source,
+            exc,
+        )
+        problems.unreadable_files += 1
+        return [], problems
     records: list[JsonDict] = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
+    # JSON Lines uses LF; Unicode separators can occur inside JSON strings.
+    for line_no, line in enumerate(text.split("\n"), start=1):
         stripped = line.strip()
         if not stripped:
             continue
         try:
             value = json.loads(stripped)
         except json.JSONDecodeError:
-            logger.warning("Skipping undecodable line %s in %s", line_no, source)
+            logger.error(  # noqa: TRY400
+                "Line %s of %s is not JSON and was skipped, its call is lost",
+                line_no,
+                source,
+            )
+            problems.unreadable_lines += 1
             continue
         if isinstance(value, dict):
             records.append(value)
-    return records
+    return records, problems
 
 
 class LogSource:
@@ -197,6 +222,8 @@ class LogSource:
         self._root = root_prefix.strip("/")
         self._max_workers = max_workers
         self._read_ahead = max(read_ahead, 1)
+        self.problems = ReadProblems()
+        self._problems_lock = threading.Lock()
 
     def _hour_prefix(self, hour: datetime) -> str:
         return f"{self._root}/{hour:%Y/%m/%d/%H}/"
@@ -225,7 +252,12 @@ class LogSource:
         return objects
 
     def read_object(self, obj: LogObject) -> list[LogRecord]:
-        records = _decode_lines(self._store.get_bytes(obj.key), source=obj.key)
+        records, problems = _decode_lines(
+            self._store.get_bytes(obj.key), source=obj.key
+        )
+        with self._problems_lock:
+            self.problems.unreadable_files += problems.unreadable_files
+            self.problems.unreadable_lines += problems.unreadable_lines
         return [
             LogRecord(key=obj.key, record=self._inline_bodies(record))
             for record in records
@@ -248,8 +280,8 @@ class LogSource:
 
     def read_requests(self, calls: Iterable[CallRef]) -> list[LogRecord]:
         """Read again the calls saved at the last checkpoint. Each file is read
-        once, however many of its records are wanted. A file that is gone is
-        logged and skipped, with the number of calls lost."""
+        once, however many of its records are wanted. Missing files are logged
+        so the caller can report the calls that could not be restored."""
         wanted: dict[str, set[str]] = {}
         for call in calls:
             wanted.setdefault(call.source_key, set()).add(call.request_id)
@@ -263,16 +295,14 @@ class LogSource:
             try:
                 records = self.read_object(obj)
             except Exception as exc:
-                # Only a file that is gone costs its calls. Any other error
-                # (permissions, network) stops the run before a checkpoint
-                # can drop the calls from the state for good.
+                # A missing object only affects its turns. Other errors, such
+                # as permissions or network failures, stop the run.
                 if not _is_missing(exc):
                     raise
                 logger.warning(
-                    "Could not read %s again (%s): %d call(s) of open "
-                    "interactions are lost",
+                    "Log file %s is missing: could not restore %d call(s) "
+                    "of open interactions",
                     key,
-                    exc,
                     len(wanted[key]),
                 )
                 continue

@@ -2,7 +2,8 @@
 
 Load optional customer mappings once per run in load_context. Return only explicit
 customer-provided segments; the connector cannot infer team, tenure or market.
-End-user pseudonymization happens after these hooks have seen the native actor.
+With PSEUDONYMIZE_END_USER, the end user is pseudonymized after these hooks
+have seen the native actor.
 """
 
 from __future__ import annotations
@@ -15,9 +16,19 @@ if TYPE_CHECKING:
     from .models import InteractionSnapshot
 
 
+MAX_CONTENT_CHARS = 8000
+"""Same cap as the runtime connector, applied to every text we send: Nebuly
+refuses a payload too large for its queue (HTTP 413), and cuts trace texts
+to 5000 characters anyway."""
+
+
 def load_context() -> Mapping[str, object]:
     """Load customer mappings here; do not do per-interaction remote lookups."""
     return {}
+
+
+def truncate(text: str) -> str:
+    return text[:MAX_CONTENT_CHARS]
 
 
 def end_user_id(

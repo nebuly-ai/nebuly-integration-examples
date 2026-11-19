@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import TYPE_CHECKING
 
+from bedrock_sync.shared.cli import format_exception_stack
+from bedrock_sync.shared.model_names import GEO_PREFIX_RE
 from bedrock_sync.shared.time_utils import timestamp_str_to_datetime
 
 from .formats import anthropic, converse, openai
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CONVERSE_OPERATIONS = frozenset({"Converse", "ConverseStream"})
-_GEO_PREFIX_RE = re.compile(r"^(global|us|us-gov|eu|apac|jp|au|ca)\.")
 
 
 def normalize_model_id(model_id: str) -> str:
@@ -40,7 +40,7 @@ def normalize_model_id(model_id: str) -> str:
     Converse logs the id the caller passed, InvokeModel the full profile ARN;
     the geographic prefix of cross-region profiles is routing, not the model.
     """
-    return _GEO_PREFIX_RE.sub("", model_id.rsplit("/", 1)[-1])
+    return GEO_PREFIX_RE.sub("", model_id.rsplit("/", 1)[-1])
 
 
 def _adapter(
@@ -108,14 +108,20 @@ def parse_record(record: JsonDict, *, source_key: str = "") -> Invocation | Skip
     request_id = str(record.get("requestId") or "")
     try:
         result = _parse(record, request_id, source_key)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - isolate adapter errors to one record
         # An adapter bug must cost one record, not the whole run.
-        logger.exception(
-            "Skipping request %s (unexpected error) in %s", request_id, source_key
+        logger.error(  # noqa: TRY400 - the exception may contain the log body
+            "Skipping request %s (unexpected %s) in %s",
+            request_id,
+            type(exc).__name__,
+            source_key,
         )
-        return Skipped(
-            request_id, RecordSkip.INVALID_BODY, f"{type(exc).__name__}: {exc}"
+        logger.debug(
+            "Adapter error of request %s:\n%s",
+            request_id,
+            format_exception_stack(exc),
         )
+        return Skipped(request_id, RecordSkip.INVALID_BODY, type(exc).__name__)
     if isinstance(result, Skipped):
         _log_skip(result, source_key)
     return result
@@ -154,9 +160,12 @@ def _parse(record: JsonDict, request_id: str, source_key: str) -> Invocation | S
 
     try:
         body = adapter(input_body, output_body)
+    except BodyFormatError:
+        return Skipped(request_id, RecordSkip.INVALID_BODY, "invalid model body")
+    try:
         timestamp = timestamp_str_to_datetime(str(record.get("timestamp") or ""))
-    except (BodyFormatError, ValueError) as exc:
-        return Skipped(request_id, RecordSkip.INVALID_BODY, str(exc))
+    except ValueError:
+        return Skipped(request_id, RecordSkip.INVALID_BODY, "invalid timestamp")
 
     return Invocation(
         request_id=request_id,

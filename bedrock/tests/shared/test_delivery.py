@@ -1,7 +1,8 @@
-"""A remote POST cannot be made exactly-once by retrying uncertain attempts."""
+"""Every POST Nebuly did not confirm is retried, never twice in the same moment."""
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from typing import TYPE_CHECKING, Any
@@ -37,15 +38,12 @@ def deliver_pending(
         (200, "sent"),
         (202, "sent"),
         (204, "sent"),
-        (301, "uncertain"),
-        (307, "uncertain"),
-        (308, "uncertain"),
         (400, "rejected"),
-        (408, "uncertain"),
+        (408, "retryable"),
         (422, "rejected"),
         (429, "retryable"),
-        (500, "uncertain"),
-        (503, "uncertain"),
+        (500, "retryable"),
+        (503, "retryable"),
     ],
 )
 def test_one_post_after_durable_marker_and_no_replay(
@@ -86,7 +84,7 @@ def test_one_post_after_durable_marker_and_no_replay(
 @pytest.mark.parametrize(
     "exception", [httpx.ReadTimeout, httpx.ReadError, httpx.WriteError]
 )
-def test_transport_failure_is_uncertain_once(
+def test_transport_failure_is_retried_by_a_later_run_only(
     tmp_path: Path, exception: type[httpx.TransportError]
 ) -> None:
     calls = []
@@ -95,16 +93,21 @@ def test_transport_failure_is_uncertain_once(
         calls.append(request)
         raise exception("private response or credentials", request=request)
 
-    with OutboxStore(tmp_path / "db") as state:
+    path = tmp_path / "db"
+    with OutboxStore(path, now_ms=1000) as state:
         key = state.put("trace", {"synthetic": True})
         with SafeNebulyClient(
             "key", "https://example.test", transport=httpx.MockTransport(fail)
         ) as client:
             report = deliver_pending(state, client)
-            assert report.uncertain == 1
-            assert state.get(key).status == "uncertain"
+            assert report.retryable == 1
+            assert state.get(key).status == "pending"
+            # Nebuly may have it: not again in this run, nor within a minute.
             deliver_pending(state, client)
             assert len(calls) == 1
+            assert not state.pending_deliveries()
+    with OutboxStore(path, now_ms=61000) as state:
+        assert len(state.pending_deliveries()) == 1
 
 
 def test_preparation_failure_is_still_pending(tmp_path: Path) -> None:
@@ -121,7 +124,9 @@ def test_preparation_failure_is_still_pending(tmp_path: Path) -> None:
         assert state.get(key).status == "pending"
 
 
-def test_unexpected_transport_error_is_sanitized_and_uncertain(tmp_path: Path) -> None:
+def test_unexpected_transport_error_is_sanitized_and_retried_later(
+    tmp_path: Path,
+) -> None:
     def fail(request: httpx.Request) -> httpx.Response:
         raise RuntimeError("private-response-body")
 
@@ -131,11 +136,11 @@ def test_unexpected_transport_error_is_sanitized_and_uncertain(tmp_path: Path) -
             SafeNebulyClient(
                 "key", "https://example.test", transport=httpx.MockTransport(fail)
             ) as client,
-            pytest.raises(DeliveryError, match="uncertain") as error,
+            pytest.raises(DeliveryError, match="later run") as error,
         ):
             deliver_pending(state, client)
         assert "private-response-body" not in str(error.value)
-        assert state.get(key).status == "uncertain"
+        assert state.get(key).status == "pending"
 
 
 def test_auth_failure_stops_before_other_pending_deliveries(tmp_path: Path) -> None:
@@ -167,6 +172,8 @@ def test_auth_failure_stops_before_other_pending_deliveries(tmp_path: Path) -> N
         (403, AuthenticationError, "authentication failed"),
         (404, DeliveryError, "NEBULY_ENDPOINT"),
         (405, DeliveryError, "NEBULY_ENDPOINT"),
+        (301, DeliveryError, "NEBULY_ENDPOINT"),
+        (308, DeliveryError, "NEBULY_ENDPOINT"),
     ],
 )
 def test_wrong_key_or_endpoint_keeps_the_item_pending(
@@ -192,8 +199,12 @@ def test_wrong_key_or_endpoint_keeps_the_item_pending(
         assert not state.delivery_paused()
 
 
-@pytest.mark.parametrize("status", [308, 502, 503])
-def test_first_uncertain_response_stops_the_run(tmp_path: Path, status: int) -> None:
+@pytest.mark.parametrize("status", [408, 502, 503])
+def test_second_failed_response_in_a_row_stops_the_run(
+    tmp_path: Path, status: int
+) -> None:
+    """Nebuly failing two different items is an outage: stop, one more
+    attempt only. Each item waits for itself; the source is not paused."""
     requests = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -207,9 +218,46 @@ def test_first_uncertain_response_stops_the_run(tmp_path: Path, status: int) -> 
             "key", "https://example.test", transport=httpx.MockTransport(respond)
         ) as client:
             report = deliver_pending(state, client)
-        assert len(requests) == 1
-        assert report.uncertain == 1
-        assert len(state.pending_deliveries()) == 2
+        assert len(requests) == 2
+        assert report.retryable == 2
+        assert not report.paused
+        assert state.delivery_counts() == {"pending": 3}
+
+
+@pytest.mark.parametrize("status", [413, 422])
+def test_rejected_interaction_is_logged_with_where_to_find_it(
+    tmp_path: Path, status: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    payload = {
+        "interaction": {
+            "conversation_id": "private@example.test",
+            "time_start": "2026-11-11T10:00:00Z",
+            "input": "secret",
+        }
+    }
+    with OutboxStore(tmp_path / "db") as state:
+        key = state.put("trace", payload)
+        with (
+            SafeNebulyClient(
+                "key",
+                "https://example.test",
+                transport=httpx.MockTransport(lambda _: httpx.Response(status)),
+            ) as client,
+            caplog.at_level(logging.WARNING, logger="bedrock_sync.shared.delivery"),
+        ):
+            assert deliver_pending(state, client).rejected == 1
+        assert state.get(key).status == "rejected"
+    [line] = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "bedrock_sync.shared.delivery"
+    ]
+    assert "delivery trace" in line
+    assert "private@example.test" not in line
+    assert "2026-11-11T10:00:00Z" in line
+    assert f"HTTP {status}" in line
+    assert "secret" not in line
+    assert ("too large" in line) == (status == 413)
 
 
 def test_dry_run_state_cannot_send(tmp_path: Path) -> None:
@@ -223,12 +271,12 @@ def test_dry_run_state_cannot_send(tmp_path: Path) -> None:
     assert not (tmp_path / "missing").exists()
 
 
-def test_process_interruption_is_recovered_without_replay(tmp_path: Path) -> None:
+def test_process_interruption_is_sent_again_by_the_next_run(tmp_path: Path) -> None:
     def interrupt(request: httpx.Request) -> httpx.Response:
         raise KeyboardInterrupt
 
     path = tmp_path / "db"
-    with OutboxStore(path) as state:
+    with OutboxStore(path, now_ms=1_000) as state:
         key = state.put("trace", {"synthetic": True})
         with (
             SafeNebulyClient(
@@ -238,9 +286,11 @@ def test_process_interruption_is_recovered_without_replay(tmp_path: Path) -> Non
         ):
             deliver_pending(state, client)
         assert state.get(key).status == "sending"
-    with OutboxStore(path) as state:
-        assert state.get(key).status == "uncertain"
+    with OutboxStore(path, now_ms=2_000) as state:
+        assert state.get(key).status == "pending"
         assert not state.pending_deliveries()
+    with OutboxStore(path, now_ms=62_000) as state:
+        assert len(state.pending_deliveries()) == 1
 
 
 @pytest.mark.parametrize(
@@ -330,7 +380,7 @@ def test_long_retry_after_is_persisted_across_runs(tmp_path: Path) -> None:
         assert state.get(key).status == "sent"
 
 
-def test_retry_exhaustion_stays_pending_and_ambiguous_next_attempt_stops(
+def test_retry_exhaustion_stays_pending_and_a_server_error_waits_again(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "db"
@@ -359,12 +409,16 @@ def test_retry_exhaustion_stays_pending_and_ambiguous_next_attempt_stops(
             "https://example.test",
             transport=httpx.MockTransport(lambda _: httpx.Response(500)),
         ) as client:
-            assert deliver_pending(state, client).uncertain == 1
-        assert state.get(key).status == "uncertain"
+            assert deliver_pending(state, client).retryable == 1
+        assert state.get(key).status == "pending"
         assert not state.pending_deliveries()
+    with OutboxStore(path, now_ms=121000) as state:
+        assert len(state.pending_deliveries()) == 1
 
 
-def test_ambiguous_error_after_connection_retry_is_not_retried(tmp_path: Path) -> None:
+def test_ambiguous_error_after_connection_retry_waits_for_a_later_run(
+    tmp_path: Path,
+) -> None:
     calls = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -381,21 +435,8 @@ def test_ambiguous_error_after_connection_retry_is_not_retried(tmp_path: Path) -
             transport=httpx.MockTransport(respond),
             sleep=lambda _: None,
         ) as client:
-            assert deliver_pending(state, client).uncertain == 1
+            assert deliver_pending(state, client).retryable == 1
         assert len(calls) == 2
-
-
-def test_rate_limit_retry_can_be_disabled(tmp_path: Path) -> None:
-    with OutboxStore(tmp_path / "db") as state:
-        key = state.put("trace", {"synthetic": True})
-        with SafeNebulyClient(
-            "key",
-            "https://example.test",
-            transport=httpx.MockTransport(lambda _: httpx.Response(429)),
-            retry_http_429=False,
-        ) as client:
-            assert deliver_pending(state, client).uncertain == 1
-        assert state.get(key).status == "uncertain"
 
 
 def test_retry_deadline_is_relative_to_response_time_not_run_start(
@@ -479,3 +520,102 @@ def test_huge_retry_after_is_capped_at_one_day(tmp_path: Path) -> None:
     with OutboxStore(tmp_path / "db", now_ms=1000 + 86400 * 1000) as state:
         assert state.pending_deliveries()
         assert not state.delivery_paused()
+
+
+def _respond_by_key(
+    statuses: dict[bytes, int], requests: list[bytes]
+) -> httpx.MockTransport:
+    """Answer each payload by a marker in its body (default 200)."""
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.content)
+        for marker, status in statuses.items():
+            if marker in request.content:
+                return httpx.Response(status)
+        return httpx.Response(200)
+
+    return httpx.MockTransport(respond)
+
+
+def _payload(name: str, minute: int) -> dict[str, Any]:
+    return {
+        "interaction": {"time_start": f"2026-11-11T10:{minute:02d}:00Z"},
+        "name": name,
+    }
+
+
+def test_one_payload_failing_forever_does_not_hold_the_others(
+    tmp_path: Path,
+) -> None:
+    """The oldest payload always gets a 504: the newer ones are sent in the
+    same run, and from then on the failing one goes last."""
+    path = tmp_path / "db"
+    requests: list[bytes] = []
+    transport = _respond_by_key({b'"bad"': 504}, requests)
+    with OutboxStore(path, now_ms=1000) as state:
+        state.put("bad", _payload("bad", 0))
+        state.put("good", _payload("good", 1))
+        with SafeNebulyClient("key", "https://example.test", transport=transport) as c:
+            report = deliver_pending(state, c)
+        assert (report.sent, report.retryable, report.paused) == (1, 1, False)
+        assert state.delivery_counts() == {"pending": 1, "sent": 1}
+        state.put("newer", _payload("newer", 2))
+        state.now_ms = 1000 + 61_000
+        assert [d.interaction_key for d in state.pending_deliveries()] == [
+            "newer",
+            "bad",
+        ]
+
+
+def test_failing_payload_waits_longer_each_time_then_is_given_up(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    requests: list[bytes] = []
+    transport = _respond_by_key({b'"bad"': 503}, requests)
+    with OutboxStore(tmp_path / "db", now_ms=0) as state:
+        key = state.put("bad", _payload("bad", 0))
+        waits = []
+        with SafeNebulyClient("key", "https://example.test", transport=transport) as c:
+            for _ in range(100):
+                if state.get(key).status != "pending":
+                    break
+                due = state._db.execute(
+                    "SELECT next_attempt_ms FROM delivery_policy"
+                ).fetchone()[0]
+                waits.append(due - state.now_ms)
+                state.now_ms = due
+                with caplog.at_level(logging.WARNING):
+                    report = deliver_pending(state, c)
+        # One minute, then the time it has been failing, up to six hours.
+        assert waits[:5] == [0, 60_000, 60_000, 120_000, 240_000]
+        assert max(waits) == 6 * 3600 * 1000
+        assert state.now_ms >= 7 * 86400 * 1000
+        assert report.rejected == 1
+        assert state.delivery_counts() == {"rejected": 1}
+        assert "given up" in caplog.text
+        assert "--retry-given-up bad" in caplog.text
+        assert "while it accepted others" not in caplog.text
+        assert len(requests) < 50
+
+
+def test_connection_failure_still_pauses_the_source_and_is_never_given_up(
+    tmp_path: Path,
+) -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no connection", request=request)
+
+    with OutboxStore(tmp_path / "db", now_ms=0) as state:
+        state.put("first", _payload("first", 0))
+        state.put("second", _payload("second", 1))
+        with SafeNebulyClient(
+            "key",
+            "https://example.test",
+            transport=httpx.MockTransport(fail),
+            sleep=lambda _: None,
+        ) as client:
+            for day in range(9):
+                state.now_ms = day * 86400 * 1000
+                report = deliver_pending(state, client)
+                assert report.retryable == 1
+                assert report.paused
+        assert state.delivery_counts() == {"pending": 2}

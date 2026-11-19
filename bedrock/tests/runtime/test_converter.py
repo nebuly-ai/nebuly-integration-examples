@@ -69,7 +69,7 @@ def _result(
 ) -> dict[str, Any] | InteractionSkip:
     options: dict[str, Any] = {
         "anonymize": False,
-        "send_plain_end_user": True,
+        "pseudonymize_end_user": False,
         "user_hash_secret": "",
     }
     return interaction_to_payload(interaction, **{**options, **kwargs})
@@ -173,7 +173,7 @@ def test_end_user_is_pseudonymized_with_a_namespace() -> None:
     interaction = _interaction(_call("p1", 0, [user("Q")], "A"))
 
     end_user = _payload(
-        interaction, send_plain_end_user=False, user_hash_secret="secret"
+        interaction, pseudonymize_end_user=True, user_hash_secret="secret"
     )["interaction"]["end_user"]
 
     assert end_user == pseudonymize(END_USER_NAMESPACE, "u-1", "secret")
@@ -237,6 +237,26 @@ def test_model_names_are_normalized() -> None:
     )
 
     assert _payload(interaction)["interaction"]["tags"]["model"] == "claude-haiku-4-5"
+
+
+def test_application_inference_profile_is_mapped_by_the_model_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = (
+        "arn:aws:bedrock:eu-north-1:123456789012:application-inference-profile/abc123"
+    )
+    interaction = _interaction(_call("p1", 0, [user("Q")], "A", model_id=profile))
+    payload = _payload(interaction)
+    assert payload["interaction"]["tags"]["model"] == "abc123"
+    assert payload["traces"][0]["model"] == "abc123"
+
+    profiles = {"abc123": "claude-sonnet-4-5"}
+    monkeypatch.setattr(
+        user_defined, "model_name", lambda model, _: profiles.get(model, model)
+    )
+    payload = _payload(interaction)
+    assert payload["interaction"]["tags"]["model"] == "claude-sonnet-4-5"
+    assert payload["traces"][0]["model"] == "claude-sonnet-4-5"
 
 
 def test_history_with_assistant_text_keeps_the_latest_question() -> None:

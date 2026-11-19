@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -15,10 +16,13 @@ from bedrock_sync.agentcore import sync, user_defined
 from bedrock_sync.agentcore.config import AgentCoreConfig
 from bedrock_sync.agentcore.records import SourceScope
 from bedrock_sync.agentcore.state import AgentCoreState
-from tests.agentcore.cases import REAL_CASES, Logs, load
+from bedrock_sync.shared.errors import ConfigError
+from tests.agentcore.cases import REAL_CASES, Logs, load, snapshot
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from bedrock_sync.agentcore.models import InteractionSnapshot
 
 CASES = sorted(path.stem for path in REAL_CASES)
 DEFAULT_CASE = "principal_tools"
@@ -249,7 +253,7 @@ def test_partial_cloudwatch_failure_does_not_advance_coverage(tmp_path: Path) ->
     assert report.sent == 1
 
 
-def test_uncertain_send_is_not_retried_on_next_run(tmp_path: Path) -> None:
+def test_server_error_is_sent_again_by_a_later_run(tmp_path: Path) -> None:
     case = load(DEFAULT_CASE)
     config, now = settings(tmp_path, case)
     sent: list[dict[str, Any]] = []
@@ -259,12 +263,22 @@ def test_uncertain_send_is_not_retried_on_next_run(tmp_path: Path) -> None:
         transport=recorder(sent, status=503),
         now=now,
     )
-    assert first.uncertain == 1
-    second = sync.run_sync(
+    assert first.retryable == 1
+    same_minute = sync.run_sync(
         config, logs_client=Logs(case["records"]), transport=recorder(sent), now=now
     )
-    assert second.sent == 0
-    assert len(sent) == 1
+    assert same_minute.sent == 0
+    assert same_minute.delivery_waiting_for_retry
+    assert same_minute.incomplete
+    later = sync.run_sync(
+        config,
+        logs_client=Logs(case["records"]),
+        transport=recorder(sent),
+        now=now + timedelta(minutes=2),
+    )
+    assert later.sent == 1
+    assert len(sent) == 2
+    assert sent[0] == sent[1]
 
 
 def test_customer_mapping_is_loaded_once_for_multiple_traces(tmp_path: Path) -> None:
@@ -300,10 +314,52 @@ def test_bad_customer_enrichment_blocks_then_recovers_without_new_events(
         )
     assert first.blocked == 1
     assert first.diagnostics["conversion_failed"] == 1
+    assert first.incomplete
     second = sync.run_sync(
         config, logs_client=Logs([]), transport=recorder(sent), now=now
     )
     assert second.sent == 1
+
+
+def test_any_hook_error_blocks_only_its_trace_and_is_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    sent: list[dict[str, Any]] = []
+    with (
+        patch.object(user_defined, "build_tags", side_effect=KeyError("secret")),
+        caplog.at_level(logging.DEBUG, logger="bedrock_sync.agentcore.sync"),
+    ):
+        report = sync.run_sync(
+            config, logs_client=Logs(case["records"]), transport=recorder(sent), now=now
+        )
+    assert report.blocked == 1
+    assert report.incomplete
+    assert sent == []
+    assert "KeyError" in caplog.text
+    assert "stack without message" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_unserializable_hook_result_does_not_stop_other_traces(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    other = load("text_cache_read")
+    records = [*case["records"], *other["records"]]
+    config, now = settings(tmp_path, {**case, "records": records})
+    bad_trace = snapshot(case)[1].trace_id
+
+    def customize(
+        interaction: InteractionSnapshot, traces: list[dict[str, Any]], _: object
+    ) -> list[dict[str, Any]]:
+        return [{"bad": object()}] if interaction.trace_id == bad_trace else traces
+
+    with patch.object(user_defined, "customize_traces", side_effect=customize):
+        report = sync.run_sync(
+            config, logs_client=Logs(records), transport=recorder([]), now=now
+        )
+    assert (report.sent, report.blocked) == (1, 1)
+    assert report.diagnostics["conversion_failed"] == 1
 
 
 def test_future_to_date_is_capped_and_missing_first_start_fails_before_aws(
@@ -321,7 +377,9 @@ def test_future_to_date_is_capped_and_missing_first_start_fails_before_aws(
     )
     with (
         patch("bedrock_sync.agentcore.sync.create_logs_client") as create,
-        pytest.raises(ValueError, match="first-run"),
+        pytest.raises(
+            ConfigError, match="Cannot plan the CloudWatch read: --from-date"
+        ),
     ):
         sync.run_sync(
             replace(config, state_db=tmp_path / "other.db", from_date=None), now=now
@@ -329,7 +387,7 @@ def test_future_to_date_is_capped_and_missing_first_start_fails_before_aws(
     create.assert_not_called()
 
 
-def test_new_usage_after_confirmed_delivery_reports_discrepancy_without_resend(
+def test_new_usage_after_confirmed_delivery_is_sent_again_as_an_update(
     tmp_path: Path,
 ) -> None:
     case = load(DEFAULT_CASE)
@@ -349,19 +407,29 @@ def test_new_usage_after_confirmed_delivery_reports_discrepancy_without_resend(
     message["spanId"] = "f" * 16
     extra["eventId"] += "-new-usage"
     extra["message"] = json.dumps(message)
+    logs = [*case["records"], extra]
     report = sync.run_sync(
-        config,
-        logs_client=Logs([*case["records"], extra]),
-        transport=recorder(sent),
-        now=now,
+        config, logs_client=Logs(logs), transport=recorder(sent), now=now
     )
-    assert report.diagnostics["late_delivery_discrepancy"] == 1
+    # Nebuly may still be processing the first POST: wait a minute.
+    assert report.diagnostics["updated_after_delivery"] == 1
     assert report.sent == 0
-    assert len(sent) == 1
-    assert report.outbox_statuses == {"sent": 1}
+    assert report.outbox_statuses == {"pending": 1}
+    later = sync.run_sync(
+        config,
+        logs_client=Logs(logs),
+        transport=recorder(sent),
+        now=now + timedelta(minutes=2),
+    )
+    assert later.sent == 1
+    first, update = sent
+    for name in ("input", "end_user", "time_start", "conversation_id"):
+        assert update["interaction"][name] == first["interaction"][name]
+    assert update["traces"][0]["output_tokens"] > first["traces"][0]["output_tokens"]
+    assert later.outbox_statuses == {"sent": 1}
 
 
-def test_new_malformed_evidence_suspends_previously_pending_payload(
+def test_new_malformed_evidence_is_a_warning_on_a_pending_payload(
     tmp_path: Path,
 ) -> None:
     case = load(DEFAULT_CASE)
@@ -394,12 +462,35 @@ def test_new_malformed_evidence_suspends_previously_pending_payload(
         transport=recorder(sent),
         now=now,
     )
-    assert report.blocked == 1
-    assert report.sent == 0
-    assert not sent
+    assert report.blocked == 0
+    assert report.sent == 1
+    assert report.diagnostics["malformed_record"] >= 1
+
+
+def test_malformed_trace_id_does_not_block_sync_or_replay(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    bad = dict(case["records"][0])
+    message = json.loads(bad["message"])
+    message["traceId"] = "\ud800"
+    bad["eventId"] += "-invalid-trace-id"
+    bad["message"] = json.dumps(message)
+    logs = [*case["records"], bad]
+    sent: list[dict[str, Any]] = []
+    first = sync.run_sync(
+        config, logs_client=Logs(logs), transport=recorder(sent), now=now
+    )
+    assert first.diagnostics["malformed_record"] == 1
+    assert first.sent == 1
+    second = sync.run_sync(
+        replace(config, from_date=None),
+        logs_client=Logs(logs),
+        transport=recorder(sent),
+        now=now + timedelta(seconds=1),
+    )
+    assert second.sent == 0
     with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
-        assert len(state.pending_deliveries()) == 1
-        assert not state.pending_deliveries(ended_before_ns=2**62)
+        assert not state.records(unprocessed_only=True)
 
 
 def test_backfill_does_not_send_pending_interactions_after_selected_end(
@@ -585,7 +676,7 @@ def test_open_span_can_be_completed_by_a_later_export(tmp_path: Path) -> None:
     assert sent[0]["traces"][0]["output_tokens"] == expected["output_tokens"]
 
 
-def test_nonfinite_model_attributes_are_blocked_without_poisoning_the_run(
+def test_nonfinite_model_attributes_are_a_warning_without_poisoning_the_run(
     tmp_path: Path,
 ) -> None:
     case = load(DEFAULT_CASE)
@@ -609,12 +700,13 @@ def test_nonfinite_model_attributes_are_blocked_without_poisoning_the_run(
         transport=recorder(sent),
         now=now,
     )
-    assert report.blocked == 1
+    assert report.blocked == 0
     assert report.diagnostics["malformed_record"] >= 1
-    assert not sent
+    assert report.degraded == {"malformed_record": 1}
+    assert len(sent) == 1
     with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
         assert not state.records(unprocessed_only=True)
-        assert len(state.pending_traces()) == 1
+        assert not state.pending_traces()
 
 
 def test_blocked_trace_does_not_repeat_historical_prefix_queries(
@@ -626,12 +718,13 @@ def test_blocked_trace_does_not_repeat_historical_prefix_queries(
         for e in case["records"]
         if json.loads(e["message"]).get("name") == "invoke_agent Strands Agents"
     )
-    missing = next(
+    # Without the Memory log the trace has no actor: blocked, not sent.
+    incomplete = [
         e
         for e in case["records"]
-        if json.loads(e["message"]).get("name", "").startswith("execute_tool ")
-    )
-    incomplete = [e for e in case["records"] if e is not missing]
+        if json.loads(e["message"])["scope"]["name"]
+        != "bedrock_agentcore.memory.client"
+    ]
     config, now = settings(tmp_path, case, start=root["timestamp"])
     first_logs = Logs(incomplete)
     first = sync.run_sync(config, logs_client=first_logs, now=now)
@@ -760,6 +853,46 @@ def test_compacted_sent_trace_never_resends_on_replay_or_late_span(
         assert not state.pending_traces()
 
 
+def test_late_correction_survives_old_delivery_retention_on_conversion_failure(
+    tmp_path: Path,
+) -> None:
+    case = load("principal_tools")
+    config, now = settings(tmp_path, case)
+    config = replace(config, content_retention_seconds=60)
+    tool = next(
+        event
+        for event in case["records"]
+        if json.loads(event["message"]).get("name", "").startswith("execute_tool ")
+    )
+    sent: list[dict[str, Any]] = []
+    first = sync.run_sync(
+        config,
+        logs_client=Logs([event for event in case["records"] if event is not tool]),
+        transport=recorder(sent),
+        now=now,
+    )
+    assert first.sent == 1
+    config = replace(config, from_date=None)
+    with patch.object(sync, "snapshot_to_payload", side_effect=ValueError):
+        failed = sync.run_sync(
+            config,
+            logs_client=Logs([tool]),
+            transport=recorder(sent),
+            now=now + timedelta(seconds=61),
+        )
+    assert failed.diagnostics["conversion_failed"] == 1
+    assert failed.pruned_records == 0
+    recovered = sync.run_sync(
+        config,
+        logs_client=Logs([]),
+        transport=recorder(sent),
+        now=now + timedelta(seconds=62),
+    )
+    assert recovered.sent == 1
+    assert len(sent) == 2
+    assert sent[0] != sent[1]
+
+
 def test_changed_namespace_recovers_previously_unrecognized_identity_log(
     tmp_path: Path,
 ) -> None:
@@ -778,13 +911,36 @@ def test_changed_namespace_recovers_previously_unrecognized_identity_log(
     assert first.blocked == 1
     sent: list[dict[str, Any]] = []
     second = sync.run_sync(
-        replace(config, actor_namespace_template="/facts/{actorId}/"),
+        replace(config, actor_namespace_templates=("/facts/{actorId}/",)),
         logs_client=Logs([]),
         transport=recorder(sent),
         now=now,
     )
     assert second.sent == 1
     assert sent[0]["interaction"]["conversation_id"] == case["expected"]["session_id"]
+
+
+def test_history_retention_forgets_the_trace_and_a_replay_resends_it(
+    tmp_path: Path,
+) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    config = replace(config, content_retention_seconds=0, history_retention_seconds=0)
+    sent: list[dict[str, Any]] = []
+    first = sync.run_sync(
+        config, logs_client=Logs(case["records"]), transport=recorder(sent), now=now
+    )
+    assert (first.sent, first.forgotten_traces) == (1, 1)
+    with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
+        db = state._db
+        for table in ("traces", "record_receipts", "trace_outbox", "outbox"):
+            assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0  # noqa: S608
+    replay = sync.run_sync(
+        config, logs_client=Logs(case["records"]), transport=recorder(sent), now=now
+    )
+    # Same input, user and time_start: Nebuly updates the same interaction.
+    assert replay.sent == 1
+    assert sent[1] == sent[0]
 
 
 def test_blocked_trace_expires_after_reconciliation_and_retention(
@@ -806,10 +962,63 @@ def test_blocked_trace_expires_after_reconciliation_and_retention(
         config, logs_client=Logs([]), now=now + timedelta(days=8, seconds=1)
     )
     assert late.diagnostics["expired_trace"] == 1
+    assert late.expired == 1
+    assert late.expired_reasons == {"missing_actor": 1}
+    assert late.incomplete
     assert late.pruned_records > 0
     with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
         assert not state.pending_traces()
         assert not state.records()
+
+
+@pytest.mark.parametrize("actionable", [False, True])
+def test_rootless_expiration_fails_only_with_agent_evidence(
+    tmp_path: Path, *, actionable: bool
+) -> None:
+    case = load(DEFAULT_CASE)
+    name = "chat" if actionable else "POST /invocations"
+    event = next(
+        event
+        for event in case["records"]
+        if json.loads(event["message"]).get("name") == name
+    )
+    config, now = settings(tmp_path, {**case, "records": [event]})
+    first = sync.run_sync(config, logs_client=Logs([event]), now=now)
+    assert first.blocked == 1
+    later = sync.run_sync(
+        replace(config, from_date=None),
+        logs_client=Logs([]),
+        now=now + timedelta(days=8, seconds=1),
+    )
+    assert later.incomplete == actionable
+    assert (
+        later.diagnostics["expired_trace" if actionable else "ignored_rootless_trace"]
+        == 1
+    )
+    assert later.expired_reasons == ({"missing_root": 1} if actionable else {})
+    with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
+        assert not state.pending_traces()
+        assert not state.records()
+
+
+def test_other_harness_payload_is_not_persisted(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    other = dict(case["records"][0])
+    message = json.loads(other["message"])
+    message["resource"]["attributes"]["cloud.resource_id"] = "foreign-harness"
+    message["private_marker"] = "foreign-body"
+    other["message"] = json.dumps(message)
+    other["eventId"] += "-foreign"
+    report = sync.run_sync(
+        config,
+        logs_client=Logs([*case["records"], other]),
+        transport=recorder([]),
+        now=now,
+    )
+    assert report.sent == 1
+    with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
+        assert all("foreign-body" not in record.message for record in state.records())
 
 
 def test_scheduled_reconciliation_finds_late_child_without_full_prefix_rescan(
@@ -826,10 +1035,16 @@ def test_scheduled_reconciliation_finds_late_child_without_full_prefix_rescan(
     # Coverage ends an hour after the trace, so the overlap cannot find the
     # missing record again: only the reconciliation reads that far back.
     coverage_end = now + timedelta(hours=1)
-    first = sync.run_sync(config, logs_client=Logs(incomplete), now=coverage_end)
-    assert first.blocked == 1
-    logs = Logs(case["records"])
     sent: list[dict[str, Any]] = []
+    first = sync.run_sync(
+        config,
+        logs_client=Logs(incomplete),
+        transport=recorder(sent),
+        now=coverage_end,
+    )
+    assert first.sent == 1
+    assert first.degraded == {"missing_tool_span": 1}
+    logs = Logs(case["records"])
     result = sync.run_sync(
         replace(config, from_date=None),
         logs_client=logs,
@@ -837,11 +1052,51 @@ def test_scheduled_reconciliation_finds_late_child_without_full_prefix_rescan(
         now=coverage_end + timedelta(days=1),
     )
     assert result.sent == 1
+    assert result.diagnostics["updated_after_delivery"] == 1
+    assert len(sent[1]["traces"]) == len(sent[0]["traces"]) + 1
     overlap_start_ms = int(
         (coverage_end - timedelta(seconds=config.overlap_seconds)).timestamp() * 1000
     )
     assert min(request["startTime"] for request in logs.requests) < overlap_start_ms
     assert not any("filterPattern" in request for request in logs.requests)
+
+
+def test_hourly_checkpoint_does_not_shorten_daily_reconciliation(
+    tmp_path: Path,
+) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    tool = next(
+        event
+        for event in case["records"]
+        if json.loads(event["message"]).get("name", "").startswith("execute_tool ")
+    )
+    first_end = now + timedelta(hours=2)
+    posts: list[dict[str, Any]] = []
+    sync.run_sync(
+        config,
+        logs_client=Logs([event for event in case["records"] if event is not tool]),
+        transport=recorder(posts),
+        now=first_end,
+    )
+    config = replace(config, from_date=None)
+    for hour in (1, 23):
+        report = sync.run_sync(
+            config,
+            logs_client=Logs([tool]),
+            transport=recorder(posts),
+            now=first_end + timedelta(hours=hour),
+        )
+        assert report.new_records == 0
+    report = sync.run_sync(
+        config,
+        logs_client=Logs([tool]),
+        transport=recorder(posts),
+        now=first_end + timedelta(hours=27),
+    )
+    assert report.diagnostics["updated_after_delivery"] == 1
+    assert len(posts) == 2
+    assert len(posts[1]["traces"]) == len(posts[0]["traces"]) + 1
 
 
 def test_retryable_delivery_is_retained_and_sent_on_a_later_run(tmp_path: Path) -> None:
@@ -902,37 +1157,304 @@ def _retraced(
     return events
 
 
-def test_session_goes_to_the_actor_of_the_oldest_trace_staged(tmp_path: Path) -> None:
-    """Two ready traces of one session by different actors in the same run: the
-    newer one has the lower trace id, so only the ordering by start time gives
-    the session to the actor who started it."""
+def test_session_with_several_actors_sends_both_and_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nebuly keys a conversation by id and end user: two actors in one
+    session are two conversations there, so both are sent, with a warning."""
     case = load(DEFAULT_CASE)
     newer = _retraced(case, "0" * 31 + "1", 60_000, "another-actor")
     both = {**case, "records": [*case["records"], *newer]}
     config, now = settings(tmp_path, both)
     sent: list[dict[str, Any]] = []
 
-    report = sync.run_sync(
-        config, logs_client=Logs(both["records"]), transport=recorder(sent), now=now
-    )
+    with caplog.at_level(logging.WARNING):
+        report = sync.run_sync(
+            config,
+            logs_client=Logs(both["records"]),
+            transport=recorder(sent),
+            now=now,
+        )
 
     assert [p["interaction"]["conversation_id"] for p in sent] == [
         case["expected"]["session_id"]
-    ]
-    assert report.diagnostics["conversation_user_conflict"] == 1
-    assert (report.sent, report.dropped) == (1, 1)
-    with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
-        dropped = state.trace("0" * 31 + "1")
-        assert dropped is not None
-        assert dropped.status == "dropped"
-        assert all(t.trace_id != dropped.trace_id for t in state.pending_traces())
+    ] * 2
+    assert len({p["interaction"]["end_user"] for p in sent}) == 2
+    assert report.sessions_with_several_actors == 1
+    assert caplog.text.count("several actors") == 1
+    assert not report.incomplete
 
-    # A dropped trace is not assembled again on the next run.
-    again = sync.run_sync(
-        config,
-        logs_client=Logs(both["records"]),
-        transport=recorder(sent),
-        now=now + timedelta(minutes=10),
+
+def test_changed_match_values_after_delivery_keep_the_sent_interaction() -> None:
+    """Nebuly matches input, end user and start time: a payload that changes one
+    of them would add a copy, so it is not sent again."""
+    sent = {"interaction": {"input": "a", "end_user": "u", "time_start": "t"}}
+    for changed in ({"input": "b"}, {"end_user": "v"}, {"time_start": "s"}):
+        payload = {"interaction": {**sent["interaction"], **changed}}
+        assert not sync._same_nebuly_interaction(sent, payload)
+    assert not sync._same_nebuly_interaction({}, sent)
+    assert sync._same_nebuly_interaction(
+        sent, {"interaction": {**sent["interaction"], "output": "new"}}
     )
-    assert "conversation_user_conflict" not in again.diagnostics
+
+
+@pytest.mark.parametrize("initial_status", [200, 503])
+def test_late_pending_payload_keeps_the_first_post_key(
+    tmp_path: Path, initial_status: int
+) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    tool = next(
+        event
+        for event in case["records"]
+        if json.loads(event["message"]).get("name", "").startswith("execute_tool ")
+    )
+    posts: list[dict[str, Any]] = []
+    sync.run_sync(
+        config,
+        logs_client=Logs([event for event in case["records"] if event is not tool]),
+        transport=recorder(posts, status=initial_status),
+        now=now,
+    )
+    config = replace(config, from_date=None)
+    correction = sync.run_sync(
+        config,
+        logs_client=Logs([tool]),
+        transport=recorder(posts),
+        now=now + timedelta(seconds=1),
+    )
+    assert correction.outbox_statuses == {"pending": 1}
+    assert len(posts) == 1
+    retried = sync.run_sync(
+        replace(config, pseudonymize_end_user=True),
+        logs_client=Logs([]),
+        transport=recorder(posts),
+        now=now + timedelta(minutes=2),
+    )
+    assert retried.sent == 1
+    assert retried.diagnostics["late_delivery_discrepancy"] == 1
+    assert sync._same_nebuly_interaction(posts[0], posts[1])
+    assert len(posts[1]["traces"]) == len(posts[0]["traces"]) + 1
+
+
+def test_crash_before_requeue_retries_sent_trace_correction(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    tool = next(
+        event
+        for event in case["records"]
+        if json.loads(event["message"]).get("name", "").startswith("execute_tool ")
+    )
+    posts: list[dict[str, Any]] = []
+    sync.run_sync(
+        config,
+        logs_client=Logs([event for event in case["records"] if event is not tool]),
+        transport=recorder(posts),
+        now=now,
+    )
+    config = replace(config, from_date=None)
+    with (
+        patch.object(
+            AgentCoreState, "requeue_payload", side_effect=RuntimeError("crash")
+        ),
+        pytest.raises(RuntimeError, match="crash"),
+    ):
+        sync.run_sync(
+            config,
+            logs_client=Logs([tool]),
+            transport=recorder(posts),
+            now=now + timedelta(seconds=1),
+        )
+    resumed = sync.run_sync(
+        config,
+        logs_client=Logs([]),
+        transport=recorder(posts),
+        now=now + timedelta(minutes=2),
+    )
+    assert resumed.sent == 1
+    assert len(posts) == 2
+    assert len(posts[1]["traces"]) == len(posts[0]["traces"]) + 1
+
+
+def test_retry_given_up_only_replays_the_retained_post(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    tool = next(
+        event
+        for event in case["records"]
+        if json.loads(event["message"]).get("name", "").startswith("execute_tool ")
+    )
+    incomplete = [event for event in case["records"] if event is not tool]
+    posts: list[dict[str, Any]] = []
+    for clock in (now, now + timedelta(days=7)):
+        report = sync.run_sync(
+            config,
+            logs_client=Logs(incomplete),
+            transport=recorder(posts, status=503),
+            now=clock,
+        )
+    assert report.outbox_statuses == {"rejected": 1}
+    _, item = snapshot(case)
+    late = sync.run_sync(
+        config,
+        logs_client=Logs([tool]),
+        transport=recorder(posts),
+        now=now + timedelta(days=7, minutes=1),
+    )
+    assert late.outbox_statuses == {"rejected": 1}
+    assert len(posts) == 2
+    with AgentCoreState(config.state_db, source(config), config.log_groups) as state:
+        state.put_payload("unrelated-trace", "unrelated-root", posts[0])
+    with patch.object(
+        sync, "create_logs_client", side_effect=AssertionError("No AWS reads")
+    ):
+        recovered = sync.run_sync(
+            replace(config, from_date=None, retry_given_up=item.interaction_key),
+            transport=recorder(posts),
+            now=now + timedelta(days=7, minutes=2),
+        )
+    assert recovered.sent == 1
+    assert recovered.outbox_statuses == {"sent": 1, "pending": 1}
+    assert len(posts) == 3
+    assert posts[0] == posts[2]
+
+
+def _sub_agent_exported_ms(case: dict[str, Any]) -> int:
+    """When the first sub-agent span reached CloudWatch, before its caller."""
+    return min(
+        int(event["timestamp"])
+        for event in case["records"]
+        if json.loads(event["message"]).get("name", "").startswith("invoke_agent ")
+        and json.loads(event["message"])["name"] != "invoke_agent Strands Agents"
+    )
+
+
+def _without_http_parent(
+    case: dict[str, Any], *, orphan_root: bool = False
+) -> list[dict[str, Any]]:
+    """The records without POST /invocations; ``orphan_root`` also clears the
+    root's parent, as for an agent run outside AgentCore Runtime."""
+    events = []
+    for event in case["records"]:
+        message = json.loads(event["message"])
+        if message.get("name") == "POST /invocations":
+            continue
+        if orphan_root and message.get("name") == "invoke_agent Strands Agents":
+            message.pop("parentSpanId", None)
+            events.append({**event, "message": json.dumps(message)})
+            continue
+        events.append(event)
+    return events
+
+
+def test_sub_agent_seen_before_its_caller_waits_and_only_the_turn_is_sent(
+    tmp_path: Path,
+) -> None:
+    """A run between the sub-agent's end and its caller's must not send the
+    sub-agent as the turn: Nebuly would get two interactions for one turn."""
+    case = load("subagent_usage")
+    config, end = settings(tmp_path, case)
+    sent: list[dict[str, Any]] = []
+    early = sync.run_sync(
+        config,
+        logs_client=Logs(case["records"]),
+        transport=recorder(sent),
+        now=date(_sub_agent_exported_ms(case) + 1),
+    )
+    assert (early.sent, early.open) == (0, 1)
+    assert early.diagnostics["waiting_for_parent"] == 1
+    later = sync.run_sync(
+        replace(config, from_date=None),
+        logs_client=Logs(case["records"]),
+        transport=recorder(sent),
+        now=end,
+    )
+    assert later.sent == 1
+    assert [p["interaction"]["input"] for p in sent] == [case["expected"]["input"]]
+
+
+def test_root_without_its_http_parent_is_sent_after_the_wait(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    records = _without_http_parent(case)
+    config, now = settings(tmp_path, case)
+    sent: list[dict[str, Any]] = []
+    first = sync.run_sync(
+        config, logs_client=Logs(records), transport=recorder(sent), now=now
+    )
+    assert (first.sent, first.open) == (0, 1)
+    later = sync.run_sync(
+        replace(config, from_date=None),
+        logs_client=Logs(records),
+        transport=recorder(sent),
+        now=now + timedelta(seconds=config.root_wait_seconds + 60),
+    )
+    assert later.sent == 1
+    assert later.degraded["missing_parent"] == 1
+    assert sent[0]["interaction"]["input"] == case["expected"]["input"]
+
+
+def test_historical_to_date_does_not_freeze_parent_wait(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    records = _without_http_parent(case)
+    config, now = settings(tmp_path, case)
+    config = replace(config, to_date=now)
+    first = sync.run_sync(
+        config, logs_client=Logs(records), transport=recorder([]), now=now
+    )
+    assert first.open == 1
+    later = sync.run_sync(
+        config,
+        logs_client=Logs(records),
+        transport=recorder([]),
+        now=now + timedelta(days=2),
+    )
+    assert (later.open, later.sent) == (0, 1)
+
+
+def test_root_without_a_parent_is_sent_at_once(tmp_path: Path) -> None:
+    case = load(DEFAULT_CASE)
+    config, now = settings(tmp_path, case)
+    sent: list[dict[str, Any]] = []
+    report = sync.run_sync(
+        config,
+        logs_client=Logs(_without_http_parent(case, orphan_root=True)),
+        transport=recorder(sent),
+        now=now,
+    )
+    assert report.sent == 1
+    assert "waiting_for_parent" not in report.diagnostics
+
+
+@pytest.mark.parametrize("first_status", [200, 503])
+def test_sub_agent_sent_after_the_wait_is_followed_by_the_turn_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, first_status: int
+) -> None:
+    """A caller later than --root-wait-seconds: the sub-agent went out as the
+    turn. The turn is sent too, with a warning; a sub-agent payload still
+    waiting for a retry is dropped, not sent again."""
+    case = load("subagent_usage")
+    config, end = settings(tmp_path, case)
+    config = replace(config, root_wait_seconds=0)
+    sent: list[dict[str, Any]] = []
+    sync.run_sync(
+        config,
+        logs_client=Logs(case["records"]),
+        transport=recorder(sent, status=first_status),
+        now=date(_sub_agent_exported_ms(case) + 1),
+    )
     assert len(sent) == 1
+    assert sent[0]["interaction"]["input"] != case["expected"]["input"]
+
+    with caplog.at_level(logging.WARNING):
+        later = sync.run_sync(
+            replace(config, from_date=None),
+            logs_client=Logs(case["records"]),
+            transport=recorder(sent),
+            now=end + timedelta(minutes=5),
+        )
+
+    assert len(sent) == 2
+    assert sent[1]["interaction"]["input"] == case["expected"]["input"]
+    assert later.diagnostics["sub_agent_sent_as_turn"] == 1
+    assert "sub-agent was sent as the turn" in caplog.text
+    assert later.outbox_statuses == {"sent": 1 if first_status == 503 else 2}

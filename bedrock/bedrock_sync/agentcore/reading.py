@@ -43,14 +43,14 @@ def plan_reads(
     end_ms: int,
     overlap_seconds: int,
     reconciliation_seconds: int,
+    last_reconciliation_ms: int | None = None,
 ) -> ReadPlan:
     """The primary window (from the coverage end minus the overlap, or from
     ``--from-date``) and, when due, a reconciliation window before it.
 
-    Reconciliation looks behind the previous coverage end, not the current
-    clock: a daily run must still read the previous day's late events. It is
-    bounded, so an event later than the horizon is not found; traces already
-    known are read back from their own start by ``plan_trace_recovery``.
+    Reconciliation starts one lookback before the last reconciliation's end.
+    Events that showed up just after that scan need to be revisited even when
+    intermediate runs advanced coverage or a scheduled run was missed.
     """
     if min(end_ms, overlap_seconds, reconciliation_seconds) < 0:
         raise ValueError("Read times and lookbacks must be nonnegative")
@@ -70,13 +70,16 @@ def plan_reads(
             if requested_start_ms is not None
             else max(coverage_start, coverage_end - overlap_seconds * 1000)
         )
-        reconcile_start = max(
-            coverage_start, coverage_end - reconciliation_seconds * 1000
+        if end_ms < coverage_start:
+            raise ValueError("Requested end is before stored coverage")
+        anchor = (
+            coverage_end if last_reconciliation_ms is None else last_reconciliation_ms
         )
+        reconcile_start = max(coverage_start, anchor - reconciliation_seconds * 1000)
         reconcile_end = min(start_ms, end_ms)
         reconcile = (
             ReadWindow(reconcile_start, reconcile_end)
-            if reconcile_start < reconcile_end
+            if reconciliation_seconds and reconcile_start < reconcile_end
             else None
         )
     if start_ms < 0 or start_ms >= end_ms:

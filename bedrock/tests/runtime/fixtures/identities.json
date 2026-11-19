@@ -11,7 +11,7 @@
    "Prompts were written by the collection script; outputs are the models' real answers."
   ]
  },
- "notes": "One interaction_id is reused on purpose: its first call wins, the call of another conversation and the call of another user are dropped.",
+ "notes": "One interaction_id is reused on purpose: in another conversation it is another turn. A call of another user in the same conversation is sent as that user's own conversation, as Nebuly keys conversations by id and end user.",
  "source": {
   "account_id": "123456789012",
   "region": "eu-north-1",
@@ -419,6 +419,36 @@
    },
    {
     "conversation_id": "6f283a57-947f-49c7-b1d8-d0c002543e44",
+    "end_user": "fixture_d4165046263c_bob",
+    "input": "Say hello in one short sentence.",
+    "output": "Hello, it's nice to meet you!",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 19,
+      "output_tokens": 15,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "0a487e4a-f601-41a4-8945-54a466276052",
+    "end_user": "fixture_d4165046263c_alice",
+    "input": "Say hello in one short sentence.",
+    "output": "Hello, it's nice to meet you!",
+    "tokens": {
+     "claude-haiku-5-5": {
+      "input_tokens": 19,
+      "output_tokens": 15,
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0
+     }
+    },
+    "tools": []
+   },
+   {
+    "conversation_id": "6f283a57-947f-49c7-b1d8-d0c002543e44",
     "end_user": "fixture_d4165046263c_alice",
     "input": "Same prompt repeated with a NEW interaction ID. Say hello.",
     "output": "Hello! How can I help you today?",
@@ -449,11 +479,11 @@
    }
   ],
   "grouping": {
-   "accepted": 3,
-   "interaction_id_conflicts": 1,
-   "conversation_user_conflicts": 1,
+   "accepted": 5,
+   "conversations_with_several_users": 1,
+   "interactions_with_several_users": 1,
    "closed_next_interaction": 2,
-   "closed_idle": 1
+   "closed_idle": 3
   },
   "records_skipped": {},
   "interactions_skipped": {},

@@ -157,14 +157,14 @@ def test_unsupported_records_are_parsed_again_when_the_namespace_changes(
     tmp_path: Path,
 ) -> None:
     with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
-        state.configure_parser("/actors/{actorId}/")
+        state.configure_parser(("/actors/{actorId}/",))
         window = state.begin_window(100, 200)
         state.ingest_page(window, page(GROUPS[0], record(), record("event-2")))
         state.mark_processed(record(), trace_id="trace", unsupported=True)
         state.mark_processed(record("event-2"), trace_id="trace")
-        state.configure_parser("/actors/{actorId}/")
+        state.configure_parser(("/actors/{actorId}/",))
         assert state.records(unprocessed_only=True) == ()
-        state.configure_parser("/facts/{actorId}/")
+        state.configure_parser(("/actors/{actorId}/", "/facts/{actorId}/"))
         assert state.records(unprocessed_only=True) == (record(),)
 
 
@@ -312,7 +312,7 @@ def test_content_retention_erases_all_copies_but_preserves_dedup(
         assert state.coverage == (100, 200)
 
 
-@pytest.mark.parametrize("outcome", ["pending", "uncertain"])
+@pytest.mark.parametrize("outcome", ["pending", "retried"])
 def test_retention_preserves_unresolved_delivery_content(
     tmp_path: Path, outcome: str
 ) -> None:
@@ -321,12 +321,54 @@ def test_retention_preserves_unresolved_delivery_content(
     ) as state:
         state.save_trace("trace", "ready", 100, {"input": "private"})
         key = state.put_payload("trace", "root", {"input": "private"})
-        if outcome == "uncertain":
-            state.finish_attempt(state.begin_attempt(key), "uncertain")
+        if outcome == "retried":
+            state.finish_attempt(state.begin_attempt(key), "retryable", http_status=503)
         state.now_ms = 10000000
         state.prune_content(0)
         assert delivery(state, key).payload == {"input": "private"}
         assert not state.is_compacted("trace")
+
+
+def test_trace_retention_waits_for_latest_delivery_to_age(tmp_path: Path) -> None:
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS, now_ms=62_000) as state:
+        state.save_trace("trace", "ready", 100, {"input": "private"})
+        child = state.put_payload("trace", "child", {"input": "child"})
+        state.finish_attempt(
+            state.begin_attempt(child), "sent", http_status=200, finished_ms=1000
+        )
+        assert state.supersede_roots("trace", "root") == 1
+        root = state.put_payload("trace", "root", {"input": "root"})
+        state.finish_attempt(state.begin_attempt(root), "sent", http_status=200)
+        state.prune_content(60)
+        assert not state.is_compacted("trace")
+        assert delivery(state, child).payload == {"input": "child"}
+        assert delivery(state, root).payload == {"input": "root"}
+        state.now_ms = 122_000
+        state.prune_content(60)
+        assert state.is_compacted("trace")
+        assert delivery(state, child).payload == {}
+        assert delivery(state, root).payload == {}
+
+
+def test_dropped_trace_stays_dropped_when_a_delivery_is_old(tmp_path: Path) -> None:
+    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS, now_ms=62_000) as state:
+        state.save_trace("trace", "dropped", 100, {"expired": True})
+        old = state.put_payload("trace", "old", {"input": "old"})
+        state.finish_attempt(
+            state.begin_attempt(old), "sent", http_status=200, finished_ms=1000
+        )
+        recent = state.put_payload("trace", "recent", {"input": "recent"})
+        state.finish_attempt(state.begin_attempt(recent), "sent", http_status=200)
+        state.prune_content(60)
+        trace = state.trace("trace")
+        assert trace is not None
+        assert trace.status == "dropped"
+        assert state.is_compacted("trace")
+        assert delivery(state, old).payload == {}
+        assert delivery(state, recent).payload == {"input": "recent"}
+        state.now_ms = 122_000
+        state.prune_content(60)
+        assert delivery(state, recent).payload == {}
 
 
 def test_old_unrelated_records_are_pruned_with_receipts(tmp_path: Path) -> None:
@@ -347,83 +389,14 @@ def _staged(state: AgentCoreState, trace_id: str) -> str:
     return state.put_payload(trace_id, "root", {"synthetic": True})
 
 
-def test_conversation_belongs_to_the_first_actor_across_runs(tmp_path: Path) -> None:
-    path = tmp_path / "state.db"
-    with AgentCoreState(path, SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice", "t1")
-        _staged(state, "t1")
-        assert state.claim_conversation("session-1", "alice", "t2")
-        assert not state.claim_conversation("session-1", "bob", "t3")
-        assert state.claim_conversation("session-2", "bob", "t3")
-    with AgentCoreState(path, SOURCE, GROUPS) as state:
-        assert not state.claim_conversation("session-1", "bob", "t4")
-        assert state.claim_conversation("session-1", "alice", "t4")
-
-
-@pytest.mark.parametrize(
-    ("outcome", "status", "keeps"),
-    [
-        ("sent", 200, True),
-        ("uncertain", 503, True),
-        ("rejected", 422, False),
-    ],
-)
-def test_session_stays_with_a_delivered_trace_only(
-    tmp_path: Path, outcome: str, status: int, *, keeps: bool
-) -> None:
-    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice", "t1")
-        key = _staged(state, "t1")
-        state.finish_attempt(state.begin_attempt(key), outcome, http_status=status)  # type: ignore[arg-type]
-        assert state.claim_conversation("session-1", "bob", "t2") is not keeps
-
-
-def test_session_is_freed_when_its_staged_trace_is_dropped(tmp_path: Path) -> None:
-    """The trace expired before delivery."""
-    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice", "t1")
-        _staged(state, "t1")
-        state.save_trace("t1", "dropped", 100, {})
-        assert state.claim_conversation("session-1", "bob", "t2")
-        _staged(state, "t2")
-        assert not state.claim_conversation("session-1", "alice", "t3")
-
-
-def test_session_stays_with_a_staged_trace_blocked_for_now(tmp_path: Path) -> None:
-    """A late record, or an earlier --to-date, may block it until a later run."""
-    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice", "t1")
-        _staged(state, "t1")
-        state.save_trace("t1", "blocked", 100, {})
-        assert not state.claim_conversation("session-1", "bob", "t2")
-
-
-def test_session_stays_with_any_delivered_trace_of_the_owner(tmp_path: Path) -> None:
-    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice", "t1")
-        first = _staged(state, "t1")
-        assert state.claim_conversation("session-1", "alice", "t2")
-        second = _staged(state, "t2")
-        state.finish_attempt(state.begin_attempt(second), "sent", http_status=200)
-        state.finish_attempt(state.begin_attempt(first), "rejected", http_status=422)
-        assert not state.claim_conversation("session-1", "bob", "t3")
-
-
 def test_payload_of_an_expired_staged_trace_is_erased(tmp_path: Path) -> None:
     with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS, now_ms=61_000) as state:
         key = _staged(state, "t1")
         state.save_trace("t1", "blocked", 100, {})
-        assert state.expire_traces(200) == 1
+        assert state.expire_traces(200) == (1, {"not_assembled": 1}, 0)
         state.prune_content(60)
         assert delivery(state, key).payload == {}
         assert state.pending_deliveries(ended_before_ns=2**62) == ()
-
-
-def test_claim_without_staging_holds_nothing(tmp_path: Path) -> None:
-    """A crash between the claim and the staging leaves the session free."""
-    with AgentCoreState(tmp_path / "state.db", SOURCE, GROUPS) as state:
-        assert state.claim_conversation("session-1", "alice", "t1")
-        assert state.claim_conversation("session-1", "bob", "t2")
 
 
 def test_dropped_traces_are_erased_after_the_retention(tmp_path: Path) -> None:
@@ -433,7 +406,7 @@ def test_dropped_traces_are_erased_after_the_retention(tmp_path: Path) -> None:
         window = state.begin_window(100, 200)
         state.ingest_page(window, page(GROUPS[0], record()))
         state.mark_processed(record(), trace_id="trace")
-        state.save_trace("trace", "dropped", 100, {"conversation_user_conflict": True})
+        state.save_trace("trace", "dropped", 100, {"expired": True})
         assert state.prune_content(60) == 0  # 100 ms + 60 s is not past yet
         state.now_ms = 61_000
         assert state.prune_content(60) == 1

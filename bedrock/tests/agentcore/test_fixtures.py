@@ -260,4 +260,4 @@ def test_reusable_cases_materialize_labeled_mutations(
         chat = next(record for record in decoded if record.get("name") == "chat")
         assert "gen_ai.usage.input_tokens" not in chat["attributes"]
         assert "gen_ai.usage.prompt_tokens" not in chat["attributes"]
-        assert case["expected"]["readiness"] == "blocked"
+        assert case["expected"]["readiness"] == "ready"  # sent without its usage

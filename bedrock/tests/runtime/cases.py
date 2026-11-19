@@ -51,7 +51,7 @@ def config(case: dict[str, Any], state_dir: Path) -> Config:
         nebuly_api_key="nb-key",
         nebuly_endpoint="https://backend.example.test/trace_interaction",
         user_hash_secret="",
-        send_plain_end_user=True,
+        pseudonymize_end_user=False,
         anonymize=False,
         from_date=datetime.fromisoformat(case["run"]["from_date"]),
         to_date=None,
@@ -59,7 +59,6 @@ def config(case: dict[str, Any], state_dir: Path) -> Config:
         content_retention_seconds=604800,
         dry_run=False,
         verbose=False,
-        retry_http_429=True,
         s3_bucket=source["bucket"],
         s3_prefix="",
     )

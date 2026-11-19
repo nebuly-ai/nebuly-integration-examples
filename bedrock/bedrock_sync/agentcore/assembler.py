@@ -25,6 +25,15 @@ if TYPE_CHECKING:
 
 STRANDS = "strands.telemetry.tracer"
 
+BLOCKING = frozenset(
+    {"missing_root", "ambiguous_roots", "missing_actor", "ambiguous_actor"}
+    | {"empty_interaction"}
+)
+"""Problems that stop a trace: Nebuly needs a user and some content, and
+without one root there is no interaction. Every other problem is a warning:
+the trace is sent with what could be read, and sent again if a late span
+completes it."""
+
 
 def _decode(value: object) -> object:
     if isinstance(value, str):
@@ -138,11 +147,7 @@ def assemble(
                 issue = Diagnostic(
                     "unread_trace_history", snapshot.trace_id, snapshot.root_span_id
                 )
-                snapshot = replace(
-                    snapshot,
-                    readiness="open" if snapshot.readiness == "open" else "blocked",
-                    diagnostics=(*snapshot.diagnostics, issue),
-                )
+                snapshot = replace(snapshot, diagnostics=(*snapshot.diagnostics, issue))
                 diagnostics.append(issue)
             interactions.append(snapshot)
         diagnostics.extend(trace_result.diagnostics)
@@ -291,7 +296,7 @@ def _snapshot(
     ) and not _verified_zero_model_error(root):
         diagnostics.append(Diagnostic("missing_model_calls", root.trace_id))
     _check_tool_links(descendants, diagnostics)
-    blocking = any(item.code != "actor_conflict" for item in diagnostics)
+    blocking = any(item.code in BLOCKING for item in diagnostics)
     readiness: Literal["open", "blocked", "ready"] = (
         "open" if root.end_ns is None else "blocked" if blocking else "ready"
     )

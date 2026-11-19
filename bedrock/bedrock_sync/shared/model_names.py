@@ -19,6 +19,8 @@ _PROVIDERS = (
     "nvidia",
     "zai",
 )
+GEO_PREFIX_RE = re.compile(r"^(global|us|us-gov|eu|apac|jp|au|ca)\.")
+"""Routing prefix of cross-region inference profiles, not part of the model."""
 _PROVIDER_RE = re.compile(rf"^({'|'.join(_PROVIDERS)})\.")
 _NAME_WITHOUT_PROVIDER = frozenset({"deepseek"})
 """Providers whose Bedrock ids drop the family name: ``deepseek.r1-v1:0``."""
@@ -56,7 +58,7 @@ def nebuly_model_name(model: str) -> str:
 
 def observed_model_name(model: str) -> str:
     """Normalize known provider IDs, preserving unknown observed IDs exactly."""
-    candidate = re.sub(r"^(global|us|eu|apac)\.", "", model)
+    candidate = GEO_PREFIX_RE.sub("", model)
     if not _PROVIDER_RE.match(candidate):
         return model
     return nebuly_model_name(candidate)

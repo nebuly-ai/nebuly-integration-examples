@@ -8,10 +8,12 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from bedrock_sync.agentcore.cloudwatch_client import (
     CloudWatchLogReader,
     InvalidLogResponseError,
+    LogsAccessError,
     PaginationError,
     create_logs_client,
 )
@@ -80,6 +82,24 @@ def test_access_error_propagates() -> None:
 
 
 @pytest.mark.parametrize(
+    ("code", "guidance"),
+    [
+        ("AccessDeniedException", "logs:FilterLogEvents"),
+        ("ResourceNotFoundException", "--log-group"),
+        ("ExpiredTokenException", "refresh the AWS login"),
+    ],
+)
+def test_read_access_error_has_safe_guidance(code: str, guidance: str) -> None:
+    error = ClientError(
+        {"Error": {"Code": code, "Message": "private resource ARN"}},
+        "FilterLogEvents",
+    )
+    with pytest.raises(LogsAccessError, match=guidance) as shown:
+        list(CloudWatchLogReader(FakeLogs(error), ["runtime"]).iter_pages(10, 20))
+    assert "private resource ARN" not in str(shown.value)
+
+
+@pytest.mark.parametrize(
     "bad",
     [
         {},
@@ -128,7 +148,6 @@ def test_factory_uses_bounded_read_retries_and_refreshable_role() -> None:
         env={
             "BEDROCK_ACCOUNT_ID": "123456789012",
             "BEDROCK_REGION": "eu-north-1",
-            "SEND_PLAIN_END_USER": "true",
             "AWS_ROLE_ARN": "synthetic-role",
             "AWS_EXTERNAL_ID": "synthetic-external",
         },

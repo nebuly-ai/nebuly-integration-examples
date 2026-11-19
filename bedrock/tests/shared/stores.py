@@ -29,6 +29,10 @@ class OutboxStore(Store):
             outbox.put(self._db, key, payload)
         return key
 
+    def requeue(self, key: str, payload: Mapping[str, object]) -> None:
+        with self._transaction():
+            outbox.requeue(self._db, key, payload)
+
     def get(self, key: str) -> Delivery:
         delivery = self.find_delivery(key)
         assert delivery is not None
@@ -37,3 +41,7 @@ class OutboxStore(Store):
     def prune(self, retention_seconds: int) -> int:
         with self._transaction():
             return outbox.compact(self._db, self._retention_cutoff(retention_seconds))
+
+    def purge(self, retention_seconds: int) -> int:
+        with self._transaction():
+            return outbox.purge(self._db, self._retention_cutoff(retention_seconds))

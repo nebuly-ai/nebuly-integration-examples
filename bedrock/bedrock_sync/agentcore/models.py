@@ -95,6 +95,28 @@ class InteractionSnapshot:
     diagnostics: tuple[Diagnostic, ...]
     earliest_timestamp_ms: int
 
+    @property
+    def conversation_id(self) -> str:
+        """The session id; without one, the trace is a conversation of its own."""
+        return self.session_id or self.trace_id
+
+    @property
+    def anchored(self) -> bool:
+        """The root's parents reach the top of the trace: a span without a
+        parent, or POST /invocations (its parent is the AgentCore service).
+        If not, a parent is still missing: the root may be a sub-agent whose
+        caller has not been exported yet."""
+        return not any(
+            item.code in {"missing_parent", "ancestry_cycle"}
+            and item.span_id == self.root_span_id
+            for item in self.diagnostics
+        )
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Problems the interaction is sent with, each code once."""
+        return tuple(dict.fromkeys(item.code for item in self.diagnostics))
+
 
 @dataclass(frozen=True)
 class AssemblyResult:

@@ -2,7 +2,8 @@
 
 Same hooks as the AgentCore connector. ``load_context`` runs once per sync:
 load customer mappings there, never per interaction. The end user is the
-``user_id`` of the triplet; it is pseudonymized after these hooks have seen it.
+``user_id`` of the triplet; with PSEUDONYMIZE_END_USER it is pseudonymized
+after these hooks have seen it.
 The connector cannot infer team, market or tenure: return them from
 ``build_segments`` only if the customer provides them.
 """
@@ -77,6 +78,19 @@ def tool_calls(invocation: Invocation) -> list[tuple[Block, str | None]]:
             if index is not None:
                 calls[index] = (calls[index][0], block.text)
     return calls
+
+
+def model_name(model: str, context: Mapping[str, object]) -> str:
+    """The model sent to Nebuly, used for cost and model statistics. ``model``
+    is already normalized (``claude-haiku-4-5``). An application inference
+    profile logs only its ARN, so ``model`` is the profile id at its end
+    (``abc123``): map it to the model behind it, for example with a mapping
+    loaded in ``load_context``::
+
+        return context.get("profiles", {}).get(model, model)
+    """
+    del context
+    return model
 
 
 def build_tags(

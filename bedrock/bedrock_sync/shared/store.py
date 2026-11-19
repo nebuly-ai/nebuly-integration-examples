@@ -9,6 +9,8 @@ Each connector adds its own tables and checks on top.
 from __future__ import annotations
 
 import fcntl
+import logging
+import os
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
@@ -22,9 +24,11 @@ if TYPE_CHECKING:
     from types import TracebackType
     from typing import BinaryIO
 
-    from .delivery import Delivery, Outcome
+    from .delivery import Delivery, DeliveryStatus, Outcome
 
 __all__ = ["StateError", "Store", "current_ms", "validate_ms"]
+
+logger = logging.getLogger(__name__)
 
 
 def current_ms() -> int:
@@ -53,6 +57,7 @@ class Store:
         self._lock: BinaryIO | None = None
         self._connection: sqlite3.Connection | None = None
         path = path.expanduser().resolve()
+        existed = path.exists()
         try:
             self._connection = (
                 self._snapshot(path) if dry_run else self._open_locked(path)
@@ -62,7 +67,7 @@ class Store:
             self._initialize()
             if not dry_run:
                 with self._transaction():
-                    outbox.recover_attempts(self._db)
+                    outbox.recover_attempts(self._db, self.now_ms)
         except sqlite3.DatabaseError as exc:
             self.close()
             raise StateError(
@@ -71,6 +76,22 @@ class Store:
         except BaseException:
             self.close()
             raise
+        logger.info("State file: %s", path)
+        if not existed:
+            # A relative --state-db follows the working directory: a job started
+            # elsewhere would silently start over.
+            logger.warning(
+                "No %s state file at %s yet: normal on the first run, "
+                "otherwise check --state-db",
+                self.LABEL,
+                path,
+            )
+        elif not dry_run and path.stat().st_mode & 0o077:
+            logger.warning(
+                "Existing state file %s is accessible to other users or groups; "
+                "restrict its permissions because it can contain conversation data",
+                path,
+            )
 
     def _open_locked(self, path: Path) -> sqlite3.Connection:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +102,14 @@ class Store:
             raise StateError(
                 f"Another process is using this {self.LABEL} database"
             ) from exc
+        # SQLite creates a missing file according to the process umask. Create
+        # it ourselves so conversation content is private from the first write.
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
         return sqlite3.connect(path, isolation_level=None)
 
     def _snapshot(self, path: Path) -> sqlite3.Connection:
@@ -152,24 +181,66 @@ class Store:
             )
         return True
 
-    def _create_schema(self, schema: str) -> None:
-        self._db.executescript(
-            f"BEGIN IMMEDIATE;"
-            f"PRAGMA application_id={self.APPLICATION_ID};"
-            f"PRAGMA user_version={self.SCHEMA_VERSION};"
-            f"{outbox.SCHEMA}{schema}COMMIT;"
-        )
+    def _create_schema(
+        self,
+        schema: str,
+        *,
+        initialize: tuple[str, tuple[object, ...]] | None = None,
+    ) -> None:
+        try:
+            self._db.executescript(
+                f"BEGIN IMMEDIATE;"
+                f"PRAGMA application_id={self.APPLICATION_ID};"
+                f"PRAGMA user_version={self.SCHEMA_VERSION};"
+                f"{outbox.SCHEMA}{schema}"
+            )
+            if initialize is not None:
+                self._db.execute(*initialize)
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
 
     # Outbox (DeliveryStore) -----------------------------------------------------
 
     def pending_deliveries(self) -> tuple[Delivery, ...]:
         return outbox.pending(self._db, self.now_ms)
 
+    def pending_delivery(self, interaction_key: str) -> tuple[Delivery, ...]:
+        return outbox.pending(
+            self._db,
+            self.now_ms,
+            where="interaction_key=?",
+            parameters=(interaction_key,),
+        )
+
     def find_delivery(self, interaction_key: str) -> Delivery | None:
         return outbox.find(self._db, interaction_key)
 
+    def delivery_was_attempted(self, interaction_key: str) -> bool:
+        return outbox.was_attempted(self._db, interaction_key)
+
+    def delivery_gave_up(self, interaction_key: str) -> bool:
+        return outbox.gave_up(self._db, interaction_key)
+
+    def retry_given_up(self, interaction_key: str) -> None:
+        if self.dry_run:
+            raise StateError("Dry-run state cannot retry a given-up delivery")
+        with self._transaction():
+            outbox.retry_given_up(self._db, interaction_key)
+
     def delivery_paused(self) -> bool:
         return outbox.paused(self._db, self.now_ms)
+
+    def delivery_waiting_for_retry(self, interaction_key: str | None = None) -> bool:
+        if interaction_key is None:
+            return outbox.waiting_for_retry(self._db, self.now_ms)
+        return outbox.waiting_for_retry(
+            self._db,
+            self.now_ms,
+            where="interaction_key=?",
+            parameters=(interaction_key,),
+        )
 
     def delivery_counts(self) -> dict[str, int]:
         return outbox.counts(self._db)
@@ -186,23 +257,27 @@ class Store:
         http_status: int | None = None,
         retry_after_seconds: int = 60,
         finished_ms: int | None = None,
-    ) -> None:
+        maybe_received: bool = False,
+    ) -> DeliveryStatus:
         completed_ms = self.now_ms if finished_ms is None else finished_ms
         validate_ms(completed_ms)
         with self._transaction():
-            outbox.finish_attempt(
+            return outbox.finish_attempt(
                 self._db,
                 attempt_id,
                 outcome,
                 http_status=http_status,
                 retry_after_seconds=retry_after_seconds,
                 completed_ms=completed_ms,
+                maybe_received=maybe_received,
             )
 
     def _retention_cutoff(self, retention_seconds: int) -> int:
         if type(retention_seconds) is not int or retention_seconds < 0:
             raise ValueError("Content retention must be nonnegative integer seconds")
-        return self.now_ms - retention_seconds * 1000
+        # All persisted timestamps are nonnegative. Keep a cutoff before them
+        # representable in SQLite even when the configured duration is huge.
+        return max(-1, self.now_ms - retention_seconds * 1000)
 
 
 class _Transaction:

@@ -18,6 +18,7 @@ from bedrock_sync.runtime.sync import SyncSummary
 from bedrock_sync.shared.cli import run_command
 from bedrock_sync.shared.delivery import DeliveryReport
 from bedrock_sync.shared.errors import ConfigError
+from bedrock_sync.shared.keys import pseudonymize
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,32 @@ def test_other_errors_show_only_their_type(
     assert logging.getLogger("httpx").level == logging.WARNING
 
 
+def test_crash_logs_where_it_happened_and_verbose_adds_the_stack(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def sync(_: _Settings) -> _Report:
+        pseudonymize("namespace", "private-user-id", "")  # raises ValueError
+        return _Report()
+
+    def crash(_: _Settings) -> _Report:
+        raise KeyError("private-token-and-prompt")
+
+    with caplog.at_level(logging.DEBUG, logger="bedrock_sync"):
+        assert run_command(_Settings, sync, incomplete=lambda _: False) == 1
+        assert "ValueError at bedrock_sync/shared/keys.py:" in caplog.text
+        assert "in pseudonymize" in caplog.text
+        assert "Stack" not in caplog.text
+        caplog.clear()
+        verbose = run_command(
+            lambda: _Settings(verbose=True), crash, incomplete=lambda _: False
+        )
+    assert verbose == 1
+    assert "KeyError at bedrock_sync/shared/cli.py:" in caplog.text
+    assert "Stack, without the error message" in caplog.text
+    assert "in crash" in caplog.text
+    assert "private-token-and-prompt" not in caplog.text
+
+
 def test_interruption_exits_with_130() -> None:
     assert _run(error=KeyboardInterrupt()) == 130
 
@@ -72,7 +99,7 @@ def test_interruption_exits_with_130() -> None:
 @pytest.mark.parametrize(
     ("module", "report"),
     [
-        (runtime_main, SyncSummary(delivery=DeliveryReport(uncertain=1))),
+        (runtime_main, SyncSummary(delivery=DeliveryReport(retryable=1))),
         (agentcore_main, SyncReport(rejected=1)),
     ],
 )

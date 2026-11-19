@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -144,6 +145,23 @@ def test_read_object_decodes_lines_and_inlines_large_bodies(tmp_path: Path) -> N
     assert "inputBodyJson" not in records[2].record["input"]
 
 
+def test_read_object_preserves_unicode_separators_inside_json_strings(
+    tmp_path: Path,
+) -> None:
+    key = _key("10", "100100000")
+    expected = [
+        {"requestId": "req-1", "input": "first\u2028second\u2029third\u0085fourth"},
+        {"requestId": "req-2", "input": "next record"},
+    ]
+    payload = "\r\n".join(json.dumps(record, ensure_ascii=False) for record in expected)
+    _write(tmp_path, key, gzip.compress(payload.encode()))
+    obj = LogObject(key=key, delivered_at=_dt("2026-11-11T10:01:00"))
+    source = _source(tmp_path)
+
+    assert [record.record for record in source.read_object(obj)] == expected
+    assert source.problems.unreadable_lines == 0
+
+
 def test_unreadable_body_stops_the_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -180,12 +198,36 @@ def test_only_a_missing_object_counts_as_missing() -> None:
     assert not _is_missing(PermissionError())
 
 
-def test_corrupt_file_is_skipped(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("content", "files", "lines", "kept"),
+    [
+        (gzip.compress(b'{"requestId": "x"}\n')[:-6], 1, 0, 0),
+        (gzip.compress(b'{"requestId": "\xff"}\n'), 1, 0, 0),
+        (gzip.compress(b'{"requestId": "a"}\nnot json\n{"requestId": "b"}\n'), 0, 1, 2),
+    ],
+    ids=["broken-gzip", "not-utf8", "bad-line"],
+)
+def test_unreadable_content_is_skipped_counted_and_logged(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    content: bytes,
+    files: int,
+    lines: int,
+    kept: int,
+) -> None:
     key = _key("10", "100100000")
-    _write(tmp_path, key, gzip.compress(b'{"requestId": "x"}\n')[:-6])
+    _write(tmp_path, key, content)
     obj = LogObject(key=key, delivered_at=_dt("2026-11-11T10:01:00"))
+    source = _source(tmp_path)
 
-    assert _source(tmp_path).read_object(obj) == []
+    with caplog.at_level(logging.ERROR):
+        assert len(source.read_object(obj)) == kept
+
+    assert (source.problems.unreadable_files, source.problems.unreadable_lines) == (
+        files,
+        lines,
+    )
+    assert key in caplog.text
 
 
 def test_iter_records_keeps_object_order(tmp_path: Path) -> None:
@@ -245,9 +287,9 @@ def test_read_requests_reads_each_file_once_and_skips_files_gone(
 
     source.read_object = counting  # type: ignore[method-assign]
     records = source.read_requests(
-        [CallRef("r1", kept), CallRef("r3", kept), CallRef("r9", gone)]
+        [CallRef("r1", kept, "a"), CallRef("r3", kept, "a"), CallRef("r9", gone, "b")]
     )
 
     assert [r.request_id for r in records] == ["r1", "r3"]
     assert reads == [kept, gone]
-    assert "1 call(s) of open interactions are lost" in caplog.text
+    assert "could not restore 1 call(s) of open interactions" in caplog.text

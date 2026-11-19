@@ -53,11 +53,21 @@ def test_every_case_is_present() -> None:
     }
 
 
+def _order(payload: dict[str, Any]) -> tuple[str, str, str]:
+    """Logs have whole seconds: break ties by conversation, then input."""
+    interaction = payload["interaction"]
+    return (
+        interaction["time_start"],
+        interaction["conversation_id"],
+        interaction["input"],
+    )
+
+
 @pytest.mark.parametrize("name", CASES)
 def test_connector_output_matches_the_case(name: str, tmp_path: Path) -> None:
     case = load(name)
     summary, payloads = run(case, tmp_path)
-    ordered = sorted(payloads, key=lambda p: p["interaction"]["time_start"])
+    ordered = sorted(payloads, key=_order)
     assert [summary_of(p) for p in ordered] == case["expected"]["interactions"]
     expected = {k: v for k, v in case["expected"].items() if k != "interactions"}
     assert counters(summary) == expected

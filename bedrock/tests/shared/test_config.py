@@ -39,11 +39,20 @@ def test_defaults(env: dict[str, str]) -> None:
     config = read([], env)
     assert config.state_db == Path("state.db")
     assert config.content_retention_seconds == 7 * 86400
-    assert config.retry_http_429
+    assert config.history_retention_seconds == 30 * 86400
     assert not (config.dry_run)
     assert not (config.anonymize)
-    assert not (config.send_plain_end_user)
+    assert not (config.pseudonymize_end_user)
     assert config.nebuly_endpoint.startswith("https://backend.nebuly.com/")
+
+
+def test_history_retention_is_not_shorter_than_content_retention(
+    env: dict[str, str],
+) -> None:
+    config = read(["--history-retention-seconds", "864000"], env)
+    assert config.history_retention_seconds == 864000
+    with pytest.raises(ConfigError, match="history-retention"):
+        read(["--history-retention-seconds", "3600"], env)
 
 
 def test_injected_environment_does_not_read_dotenv(env: dict[str, str]) -> None:
@@ -60,6 +69,20 @@ def test_dates_are_utc_and_ordered(env: dict[str, str]) -> None:
     assert config.to_date == datetime(2026, 11, 14, tzinfo=UTC)
     with pytest.raises(ConfigError, match="earlier than"):
         read(["--from-date", "2026-11-14", "--to-date", "2026-11-14"], env)
+
+
+def test_retry_given_up_takes_one_key_instead_of_a_read_window(
+    env: dict[str, str],
+) -> None:
+    option = ["--retry-given-up", "opaque-key"]
+    assert read(option, env).retry_given_up == "opaque-key"
+    for args in (
+        ["--from-date", "2026-11-13"],
+        ["--to-date", "2026-11-14"],
+        ["--dry-run"],
+    ):
+        with pytest.raises(ConfigError, match="cannot be combined"):
+            read([*option, *args], env)
 
 
 @pytest.mark.parametrize(
@@ -97,14 +120,16 @@ def test_api_key_is_optional_only_in_dry_run(env: dict[str, str]) -> None:
         read([], env)
 
 
-def test_hash_secret_is_required_unless_users_are_sent_plain(
+def test_hash_secret_is_required_only_to_pseudonymize_users(
     env: dict[str, str],
 ) -> None:
     del env["USER_HASH_SECRET"]
+    assert not read(["--dry-run"], env).pseudonymize_end_user
+    env["PSEUDONYMIZE_END_USER"] = "true"
     with pytest.raises(ConfigError, match="USER_HASH_SECRET"):
         read(["--dry-run"], env)
-    env["SEND_PLAIN_END_USER"] = "true"
-    assert read(["--dry-run"], env).send_plain_end_user
+    env["USER_HASH_SECRET"] = "secret"
+    assert read(["--dry-run"], env).pseudonymize_end_user
 
 
 def test_role_booleans_and_secrets(env: dict[str, str]) -> None:
