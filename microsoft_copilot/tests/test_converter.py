@@ -299,6 +299,32 @@ def test_warmup_final_response_uses_earlier_real_output() -> None:
     assert payload["traces"][0]["source"] == "https://example.com"
 
 
+def test_hidden_record_before_next_prompt_is_not_previous_output() -> None:
+    """Copilot in PowerPoint exports a hidden pending-task record a few ms
+    before each prompt, so it sorts into the previous turn's responses."""
+    hidden = (
+        '{"text":"","hiddenText":"{\\"taskId\\":\\"abc\\",\\"status\\":\\"pending\\"}"}'
+    )
+    turns, _ = group_interactions(
+        [
+            _prompt("req_1", content="first question", minute=0),
+            _response("req_1", content="first answer", minute=1),
+            _response("req_2", content=hidden, minute=2, second=0),
+            _prompt("req_2", content="second question", minute=2, second=1),
+            _response("req_2", content="second answer", minute=3),
+        ]
+    )
+    outputs = [
+        payload["interaction"]["output"]
+        for turn in turns
+        if not isinstance(
+            payload := turn_to_payload(turn, user=_user(), anonymize=False),
+            SkipReason,
+        )
+    ]
+    assert outputs == ["first answer", "second answer"]
+
+
 def test_build_tags() -> None:
     turn = InteractionTurn(
         "req_1",

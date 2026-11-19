@@ -15,17 +15,50 @@ _ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
 _CITATION_MARKER_RE = re.compile(r"[ \t]*【[A-Za-z0-9]+-[0-9a-f]+】")
 
 
+def _render_questions(question_data: object) -> str:
+    """Render a questionData form as each question followed by its options."""
+    if not isinstance(question_data, dict):
+        return ""
+    blocks: list[str] = []
+    for question in question_data.get("questions", []):
+        lines = [question.get("questionText", "")]
+        for option in question.get("options", []):
+            label = option.get("label", "")
+            description = option.get("description")
+            lines.append(f"- {label}: {description}" if description else f"- {label}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def _unwrap_final_response(text: str) -> str:
-    """Some app cards (e.g. Copilot in Excel) embed
+    """Some app cards (e.g. Copilot in Excel, PowerPoint) embed
     {"thoughts": ..., "finalResponse": ...} as the TextBlock text.
     Return only the user-facing finalResponse when present; otherwise
-    the text unchanged."""
+    the text unchanged. An empty finalResponse with questionData means
+    Copilot asked the user to pick options in a form, so the questions
+    are returned instead."""
     try:
         payload = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return text
     if isinstance(payload, dict) and isinstance(payload.get("finalResponse"), str):
-        return cast(str, payload["finalResponse"])
+        final_response = cast(str, payload["finalResponse"])
+        return final_response or _render_questions(payload.get("questionData"))
+    return text
+
+
+def _visible_text(text: str) -> str:
+    """Copilot in PowerPoint exports control records (pending task ids,
+    model choice) as {"text": "", "hiddenText": "..."}. Only ``text`` is
+    shown to the user."""
+    if not text.startswith("{"):
+        return text
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(payload, dict) and "hiddenText" in payload:
+        return str(payload.get("text") or "")
     return text
 
 
@@ -109,4 +142,4 @@ def parse_interaction_text(interaction: AiInteraction) -> str:
                     and att.content
                 ):
                     return extract_adaptive_card_text(att.content)
-    return strip_attachment_tags(body.content)
+    return _visible_text(strip_attachment_tags(body.content))

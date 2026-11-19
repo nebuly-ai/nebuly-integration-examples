@@ -76,6 +76,42 @@ def test_extract_textblock_without_final_response_returns_raw_json() -> None:
     assert extract_adaptive_card_text(card) == raw
 
 
+def test_extract_textblock_renders_question_data_when_final_response_empty() -> None:
+    payload = {
+        "thoughts": "internal reasoning",
+        "finalResponse": "",
+        "questionData": {
+            "questions": [
+                {
+                    "questionText": "Who is the audience?",
+                    "options": [
+                        {"label": "Beginners", "description": "Light tone."},
+                        {"label": "Experts"},
+                    ],
+                },
+                {
+                    "questionText": "How long should it be?",
+                    "options": [{"label": "Short", "description": "5 slides."}],
+                },
+            ]
+        },
+    }
+    card = _card({"type": "TextBlock", "text": json.dumps(payload)})
+    assert extract_adaptive_card_text(card) == (
+        "Who is the audience?\n"
+        "- Beginners: Light tone.\n"
+        "- Experts\n"
+        "\n"
+        "How long should it be?\n"
+        "- Short: 5 slides."
+    )
+
+
+def test_extract_textblock_empty_final_response_without_questions_is_empty() -> None:
+    card = _card({"type": "TextBlock", "text": '{"thoughts":"x","finalResponse":""}'})
+    assert extract_adaptive_card_text(card) == ""
+
+
 def test_extract_multiple_textblocks_joined_by_newline() -> None:
     card = _card(
         {"type": "TextBlock", "text": "First"},
@@ -148,6 +184,19 @@ def test_parse_text_body_strips_embedded_tag() -> None:
         content='Crea una slide<attachment id=""></attachment>',
     )
     assert parse_interaction_text(inter) == "Crea una slide"
+
+
+def test_parse_text_body_hidden_payload_returns_visible_text() -> None:
+    inter = _interaction(
+        content_type="text",
+        content=json.dumps(
+            {
+                "text": "",
+                "hiddenText": json.dumps({"taskId": "abc", "status": "pending"}),
+            }
+        ),
+    )
+    assert parse_interaction_text(inter) == ""
 
 
 def test_parse_html_body_resolves_adaptive_card() -> None:
