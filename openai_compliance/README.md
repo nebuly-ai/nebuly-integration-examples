@@ -48,13 +48,15 @@ cp .env.example .env
 
 | Variable | Required | Default | Description |
 | -------- | -------- | ------- | ----------- |
-| `NEBULY_API_KEY` | yes | none | Nebuly secret key |
+| `NEBULY_API_KEY` | yes* | none | Nebuly secret key (*not required when `CSV_EXPORT=true`) |
 | `COMPLIANCE_API_KEY` | yes | none | Compliance API bearer token |
 | `COMPLIANCE_WORKSPACE_ID` | yes | none | Workspace UUID for `/workspaces/{id}/logs` |
 | `COMPLIANCE_BASE_URL` | no | `https://api.chatgpt.com/v1/compliance` | Compliance API base URL |
 | `NEBULY_ENDPOINT` | no | Nebuly production ingestion URL | Nebuly ingestion endpoint |
 | `COMPLIANCE_MAX_REQUESTS_PER_MINUTE` | no | `100` | Client-side throttle. OpenAI documents **100 requests per minute per workspace, per HTTP method and route** (listing is a separate bucket from download). Lower this if other jobs read the same workspace. 429 responses are retried honouring `Retry-After`. |
 | `ANONYMIZE` | no | `false` | When `true`, sets `anonymize` on the Nebuly payload |
+| `CSV_EXPORT` | no | `false` | Write interactions to a CSV file instead of POSTing to Nebuly |
+| `CSV_EXPORT_PATH` | no | `./interactions.csv` | CSV output file used when `CSV_EXPORT=true` |
 | `INTERACTION_IDLE_MINUTES` | no | `30` | Close open chat/Codex turns after this idle window |
 | `CODEX_COST_WAIT_HOURS` | no | `4` | Wait for a matching `CODEX_TURN` row before emitting Codex with cost. `0` skips `CODEX_TURN` listing entirely. |
 | `ENTRA_FETCH` | no | `false` | Live Microsoft Graph directory fetch at startup (`poetry install --with entra`). Mutually exclusive with `ENTRA_EXTRACT_PATH`. |
@@ -109,11 +111,24 @@ Interaction key: user `message.id`. Closed when a later user message exists in t
 | `interaction.input` / `output` | `PROMPT_SENT` prompt / joined non-error `PROMPT_RESPONSE_RECEIVED` texts |
 | `interaction.time_start` / `time_end` | Prompt timestamp / last response or tool event |
 | `interaction.end_user` | `actor.user_id` |
-| `interaction.cost` | `CODEX_TURN` `cost_usd` + `estimated_cost_usd` (micro-dollars) when a turn record is present |
+| `traces[].cost` (LLM trace) | `CODEX_TURN` `cost_usd` + `estimated_cost_usd` (micro-dollars) when a turn record is present |
 | `traces` | `LLMTrace` plus tool traces from `TOOL_CALL_COMPLETED` / `TOOL_CALL_FAILED` |
 | `user_feedback` | Customer hooks via `build_codex_user_feedback` (no platform thumbs on Codex rows) |
 
 Interaction key: `PROMPT_SENT.event_id`. Rows are ingested from `PROMPT_SENT`, `PROMPT_RESPONSE_RECEIVED`, and tool call events; legacy single-row `PROMPT_RESPONSE_RECEIVED` blobs with both prompt and response are still accepted.
+
+## CSV export
+
+Set `CSV_EXPORT=true` to write each interaction to `CSV_EXPORT_PATH` instead of sending it to Nebuly. One column per Nebuly interaction field (`conversation_id`, `end_user`, `team`, `market`, `tenure`, `time_start`, `time_end`, `input`, `output`, `hide_content`) plus `tags`, `traces` and `user_feedback` as JSON strings, and `anonymize`. `team`, `market` and `tenure` are filled when Entra is enabled.
+
+- Rows are appended, so repeated runs extend the same file. The header is written only when the file is new or empty. Appending to a CSV produced by an older version with a different header mixes headers, so start a new file.
+- CSV runs keep their own state (the cache key includes the CSV path), so exporting to CSV never marks anything as already sent to Nebuly, and a new `CSV_EXPORT_PATH` is exported from scratch. Log files are downloaded again if both modes cover the same range.
+- Re-sends after a partial failure can produce duplicate rows in the CSV.
+- `--dry-run` still takes precedence: nothing is written.
+
+```bash
+CSV_EXPORT=true poetry run python -m openai_compliance_sync --from-date 2026-06-01 --to-date 2026-06-23
+```
 
 ## Customizing the payload
 
@@ -128,7 +143,7 @@ Directory `team` / `market` / `tenure` come from Entra via `actor.user_email`, m
 
 ## Caching & idempotency
 
-SQLite at `<cache-dir>/compliance_store.db` (WAL):
+SQLite at `<cache-dir>/<cache-key>/compliance_store.db` (WAL). The cache key is a short hash of the Compliance base URL, the workspace id and the destination: the Nebuly endpoint and API key, or the CSV export path when `CSV_EXPORT=true`. Changing any of them starts from an empty store, so a new Nebuly project or a new CSV file receives the full range. Rotating `COMPLIANCE_API_KEY` keeps the store.
 
 | Table | Role |
 | ----- | ---- |

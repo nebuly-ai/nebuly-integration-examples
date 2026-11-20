@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -56,6 +57,23 @@ class Config:
     audit_query_timeout_seconds: int = 3600
     csv_export: bool = False
     csv_export_path: Path = Path("./interactions.csv")
+
+    @property
+    def cache_key(self) -> str:
+        """Fingerprint of the source tenant/app and the destination, so changing
+        any of them starts from a fresh cache instead of skipping ranges that were
+        only sent somewhere else."""
+        destination = (
+            f"csv|{self.csv_export_path.resolve()}"
+            if self.csv_export
+            else f"nebuly|{self.nebuly_endpoint}|{self.nebuly_api_key}"
+        )
+        raw = f"{self.azure_tenant_id}|{self.azure_client_id}|{destination}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    @property
+    def cache_path(self) -> Path:
+        return self.cache_dir / self.cache_key / "sync_state.db"
 
     @classmethod
     def from_env_and_args(cls, argv: list[str] | None = None) -> Config:

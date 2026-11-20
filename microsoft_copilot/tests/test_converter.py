@@ -15,6 +15,7 @@ from copilot_sync.converter import (
 from copilot_sync.models import (
     AiInteraction,
     Attachment,
+    Context,
     CopilotAuditRecord,
     CopilotUser,
     FromIdentitySet,
@@ -298,6 +299,32 @@ def test_warmup_final_response_uses_earlier_real_output() -> None:
     assert payload["traces"][0]["source"] == "https://example.com"
 
 
+def test_hidden_record_before_next_prompt_is_not_previous_output() -> None:
+    """Copilot in PowerPoint exports a hidden pending-task record a few ms
+    before each prompt, so it sorts into the previous turn's responses."""
+    hidden = (
+        '{"text":"","hiddenText":"{\\"taskId\\":\\"abc\\",\\"status\\":\\"pending\\"}"}'
+    )
+    turns, _ = group_interactions(
+        [
+            _prompt("req_1", content="first question", minute=0),
+            _response("req_1", content="first answer", minute=1),
+            _response("req_2", content=hidden, minute=2, second=0),
+            _prompt("req_2", content="second question", minute=2, second=1),
+            _response("req_2", content="second answer", minute=3),
+        ]
+    )
+    outputs = [
+        payload["interaction"]["output"]
+        for turn in turns
+        if not isinstance(
+            payload := turn_to_payload(turn, user=_user(), anonymize=False),
+            SkipReason,
+        )
+    ]
+    assert outputs == ["first answer", "second answer"]
+
+
 def test_build_tags() -> None:
     turn = InteractionTurn(
         "req_1",
@@ -326,6 +353,32 @@ def test_build_tags() -> None:
     assert tags["country"] == "IT"
     assert tags["company_name"] == "Contoso"
     assert tags["employee_hire_date"] == "2020-03-15"
+
+
+def test_build_tags_context_type_from_prompt_contexts() -> None:
+    prompt = _prompt().model_copy(
+        update={
+            "contexts": [
+                Context(contextType="TeamsMeeting"),
+                Context(contextType="TeamsMeeting"),
+                Context(contextType="File"),
+                Context(contextType=None),
+            ]
+        }
+    )
+    turn = InteractionTurn("req_1", prompt, (_response(),))
+
+    tags = user_defined.build_tags(turn, _user())
+
+    assert tags["context_type"] == "File,TeamsMeeting"
+
+
+def test_build_tags_context_type_omitted_without_contexts() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+
+    tags = user_defined.build_tags(turn, _user())
+
+    assert "context_type" not in tags
 
 
 def test_build_tags_country_falls_back_to_usage_location() -> None:
@@ -543,6 +596,40 @@ def test_turn_to_payload_without_audit_unchanged_except_copilot_app_tag() -> Non
     assert "model_name" not in tags
     assert tags["copilot_app"] == "Microsoft 365 Chat"
     assert not any("model" in t for t in payload["traces"])
+
+
+def test_turn_to_payload_sets_segments_from_entra() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    user = _user(
+        department="Engineering",
+        country="IT",
+        employee_hire_date=datetime(2020, 3, 15, 23, 30, tzinfo=UTC),
+    )
+    payload = turn_to_payload(turn, user=user, anonymize=False)
+    assert not isinstance(payload, SkipReason)
+    interaction = payload["interaction"]
+    assert interaction["team"] == "Engineering"
+    assert interaction["market"] == "IT"
+    assert interaction["tenure"] == "2020-03-15"
+
+
+def test_turn_to_payload_market_falls_back_to_usage_location() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    user = _user(country=None, usage_location="US")
+    payload = turn_to_payload(turn, user=user, anonymize=False)
+    assert not isinstance(payload, SkipReason)
+    assert payload["interaction"]["market"] == "US"
+
+
+def test_turn_to_payload_omits_segments_when_entra_fields_missing() -> None:
+    turn = InteractionTurn("req_1", _prompt(), (_response(),))
+    user = _user(department="", country=None, usage_location=None)
+    payload = turn_to_payload(turn, user=user, anonymize=False)
+    assert not isinstance(payload, SkipReason)
+    interaction = payload["interaction"]
+    assert "team" not in interaction
+    assert "market" not in interaction
+    assert "tenure" not in interaction
 
 
 def test_audit_retrieval_dedupes_graph_link() -> None:

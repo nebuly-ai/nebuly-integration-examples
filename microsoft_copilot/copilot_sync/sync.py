@@ -101,6 +101,7 @@ def _turn_audit_message_ids(turn: InteractionTurn) -> list[str]:
             response.id for response in turn.responses if response.id != final.id
         )
     ids.append(turn.prompt.id)
+    ids.extend(followup.id for followup in turn.followups)
     return ids
 
 
@@ -300,8 +301,9 @@ async def _send_turns(
         counts.fetched += 1
         audit = None
         if config.audit_enrichment:
-            audit = cache.find_audit_record(_turn_audit_message_ids(turn))
-            if audit is not None:
+            records = cache.find_audit_records(_turn_audit_message_ids(turn))
+            if records:
+                audit = CopilotAuditRecord.merge(records)
                 counts.enriched += 1
         result = turn_to_payload(
             turn,
@@ -410,11 +412,8 @@ async def _sync_user(
 async def run_sync(config: Config) -> SyncSummary:
     _configure_logging(verbose=config.verbose)
 
-    # CSV exports track coverage separately so they never mark ranges as sent to
-    # Nebuly.
-    cache_name = "sync_state_csv.db" if config.csv_export else "sync_state.db"
     cache = SyncCache(
-        config.cache_dir / cache_name,
+        config.cache_path,
         config.azure_tenant_id,
         dry_run=config.dry_run,
     )

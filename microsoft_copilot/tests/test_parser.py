@@ -76,12 +76,68 @@ def test_extract_textblock_without_final_response_returns_raw_json() -> None:
     assert extract_adaptive_card_text(card) == raw
 
 
+def test_extract_textblock_renders_question_data_when_final_response_empty() -> None:
+    payload = {
+        "thoughts": "internal reasoning",
+        "finalResponse": "",
+        "questionData": {
+            "questions": [
+                {
+                    "questionText": "Who is the audience?",
+                    "options": [
+                        {"label": "Beginners", "description": "Light tone."},
+                        {"label": "Experts"},
+                    ],
+                },
+                {
+                    "questionText": "How long should it be?",
+                    "options": [{"label": "Short", "description": "5 slides."}],
+                },
+            ]
+        },
+    }
+    card = _card({"type": "TextBlock", "text": json.dumps(payload)})
+    assert extract_adaptive_card_text(card) == (
+        "Who is the audience?\n"
+        "- Beginners: Light tone.\n"
+        "- Experts\n"
+        "\n"
+        "How long should it be?\n"
+        "- Short: 5 slides."
+    )
+
+
+def test_extract_textblock_empty_final_response_without_questions_is_empty() -> None:
+    card = _card({"type": "TextBlock", "text": '{"thoughts":"x","finalResponse":""}'})
+    assert extract_adaptive_card_text(card) == ""
+
+
 def test_extract_multiple_textblocks_joined_by_newline() -> None:
     card = _card(
         {"type": "TextBlock", "text": "First"},
         {"type": "TextBlock", "text": "Second"},
     )
     assert extract_adaptive_card_text(card) == "First\nSecond"
+
+
+def test_extract_strips_citation_markers() -> None:
+    card = _card(
+        {
+            "type": "TextBlock",
+            "text": "See [the doc](https://x) 【1-abc123】 for details. 【2-0f9e8d】",
+        }
+    )
+    assert extract_adaptive_card_text(card) == "See [the doc](https://x) for details."
+
+
+def test_extract_strips_citation_markers_with_letter_prefix() -> None:
+    card = _card({"type": "TextBlock", "text": "Done 【xyz-0a1b2c】."})
+    assert extract_adaptive_card_text(card) == "Done."
+
+
+def test_extract_keeps_cjk_lenticular_brackets() -> None:
+    card = _card({"type": "TextBlock", "text": "【注意】 see 【2024】"})
+    assert extract_adaptive_card_text(card) == "【注意】 see 【2024】"
 
 
 def test_extract_richtextblock_concatenates_inlines() -> None:
@@ -128,6 +184,19 @@ def test_parse_text_body_strips_embedded_tag() -> None:
         content='Crea una slide<attachment id=""></attachment>',
     )
     assert parse_interaction_text(inter) == "Crea una slide"
+
+
+def test_parse_text_body_hidden_payload_returns_visible_text() -> None:
+    inter = _interaction(
+        content_type="text",
+        content=json.dumps(
+            {
+                "text": "",
+                "hiddenText": json.dumps({"taskId": "abc", "status": "pending"}),
+            }
+        ),
+    )
+    assert parse_interaction_text(inter) == ""
 
 
 def test_parse_html_body_resolves_adaptive_card() -> None:

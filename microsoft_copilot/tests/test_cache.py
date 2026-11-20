@@ -165,11 +165,13 @@ def _audit_record(
     *,
     message_ids: tuple[str, ...],
     thread_id: str = "19:thread@thread.v2",
+    record_id: str = "audit-cache-1",
+    created: str = "2025-06-15T10:00:00Z",
 ) -> CopilotAuditRecord:
     return CopilotAuditRecord.model_validate(
         {
-            "id": "audit-cache-1",
-            "createdDateTime": "2025-06-15T10:00:00Z",
+            "id": record_id,
+            "createdDateTime": created,
             "auditData": {
                 "ThreadId": thread_id,
                 "Messages": [
@@ -186,10 +188,10 @@ def test_upsert_audit_record_lookup_by_response_and_prompt_id(tmp_path: Path) ->
     cache.upsert_audit_records([record])
     cache.commit()
 
-    by_response = cache.find_audit_record(["response-id"])
-    assert cache.find_audit_record(["prompt-id"]) is not None
-    assert by_response is not None
-    assert by_response.thread_id == "19:thread@thread.v2"
+    by_response = cache.find_audit_records(["response-id"])
+    assert len(cache.find_audit_records(["prompt-id"])) == 1
+    assert len(by_response) == 1
+    assert by_response[0].thread_id == "19:thread@thread.v2"
 
 
 def test_audit_record_tenant_isolation(tmp_path: Path) -> None:
@@ -200,8 +202,8 @@ def test_audit_record_tenant_isolation(tmp_path: Path) -> None:
     cache_a.commit()
     cache_b.commit()
 
-    assert cache_a.find_audit_record(["msg-1"]) is not None
-    assert cache_b.find_audit_record(["msg-1"]) is None
+    assert len(cache_a.find_audit_records(["msg-1"])) == 1
+    assert cache_b.find_audit_records(["msg-1"]) == []
     cache_a.close()
     cache_b.close()
 
@@ -213,7 +215,36 @@ def test_upsert_audit_record_idempotent(tmp_path: Path) -> None:
     cache.upsert_audit_records([record])
     cache.commit()
 
-    assert cache.find_audit_record(["msg-1"]) is not None
+    assert len(cache.find_audit_records(["msg-1"])) == 1
+
+
+def test_find_audit_records_returns_all_distinct_matches_chronologically(
+    tmp_path: Path,
+) -> None:
+    cache = _cache(tmp_path)
+    later = _audit_record(
+        message_ids=("prompt-2", "response-1"),
+        record_id="audit-later",
+        created="2025-06-15T10:05:00Z",
+    )
+    earlier = _audit_record(
+        message_ids=("prompt-1",),
+        record_id="audit-earlier",
+        created="2025-06-15T10:00:00Z",
+    )
+    cache.upsert_audit_records([later, earlier])
+    cache.commit()
+
+    found = cache.find_audit_records(
+        ["response-1", "prompt-2", "", "unknown", "prompt-1"],
+    )
+
+    assert [r.id for r in found] == ["audit-earlier", "audit-later"]
+
+
+def test_find_audit_records_empty_for_no_ids(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    assert cache.find_audit_records([]) == []
 
 
 def test_audit_day_chunk_tracking(tmp_path: Path) -> None:
@@ -231,4 +262,20 @@ def test_interaction_denied_persists(tmp_path: Path) -> None:
     assert cache.is_interaction_denied("user-x") is False
     cache.mark_interaction_denied("user-x", reason="interaction_403")
     cache.commit()
+    assert cache.is_interaction_denied("user-x") is True
+
+
+def test_old_interaction_denial_is_retried(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    cache.mark_interaction_denied("user-x", reason="interaction_403")
+    old = (datetime.now(UTC) - timedelta(days=8)).isoformat().replace("+00:00", "Z")
+    cache._conn.execute(
+        "UPDATE sync_user_interaction_denied SET updated_at = ?",
+        (old,),
+    )
+    cache.commit()
+
+    assert cache.is_interaction_denied("user-x") is False
+
+    cache.mark_interaction_denied("user-x", reason="interaction_403")
     assert cache.is_interaction_denied("user-x") is True

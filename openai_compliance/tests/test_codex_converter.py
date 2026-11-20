@@ -236,6 +236,31 @@ def test_tool_traces_completed_and_failed() -> None:
     assert tools[1]["outputs"] == ["failed"]
 
 
+def test_tool_trace_keeps_serialized_string_input_verbatim() -> None:
+    events = [
+        _log("p1", "PROMPT_SENT", prompt_text="q", timestamp=_ts(9)),
+        _log(
+            "t-ok",
+            "TOOL_CALL_COMPLETED",
+            timestamp=_ts(9, 1),
+            tool_name="shell",
+            tool_input='{"cmd":"ls"}',
+        ),
+        _log(
+            "r1",
+            "PROMPT_RESPONSE_RECEIVED",
+            timestamp=_ts(9, 2),
+            response_text="done",
+            status="ok",
+        ),
+        _log("p2", "PROMPT_SENT", prompt_text="x", timestamp=_ts(9, 3)),
+    ]
+    payload = codex_turn_to_payload(_closed_turn(events), None, anonymize=False)
+    assert payload is not None
+    tools = [t for t in payload["traces"] if "model" not in t]
+    assert tools == [{"source": "shell", "input": '{"cmd":"ls"}', "outputs": []}]
+
+
 def test_end_user_and_entra_tags() -> None:
     events = [
         _log(
@@ -292,8 +317,9 @@ def test_turn_record_cost_and_classification_tags() -> None:
     )
     payload = codex_turn_to_payload(turn, turn_record, anonymize=False)
     assert payload is not None
-    assert payload["interaction"]["cost"] == 10_000
+    assert "cost" not in payload["interaction"]
     llm = payload["traces"][-1]
+    assert llm["cost"] == 10_000
     assert llm["input_tokens"] == 7
     assert llm["output_tokens"] == 11
     assert payload["interaction"]["tags"]["codex category"] == "code"
@@ -317,6 +343,7 @@ def test_without_turn_record_no_cost_uses_summed_tokens() -> None:
     assert payload is not None
     assert "cost" not in payload["interaction"]
     llm = payload["traces"][-1]
+    assert "cost" not in llm
     assert llm["input_tokens"] == 2
     assert llm["output_tokens"] == 3
 

@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 from httpx import HTTPStatusError
@@ -14,6 +14,7 @@ from .chat_converter import (
     app_calls_to_traces,
     assemble_interactions,
     interaction_to_payload,
+    message_effective_time,
     parse_stored_message,
 )
 from .codex_converter import (
@@ -31,6 +32,7 @@ from .compliance_client import (
     ComplianceClient,
 )
 from .config import Config, datetime_to_timestamp_str, timestamp_str_to_datetime
+from .csv_writer import CsvInteractionWriter
 from .models import (
     AppLogRecord,
     CodexLogRecord,
@@ -48,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LOOKBACK = timedelta(days=30)
 _CURSOR_LAG_WARN = timedelta(days=7)
+
+
+class InteractionSink(Protocol):
+    def send_interaction(self, payload: dict[str, Any]) -> None: ...
 
 
 @dataclass
@@ -367,7 +373,7 @@ def _assembled_codex_turn(
 
 def _emit_one_codex_interaction(
     store: ComplianceStore,
-    nebuly: NebulyClient,
+    sink: InteractionSink,
     config: Config,
     counts: SourceCounts,
     directory: EntraDirectory | None,
@@ -412,7 +418,7 @@ def _emit_one_codex_interaction(
         counts.skipped_empty += 1
         return
     try:
-        nebuly.send_interaction(payload)
+        sink.send_interaction(payload)
         store.record_emitted("codex", match.interaction_key, "sent")
         counts.sent += 1
         if sent_without_cost:
@@ -426,7 +432,7 @@ def _emit_one_codex_interaction(
 
 def _emit_codex_interactions(
     store: ComplianceStore,
-    nebuly: NebulyClient,
+    sink: InteractionSink,
     config: Config,
     counts: SourceCounts,
     directory: EntraDirectory | None,
@@ -438,7 +444,7 @@ def _emit_codex_interactions(
     for prompt_stored in store.unemitted_codex_prompts():
         _emit_one_codex_interaction(
             store,
-            nebuly,
+            sink,
             config,
             counts,
             directory,
@@ -452,7 +458,7 @@ def _emit_codex_interactions(
 def _sync_codex_source(
     client: ComplianceClient,
     store: ComplianceStore,
-    nebuly: NebulyClient,
+    sink: InteractionSink,
     config: Config,
     counts: SourceCounts,
     directory: EntraDirectory | None,
@@ -472,7 +478,7 @@ def _sync_codex_source(
 
     _emit_codex_interactions(
         store,
-        nebuly,
+        sink,
         config,
         counts,
         directory,
@@ -483,7 +489,7 @@ def _sync_codex_source(
 
 def _emit_chats(
     store: ComplianceStore,
-    nebuly: NebulyClient,
+    sink: InteractionSink,
     config: Config,
     counts: SourceCounts,
     directory: EntraDirectory | None,
@@ -511,15 +517,10 @@ def _emit_chats(
         if not match.assistants:
             counts.skipped_open += 1
             continue
-        window_start = match.user.message.created_at
-        window_end = match.assistants[-1].message.created_at
-        if window_start is None or window_end is None:
-            counts.skipped_empty += 1
-            continue
         app_calls = store.app_calls_in_window(
             match.user.conversation.id,
-            start=window_start,
-            end=window_end,
+            start=message_effective_time(match.user),
+            end=message_effective_time(match.assistants[-1]),
         )
         payload = interaction_to_payload(
             match,
@@ -531,7 +532,7 @@ def _emit_chats(
             counts.skipped_empty += 1
             continue
         try:
-            nebuly.send_interaction(payload)
+            sink.send_interaction(payload)
             store.record_emitted("chats", match.interaction_key, "sent")
             counts.sent += 1
         except PermanentRejectionError:
@@ -545,7 +546,7 @@ def run_sync(config: Config) -> SyncSummary:
     _configure_logging(verbose=config.verbose)
     summary = SyncSummary()
     store = ComplianceStore(
-        config.cache_dir / "compliance_store.db",
+        config.store_path,
         config.compliance_workspace_id,
         dry_run=config.dry_run,
     )
@@ -568,12 +569,21 @@ def run_sync(config: Config) -> SyncSummary:
                 max_requests_per_minute=config.compliance_max_requests_per_minute,
             )
             with httpx.Client(timeout=timeout) as nebuly_http:
-                nebuly = NebulyClient(
-                    nebuly_http,
-                    config.nebuly_api_key,
-                    config.nebuly_endpoint,
-                    dry_run=config.dry_run,
-                )
+                sink: InteractionSink
+                if config.csv_export:
+                    sink = CsvInteractionWriter(
+                        config.csv_export_path, dry_run=config.dry_run
+                    )
+                    logger.info(
+                        "CSV export enabled: writing to %s", config.csv_export_path
+                    )
+                else:
+                    sink = NebulyClient(
+                        nebuly_http,
+                        config.nebuly_api_key,
+                        config.nebuly_endpoint,
+                        dry_run=config.dry_run,
+                    )
 
                 if "chats" in config.sources:
                     chat_counts = SourceCounts()
@@ -588,7 +598,7 @@ def run_sync(config: Config) -> SyncSummary:
                     ):
                         _emit_chats(
                             store,
-                            nebuly,
+                            sink,
                             config,
                             chat_counts,
                             config.entra_directory,
@@ -612,7 +622,7 @@ def run_sync(config: Config) -> SyncSummary:
                     if not _sync_codex_source(
                         client,
                         store,
-                        nebuly,
+                        sink,
                         config,
                         codex_counts,
                         config.entra_directory,

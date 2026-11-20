@@ -131,7 +131,9 @@ class GraphClient:
         copilot_sku: str,
         max_requests_per_minute: int = 600,
     ) -> None:
-        self._copilot_sku = copilot_sku
+        self._copilot_skus = tuple(
+            sku.strip().lower() for sku in copilot_sku.split(",") if sku.strip()
+        )
         self._cred_kwargs = {
             "tenant_id": tenant_id,
             "client_id": client_id,
@@ -160,7 +162,6 @@ class GraphClient:
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
         }
-        sku = self._copilot_sku.lower()
         user_url = (
             f"https://graph.microsoft.com/v1.0/users/{user_id}?$select=assignedLicenses"
         )
@@ -170,7 +171,7 @@ class GraphClient:
             list[dict[str, Any]],
             user_data.get("assignedLicenses") or [],
         ):
-            if str(assignment.get("skuId", "")).lower() != sku:
+            if str(assignment.get("skuId", "")).lower() not in self._copilot_skus:
                 continue
             for plan_id in assignment.get("disabledPlans") or []:
                 disabled_plan_ids.add(str(plan_id).lower())
@@ -178,7 +179,7 @@ class GraphClient:
         details_url = f"https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails"
         data = await self._fetch_page(url=details_url, headers=headers)
         for detail in cast(list[dict[str, Any]], data.get("value") or []):
-            if str(detail.get("skuId", "")).lower() != sku:
+            if str(detail.get("skuId", "")).lower() not in self._copilot_skus:
                 continue
             for plan in cast(list[dict[str, Any]], detail.get("servicePlans") or []):
                 plan_id = str(plan.get("servicePlanId", "")).lower()
@@ -193,69 +194,78 @@ class GraphClient:
 
     async def list_copilot_users(self) -> list[CopilotUser]:
         users: list[CopilotUser] = []
-        sku_filter = f"assignedLicenses/any(u:u/skuId eq {self._copilot_sku})"
-        query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
-            select=[
-                "id",
-                "displayName",
-                "mail",
-                "userPrincipalName",
-                "department",
-                "jobTitle",
-                "officeLocation",
-                "city",
-                "country",
-                "usageLocation",
-                "companyName",
-                "employeeHireDate",
-            ],
-            filter=sku_filter,
-            top=BATCH_TOP,
-        )
-        request_config = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
-            query_parameters=query_params,
-        )
-
+        seen_ids: set[str] = set()
         # Kiota closes async credentials after token fetch; scope the SDK to this call.
         graph_cred = ClientSecretCredential(**self._cred_kwargs)
         graph = GraphServiceClient(credentials=graph_cred, scopes=[GRAPH_SCOPE])
         try:
-            page = await graph.users.get(request_configuration=request_config)
-            while page is not None:
-                if page.value:
-                    for user in page.value:
-                        if user.id is None:
-                            logger.warning(
-                                "User %s has no ID, skipping",
-                                user.user_principal_name,
-                            )
-                            continue
-                        if not await self._user_has_usable_copilot_license(user.id):
-                            logger.warning(
-                                "User %s has Copilot SKU but no provisioned service "
-                                "plans — skipping",
-                                user.user_principal_name,
-                            )
-                            continue
-                        users.append(
-                            CopilotUser(
-                                id=user.id,
-                                mail=user.mail,
-                                userPrincipalName=user.user_principal_name,
-                                department=user.department,
-                                jobTitle=user.job_title,
-                                officeLocation=user.office_location,
-                                city=user.city,
-                                country=user.country,
-                                usageLocation=user.usage_location,
-                                companyName=user.company_name,
-                                employeeHireDate=user.employee_hire_date,
-                            )
-                        )
+            for sku in self._copilot_skus:
+                sku_filter = f"assignedLicenses/any(u:u/skuId eq {sku})"
+                query_params = (
+                    UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+                        select=[
+                            "id",
+                            "displayName",
+                            "mail",
+                            "userPrincipalName",
+                            "department",
+                            "jobTitle",
+                            "officeLocation",
+                            "city",
+                            "country",
+                            "usageLocation",
+                            "companyName",
+                            "employeeHireDate",
+                        ],
+                        filter=sku_filter,
+                        top=BATCH_TOP,
+                    )
+                )
+                request_config = (
+                    UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
+                        query_parameters=query_params,
+                    )
+                )
 
-                if not page.odata_next_link:
-                    break
-                page = await graph.users.with_url(page.odata_next_link).get()
+                page = await graph.users.get(request_configuration=request_config)
+                while page is not None:
+                    if page.value:
+                        for user in page.value:
+                            if user.id is None:
+                                logger.warning(
+                                    "User %s has no ID, skipping",
+                                    user.user_principal_name,
+                                )
+                                continue
+                            if user.id in seen_ids:
+                                continue
+                            if not await self._user_has_usable_copilot_license(user.id):
+                                logger.warning(
+                                    "User %s has Copilot SKU but no provisioned "
+                                    "service plans — skipping",
+                                    user.user_principal_name,
+                                )
+                                continue
+                            seen_ids.add(user.id)
+                            users.append(
+                                CopilotUser(
+                                    id=user.id,
+                                    mail=user.mail,
+                                    userPrincipalName=user.user_principal_name,
+                                    department=user.department,
+                                    jobTitle=user.job_title,
+                                    officeLocation=user.office_location,
+                                    city=user.city,
+                                    country=user.country,
+                                    usageLocation=user.usage_location,
+                                    companyName=user.company_name,
+                                    employeeHireDate=user.employee_hire_date,
+                                )
+                            )
+
+                    if not page.odata_next_link:
+                        break
+                    page = await graph.users.with_url(page.odata_next_link).get()
         finally:
             await graph_cred.close()
 

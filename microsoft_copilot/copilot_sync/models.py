@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -132,8 +133,16 @@ class AccessedResource(BaseModel):
         None,
         validation_alias=AliasChoices("XPIADetected", "xpiaDetected"),
     )
+    resource_type: str | None = Field(
+        None, validation_alias=AliasChoices("Type", "type")
+    )
 
     model_config = ConfigDict(validate_by_name=True, extra="allow")
+
+    @property
+    def is_tool_call_event(self) -> bool:
+        """Agent tool approval events (approvalRequested, approvalDenied, ...)."""
+        return (self.resource_type or "").startswith("approval")
 
 
 class ModelTransparencyDetail(BaseModel):
@@ -226,6 +235,18 @@ def _merge_copilot_event_fields(
         target["client_region"] = event["ClientRegion"]
 
 
+_MERGED_SCALAR_FIELDS: tuple[str, ...] = (
+    "user_principal_name",
+    "thread_id",
+    "app_host",
+    "app_identity",
+    "agent_id",
+    "agent_name",
+    "agent_version",
+    "client_region",
+)
+
+
 class CopilotAuditRecord(BaseModel):
     """Purview CopilotInteraction record from Graph auditLog/queries."""
 
@@ -269,6 +290,40 @@ class CopilotAuditRecord(BaseModel):
         if "UserId" in audit_data and "user_principal_name" not in out:
             out["user_principal_name"] = audit_data["UserId"]
         return out
+
+    @classmethod
+    def merge(cls, records: Sequence["CopilotAuditRecord"]) -> "CopilotAuditRecord":
+        """Combine the audit records of one turn into a single record.
+
+        Lists are concatenated in the given order (plugins deduped by id) and
+        scalars come from the first record that sets them. The flag properties
+        (jailbreak, XPIA, web search) are derived from the lists, so they are
+        OR-ed across records.
+        """
+        first = records[0]
+        if len(records) == 1:
+            return first
+        plugins: dict[str | None, AISystemPlugin] = {}
+        for record in records:
+            for plugin in record.ai_system_plugins:
+                plugins.setdefault(plugin.plugin_id or plugin.name, plugin)
+        update: dict[str, Any] = {
+            field: next(
+                (v for r in records if (v := getattr(r, field)) is not None),
+                None,
+            )
+            for field in _MERGED_SCALAR_FIELDS
+        }
+        update["messages"] = [m for r in records for m in r.messages]
+        update["accessed_resources"] = [
+            res for r in records for res in r.accessed_resources
+        ]
+        update["ai_system_plugins"] = list(plugins.values())
+        update["model_details"] = next(
+            (r.model_details for r in records if r.model_details),
+            [],
+        )
+        return first.model_copy(update=update)
 
     @property
     def message_ids(self) -> list[str]:

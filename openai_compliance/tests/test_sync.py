@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import types
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -7,11 +8,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
 import httpx
+import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
 from openai_compliance_sync.compliance_client import (
     EVENT_CODEX_LOG,
     EVENT_CODEX_TURN,
@@ -36,6 +37,7 @@ def _config(
     sources: tuple[str, ...] = ("chats",),
     codex_cost_wait_hours: int = 4,
     interaction_idle_minutes: int = 30,
+    csv_export: bool = False,
 ) -> Config:
     return Config(
         nebuly_api_key="nebuly-key",
@@ -54,6 +56,8 @@ def _config(
         interaction_idle_minutes=interaction_idle_minutes,
         codex_cost_wait_hours=codex_cost_wait_hours,
         entra_directory=None,
+        csv_export=csv_export,
+        csv_export_path=tmp_path / "interactions.csv",
     )
 
 
@@ -225,6 +229,93 @@ def test_second_run_sends_nothing(
     assert summary2.sources["chats"].sent == 0
 
 
+def _closed_chat_transport() -> httpx.MockTransport:
+    user = _chat_row(
+        "u1",
+        author_type="user",
+        text="hi",
+        created_at=datetime_to_timestamp_str(_ago(hours_ago=2)),
+    )
+    assistant = _chat_row(
+        "a1",
+        author_type="assistant",
+        text="hey",
+        previous_message_id="u1",
+        created_at=datetime_to_timestamp_str(_ago(hours_ago=1, minutes_ago=55)),
+    )
+    closer = _chat_row(
+        "u2",
+        author_type="user",
+        text="next",
+        previous_message_id="a1",
+        created_at=datetime_to_timestamp_str(_ago(hours_ago=1, minutes_ago=50)),
+    )
+    return _make_transport(
+        pages={
+            EVENT_CONVERSATION_MESSAGE: {
+                "data": [{"id": "file-1"}],
+                "has_more": False,
+                "last_end_time": datetime_to_timestamp_str(
+                    _ago(hours_ago=1, minutes_ago=45)
+                ),
+            }
+        },
+        files={"file-1": [user, assistant, closer]},
+    )
+
+
+def test_csv_export_writes_rows_instead_of_posting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    RecordingNebuly.all_sent.clear()
+    _patch_run(monkeypatch, _closed_chat_transport())
+    config = _config(tmp_path, csv_export=True)
+
+    summary = run_sync(config)
+
+    assert summary.sources["chats"].sent == 1
+    assert RecordingNebuly.all_sent == []
+    with config.csv_export_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    assert reader.fieldnames == [
+        "conversation_id",
+        "end_user",
+        "team",
+        "market",
+        "tenure",
+        "time_start",
+        "time_end",
+        "input",
+        "output",
+        "hide_content",
+        "tags",
+        "traces",
+        "user_feedback",
+        "anonymize",
+    ]
+    assert len(rows) == 1
+    assert rows[0]["input"] == "hi"
+    assert rows[0]["output"] == "hey"
+    assert rows[0]["hide_content"] == "False"
+    assert isinstance(json.loads(rows[0]["tags"]), dict)
+    assert isinstance(json.loads(rows[0]["traces"]), list)
+    assert [p.parent.name for p in tmp_path.glob("*/compliance_store.db")] == [
+        _config(tmp_path, csv_export=True).cache_key
+    ]
+
+
+def test_csv_export_dry_run_writes_no_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_run(monkeypatch, _closed_chat_transport())
+    config = _config(tmp_path, csv_export=True, dry_run=True)
+
+    run_sync(config)
+
+    assert not config.csv_export_path.exists()
+
+
 def test_reply_in_later_file_emits_on_next_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -317,7 +408,7 @@ def test_transient_failure_keeps_cursor(
     )
     _patch_run(monkeypatch, transport)
     run_sync(_config(tmp_path))
-    store = ComplianceStore(tmp_path / "compliance_store.db", "ws-demo", dry_run=False)
+    store = ComplianceStore(_config(tmp_path).store_path, "ws-demo", dry_run=False)
     assert store.get_cursor(EVENT_CONVERSATION_MESSAGE) is None
 
 
@@ -361,9 +452,7 @@ def test_permanent_rejection_is_recorded(
             _config(tmp_path, sources=("codex",), codex_cost_wait_hours=0)
         )
         assert summary.sources["codex"].rejected == 1
-        store = ComplianceStore(
-            tmp_path / "compliance_store.db", "ws-demo", dry_run=False
-        )
+        store = ComplianceStore(_config(tmp_path).store_path, "ws-demo", dry_run=False)
         assert store.is_emitted("codex", "codex-p1")
     finally:
         RecordingNebuly.reject_all = False
@@ -503,7 +592,7 @@ def test_codex_waits_for_turn_record_then_sends_with_cost(
     RecordingNebuly.all_sent.clear()
     second = run_sync(_config(tmp_path, sources=("codex",), codex_cost_wait_hours=4))
     assert second.sources["codex"].sent == 1
-    assert RecordingNebuly.all_sent[-1]["interaction"]["cost"] == 10_000
+    assert RecordingNebuly.all_sent[-1]["traces"][-1]["cost"] == 10_000
 
 
 def test_codex_sent_without_cost_after_wait(
@@ -585,8 +674,12 @@ def test_codex_without_turn_id_sends_immediately(
     assert summary.sources["codex"].skipped_waiting_cost == 0
 
 
-def test_codex_turn_403_disables_wait(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("status", [403, 404])
+def test_codex_turn_scope_error_disables_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    status: int,
 ) -> None:
     prompt = _codex_event("p1", "PROMPT_SENT", prompt_text="q")
     response = _codex_event("r1", "PROMPT_RESPONSE_RECEIVED", response_text="a")
@@ -598,7 +691,7 @@ def test_codex_turn_403_disables_wait(
         if request.url.path.endswith("/logs"):
             event_type = request.url.params.get("event_type", "")
             if event_type == EVENT_CODEX_TURN:
-                return httpx.Response(403, request=request)
+                return httpx.Response(status, request=request)
             if event_type == EVENT_CODEX_LOG:
                 return httpx.Response(
                     200,
@@ -618,7 +711,51 @@ def test_codex_turn_403_disables_wait(
             _config(tmp_path, sources=("codex",), codex_cost_wait_hours=4)
         )
     assert summary.sources["codex"].sent == 1
-    assert "CODEX_TURN listing returned 403" in caplog.text
+    assert f"CODEX_TURN listing returned {status}" in caplog.text
+
+
+def test_listing_404_stops_run_without_raising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request)
+
+    _patch_run(monkeypatch, httpx.MockTransport(handler))
+    summary = run_sync(_config(tmp_path, sources=("chats", "codex")))
+    assert summary.sources["chats"].sent == 0
+    assert "codex" not in summary.sources
+
+
+def test_chat_without_message_created_at_uses_event_timestamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = [
+        _chat_row("u1", author_type="user", text="hi", created_at=""),
+        _chat_row(
+            "a1",
+            author_type="assistant",
+            text="hey",
+            previous_message_id="u1",
+            created_at="",
+        ),
+    ]
+    for row, minutes_ago in zip(rows, (120, 115), strict=True):
+        del row["message"]["created_at"]
+        row["timestamp"] = datetime_to_timestamp_str(_ago(minutes_ago=minutes_ago))
+    transport = _make_transport(
+        pages={
+            EVENT_CONVERSATION_MESSAGE: {
+                "data": [{"id": "file-1"}],
+                "has_more": False,
+                "last_end_time": datetime_to_timestamp_str(_ago(minutes_ago=100)),
+            }
+        },
+        files={"file-1": rows},
+    )
+    _patch_run(monkeypatch, transport)
+    summary = run_sync(_config(tmp_path))
+    assert summary.sources["chats"].sent == 1
+    assert summary.sources["chats"].skipped_empty == 0
 
 
 def test_codex_cost_wait_zero_skips_turn_listing(
@@ -703,4 +840,4 @@ def test_dry_run_writes_nothing(
     )
     _patch_run(monkeypatch, transport)
     run_sync(_config(tmp_path, dry_run=True))
-    assert not (tmp_path / "compliance_store.db").exists()
+    assert not list(tmp_path.glob("**/compliance_store.db"))

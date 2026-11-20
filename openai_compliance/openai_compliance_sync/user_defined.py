@@ -131,6 +131,7 @@ def build_codex_traces(
     input_tokens: int,
     output_tokens: int,
     output_text: str,
+    cost: int | None = None,
 ) -> list[dict[str, Any]]:
     from .chat_converter import truncate_text  # noqa: PLC0415
     from .codex_converter import prompt_text  # noqa: PLC0415
@@ -142,7 +143,9 @@ def build_codex_traces(
             continue
         tool_input = details.tool_input
         input_repr = ""
-        if tool_input is not None:
+        if isinstance(tool_input, str):
+            input_repr = truncate_text(tool_input)
+        elif tool_input is not None:
             input_repr = truncate_text(
                 json.dumps(tool_input, separators=(",", ":"), ensure_ascii=False)
             )
@@ -159,15 +162,16 @@ def build_codex_traces(
 
     prompt = prompt_text(turn.prompt.event_details)
 
-    traces.append(
-        {
-            "model": llm_model,
-            "messages": [{"role": "user", "content": truncate_text(prompt)}],
-            "output": truncate_text(output_text),
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-        }
-    )
+    llm_trace: dict[str, Any] = {
+        "model": llm_model,
+        "messages": [{"role": "user", "content": truncate_text(prompt)}],
+        "output": truncate_text(output_text),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+    if cost is not None:
+        llm_trace["cost"] = cost
+    traces.append(llm_trace)
     return traces
 
 
