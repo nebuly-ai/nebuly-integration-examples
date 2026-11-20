@@ -139,6 +139,7 @@ def test_idle_closes_after_thirty_minutes_plus_the_delivery_margin() -> None:
     g.advance(at(35.1))
     [closed] = g.drain_closed()
     assert closed.close_reason is CloseReason.IDLE
+    assert (g.stats.closed_idle, g.stats.closed_next_interaction) == (1, 0)
 
 
 def test_call_within_the_idle_time_joins_even_if_read_late() -> None:

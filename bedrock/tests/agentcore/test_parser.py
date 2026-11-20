@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -34,7 +33,7 @@ def test_identity_log_accepts_object_body_and_preserves_actor() -> None:
     data["body"] = json.loads(data["body"])
     result = parse_record(replace(raw, message=json.dumps(data)), source)
     assert result.identity is not None
-    assert result.identity.actor_id == "synthetic-actor-001"
+    assert result.identity.actor_id == "actor-1"
 
 
 def test_identity_requires_trace_and_exact_source() -> None:
@@ -66,9 +65,7 @@ def test_identity_requires_trace_and_exact_source() -> None:
 )
 def test_malformed_span_remains_trace_linked(field: str, value: object) -> None:
     source, _ = sample()
-    case = json.loads(
-        (Path(__file__).with_name("fixtures") / "text_cache_read.json").read_text()
-    )
+    case = load()
     event = next(
         event
         for event in case["records"]

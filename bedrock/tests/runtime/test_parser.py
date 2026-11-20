@@ -204,6 +204,15 @@ def test_converse_text_turn() -> None:
     assert invocation.time_end.isoformat() == "2026-11-11T10:00:01+00:00"
 
 
+def test_converse_stream_is_logged_already_assembled() -> None:
+    record = converse_record([user("Q1")], "A1", operation="ConverseStream")
+
+    invocation = _parse(record)
+
+    assert invocation.output_text == "A1"
+    assert invocation.latency_ms == 1000
+
+
 def test_nova_on_invoke_model_uses_the_converse_adapter() -> None:
     record = with_bodies(
         envelope(operation="InvokeModel", model_id="eu.amazon.nova-lite-v1:0"),
@@ -328,6 +337,9 @@ def test_anthropic_message() -> None:
         100,
         7,
     )
+    # InvokeModel without streaming logs no latency: the call ends when it starts
+    assert invocation.latency_ms is None
+    assert invocation.time_end == invocation.timestamp
 
 
 def test_anthropic_stream_with_tool_use() -> None:
@@ -468,6 +480,20 @@ def test_openai_completion_with_tool_history() -> None:
     assert invocation.output_text == "Oslo 4 C, Rome 18 C."
     assert invocation.stop_reason is StopReason.END_TURN
     assert invocation.usage.cache_read_tokens == 40  # from the body, split out
+
+    # Without envelope counters the body is used: OpenAI's prompt_tokens
+    # include the cached ones, Bedrock's inputTokenCount does not.
+    record = _openai_record(output, messages)
+    for section in ("input", "output"):
+        record[section] = {
+            k: v for k, v in record[section].items() if not k.endswith("TokenCount")
+        }
+    usage = _parse(record).usage
+    assert (usage.input_tokens, usage.cache_read_tokens, usage.output_tokens) == (
+        10,
+        40,
+        9,
+    )
 
 
 def test_openai_stream_with_tool_call() -> None:

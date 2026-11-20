@@ -17,17 +17,17 @@ from bedrock_sync.agentcore.parser import parse_record
 from bedrock_sync.agentcore.reading import plan_trace_recovery
 from bedrock_sync.agentcore.records import SourceScope
 from bedrock_sync.agentcore.state import AgentCoreState, StateError
-from tests.agentcore.cases import FIXTURES, REAL_CASES, Logs, records_of
+from tests.agentcore.cases import REAL_CASES, Logs, load, records_of
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.mark.parametrize("path", REAL_CASES, ids=lambda path: path.stem)
+@pytest.mark.parametrize("name", REAL_CASES)
 def test_cloudwatch_to_durable_assembly_survives_restart(
-    path: Path, tmp_path: Path
+    name: str, tmp_path: Path
 ) -> None:
-    case = json.loads(path.read_text())
+    case = load(name)
     config = AgentCoreConfig.from_env_and_args(
         [
             "--source-id",
@@ -109,7 +109,7 @@ def test_cloudwatch_to_durable_assembly_survives_restart(
 def test_long_trace_recovers_earlier_children_without_claiming_old_coverage(
     tmp_path: Path,
 ) -> None:
-    case = json.loads((FIXTURES / "principal_tools.json").read_text())
+    case = load("principal_tools")
     source = SourceScope(**case["source"])
     events = case["records"]
     root_event = next(

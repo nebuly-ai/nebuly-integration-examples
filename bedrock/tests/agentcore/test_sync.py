@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
     from bedrock_sync.agentcore.models import InteractionSnapshot
 
-CASES = sorted(path.stem for path in REAL_CASES)
+CASES = REAL_CASES
 DEFAULT_CASE = "principal_tools"
 
 

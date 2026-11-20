@@ -1,10 +1,9 @@
-"""Helpers over the anonymized AgentCore cases in ``fixtures/``."""
+"""Helpers over the AgentCore cases built by ``spans``."""
 
 from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bedrock_sync.agentcore.assembler import assemble
@@ -20,15 +19,11 @@ if TYPE_CHECKING:
         Span,
     )
 
-FIXTURES = Path(__file__).with_name("fixtures")
-REAL_CASES = sorted(
-    path for path in FIXTURES.glob("*.json") if path.stem != "synthetic_variants"
-)
+from tests.agentcore.spans import SCENARIOS, load
 
+__all__ = ["REAL_CASES", "Logs", "load", "parse_case", "raw_record", "snapshot"]
 
-def load(name: str = "text_cache_read") -> dict[str, Any]:
-    case: dict[str, Any] = json.loads((FIXTURES / f"{name}.json").read_text())
-    return case
+REAL_CASES = sorted(SCENARIOS)
 
 
 def raw_record(event: dict[str, Any]) -> RawLogRecord:
