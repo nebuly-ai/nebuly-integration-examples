@@ -315,6 +315,48 @@ def test_gap_without_yes_aborts(
         run_sync(_config(tmp_path, from_date=_ts(14), to_date=_ts(16)))
 
 
+@pytest.mark.parametrize(
+    ("start", "end", "traces"),
+    [
+        pytest.param(_ts(5), _ts(7), [], id="earlier-empty-window"),
+        pytest.param(
+            _ts(13), _ts(15), [_trace("new", hour=14)], id="later-populated-window"
+        ),
+    ],
+)
+@patch("langfuse_sync.sync.httpx.AsyncClient")
+@patch("langfuse_sync.sync.LangfuseClient")
+@patch("langfuse_sync.sync.NebulyClient")
+def test_confirmed_gap_starts_a_new_coverage_window(
+    nebuly_cls: MagicMock,
+    langfuse_cls: MagicMock,
+    http_cls: MagicMock,
+    *,
+    tmp_path: Path,
+    start: datetime,
+    end: datetime,
+    traces: list[dict[str, Any]],
+) -> None:
+    Coverage(tmp_path).save(
+        coverage_from=_ts(8), coverage_until=_ts(12), coverage_until_ids={"old"}
+    )
+    langfuse = FakeLangfuseClient([(start, end, traces)])
+    nebuly = FakeNebulyClient()
+    langfuse_cls.return_value = langfuse
+    nebuly_cls.return_value = nebuly
+    config = _config(tmp_path, from_date=start, to_date=end, force=True)
+
+    assert run_sync(config) == 0
+    state = Coverage(tmp_path).load()
+    assert run_sync(config) == 0
+    assert nebuly.sent == [trace["id"] for trace in traces]
+    assert run_sync(_config(tmp_path, to_date=end)) == 0
+    assert langfuse.trace_calls == [(start, end)]
+    assert state.coverage_from == start
+    assert state.coverage_until == end
+    assert "old" not in state.coverage_until_ids
+
+
 @patch("langfuse_sync.sync.httpx.AsyncClient")
 @patch("langfuse_sync.sync.LangfuseClient")
 @patch("langfuse_sync.sync.NebulyClient")

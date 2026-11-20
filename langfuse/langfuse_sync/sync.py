@@ -496,6 +496,7 @@ def run_sync(config: Config) -> int:
     if gap_detected:
         _confirm_gap(config)
         coverage.invalidate()
+        prior_state = coverage.state
         intervals = [(requested_from, requested_until)]
 
     if not intervals:
