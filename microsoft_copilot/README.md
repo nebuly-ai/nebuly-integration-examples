@@ -127,16 +127,13 @@ Audit data is retained for up to 180 days (Audit Standard).
 | `jailbreak_detected` / `xpia_detected` / `sensitive_resource_accessed` | Set to `true` when applicable |
 | `tool_approval_denied` | `true` when the final approval event of any agent tool call is `approvalDenied`; omitted otherwise |
 
-Model name coverage varies by scenario (often missing on Auto / M365 Copilot; more common when users pick a model in Copilot Chat).
-
-Audit enrichment adds these traces, in order, after the Graph retrieval traces. Nebuly has no tool trace type, so tool calls are sent as retrieval traces (`source`, `input`, `outputs`):
-
+Audit enrichment adds these traces, in order, after the Graph retrieval traces:
 - **Documents:** one trace per accessed resource, as before.
 - **Tool calls:** accessed resources whose `Type` starts with `approval` are agent tool call events, not documents. They are grouped by call id (across all merged records) into one trace per call: `source` is the tool name (for example `outlook_calendar/UpdateEvent`), `input` is empty and `outputs` holds the last approval event (for example `approvalDenied`).
-- **Plugin-only tools:** AI system plugins named `mcp__<server>__<tool>` or `core-<Tool>` become `<server>/<tool>` or `core/<Tool>` traces with empty `input` and `outputs`, unless a call trace for the same tool exists. A `_deferred` suffix on the server is dropped so deferred plugins match their calls. `TaskCreate`, `TaskUpdate` and `BuiltIn` never become traces.
+- **Plugin-only tools:** AI system plugins named `mcp__<server>__<tool>` or `core-<Tool>` become `<server>/<tool>` or `core/<Tool>` traces with empty `input` and `outputs`, unless a call trace for the same tool exists.
 - **LLM:** one trace when the audit has a model name.
 
-The audit log does not include tool inputs or outputs, so tool traces carry only the tool name and approval status. Skills appear only as an entry named `Skill` with no skill name, so they are not traced. A plugin entry named `Skill:<name>` or `Skill/<name>` would be sent as `skill/<name>` (a guess at a future format).
+The audit log does not include tool inputs or outputs, so tool traces carry only the tool name and approval status.
 
 ## Tags
 
@@ -165,7 +162,6 @@ The same profile fields also fill Nebuly's `team`, `market` and `tenure` interac
 
 ## Known limitations
 
-- **Excel & PowerPoint conversation grouping:** Graph returns unstable `sessionId`/`requestId` for these apps that change between turns of the same user session, so their multi-turn conversations can't be grouped — each turn lands as a separate conversation in Nebuly.
 - **Copilot Cowork tasks:** Cowork runs long agent tasks and exports them differently from chat. One answer can be split across several records, cut mid-sentence; these are joined (reasoning summaries starting with a `**Heading**` are dropped). A prompt sent while the agent is still working, before it has produced any text, steers the same task: Graph and Purview both pair the later answers with the latest prompt and give nothing that links each answer to its prompt, so the task is sent as one interaction with all its prompts as input and all its answers as output. Messages that Microsoft glues into one record without a separator get a paragraph break. Tasks that never produce text (for example, only saving a file) are skipped. A Cowork task can run for minutes, so on tail syncs raise `COPILOT_SETTLE_LAG_SECONDS` (or enable audit enrichment, which uses a 2h lag) to avoid sending a task before it finishes.
 - **Copilot Studio agents:** The enterprise interaction export API does not return interactions from agents created in Copilot Studio, and Purview audit only carries the agent ID. But interactions for agents invoked in a Copilot Studio chat are returned.
 - **Unlicensed and pay-as-you-go Copilot Chat:** Prompt and response text is not available through any API for these users. Purview audit records hold metadata only, no prompt or response text.
