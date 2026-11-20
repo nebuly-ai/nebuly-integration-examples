@@ -236,6 +236,31 @@ def test_tool_traces_completed_and_failed() -> None:
     assert tools[1]["outputs"] == ["failed"]
 
 
+def test_tool_trace_keeps_serialized_string_input_verbatim() -> None:
+    events = [
+        _log("p1", "PROMPT_SENT", prompt_text="q", timestamp=_ts(9)),
+        _log(
+            "t-ok",
+            "TOOL_CALL_COMPLETED",
+            timestamp=_ts(9, 1),
+            tool_name="shell",
+            tool_input='{"cmd":"ls"}',
+        ),
+        _log(
+            "r1",
+            "PROMPT_RESPONSE_RECEIVED",
+            timestamp=_ts(9, 2),
+            response_text="done",
+            status="ok",
+        ),
+        _log("p2", "PROMPT_SENT", prompt_text="x", timestamp=_ts(9, 3)),
+    ]
+    payload = codex_turn_to_payload(_closed_turn(events), None, anonymize=False)
+    assert payload is not None
+    tools = [t for t in payload["traces"] if "model" not in t]
+    assert tools == [{"source": "shell", "input": '{"cmd":"ls"}', "outputs": []}]
+
+
 def test_end_user_and_entra_tags() -> None:
     events = [
         _log(

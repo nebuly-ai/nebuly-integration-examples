@@ -114,7 +114,7 @@ class CodexEventDetails(BaseModel):
     environment_id: str | None = None
     tool_name: str | None = None
     tool_type: str | None = None
-    tool_input: dict[str, Any] | None = None
+    tool_input: dict[str, Any] | str | None = None
     tool_call_id: str | None = None
 
 

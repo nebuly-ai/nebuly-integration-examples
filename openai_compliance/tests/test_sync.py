@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
 import httpx
+import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
 from openai_compliance_sync.compliance_client import (
     EVENT_CODEX_LOG,
     EVENT_CODEX_TURN,
@@ -674,8 +674,12 @@ def test_codex_without_turn_id_sends_immediately(
     assert summary.sources["codex"].skipped_waiting_cost == 0
 
 
-def test_codex_turn_403_disables_wait(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("status", [403, 404])
+def test_codex_turn_scope_error_disables_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    status: int,
 ) -> None:
     prompt = _codex_event("p1", "PROMPT_SENT", prompt_text="q")
     response = _codex_event("r1", "PROMPT_RESPONSE_RECEIVED", response_text="a")
@@ -687,7 +691,7 @@ def test_codex_turn_403_disables_wait(
         if request.url.path.endswith("/logs"):
             event_type = request.url.params.get("event_type", "")
             if event_type == EVENT_CODEX_TURN:
-                return httpx.Response(403, request=request)
+                return httpx.Response(status, request=request)
             if event_type == EVENT_CODEX_LOG:
                 return httpx.Response(
                     200,
@@ -707,7 +711,51 @@ def test_codex_turn_403_disables_wait(
             _config(tmp_path, sources=("codex",), codex_cost_wait_hours=4)
         )
     assert summary.sources["codex"].sent == 1
-    assert "CODEX_TURN listing returned 403" in caplog.text
+    assert f"CODEX_TURN listing returned {status}" in caplog.text
+
+
+def test_listing_404_stops_run_without_raising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request)
+
+    _patch_run(monkeypatch, httpx.MockTransport(handler))
+    summary = run_sync(_config(tmp_path, sources=("chats", "codex")))
+    assert summary.sources["chats"].sent == 0
+    assert "codex" not in summary.sources
+
+
+def test_chat_without_message_created_at_uses_event_timestamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = [
+        _chat_row("u1", author_type="user", text="hi", created_at=""),
+        _chat_row(
+            "a1",
+            author_type="assistant",
+            text="hey",
+            previous_message_id="u1",
+            created_at="",
+        ),
+    ]
+    for row, minutes_ago in zip(rows, (120, 115), strict=True):
+        del row["message"]["created_at"]
+        row["timestamp"] = datetime_to_timestamp_str(_ago(minutes_ago=minutes_ago))
+    transport = _make_transport(
+        pages={
+            EVENT_CONVERSATION_MESSAGE: {
+                "data": [{"id": "file-1"}],
+                "has_more": False,
+                "last_end_time": datetime_to_timestamp_str(_ago(minutes_ago=100)),
+            }
+        },
+        files={"file-1": rows},
+    )
+    _patch_run(monkeypatch, transport)
+    summary = run_sync(_config(tmp_path))
+    assert summary.sources["chats"].sent == 1
+    assert summary.sources["chats"].skipped_empty == 0
 
 
 def test_codex_cost_wait_zero_skips_turn_listing(

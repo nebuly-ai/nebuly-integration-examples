@@ -143,7 +143,9 @@ def build_codex_traces(
             continue
         tool_input = details.tool_input
         input_repr = ""
-        if tool_input is not None:
+        if isinstance(tool_input, str):
+            input_repr = truncate_text(tool_input)
+        elif tool_input is not None:
             input_repr = truncate_text(
                 json.dumps(tool_input, separators=(",", ":"), ensure_ascii=False)
             )

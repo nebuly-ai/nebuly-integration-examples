@@ -14,6 +14,7 @@ from .chat_converter import (
     app_calls_to_traces,
     assemble_interactions,
     interaction_to_payload,
+    message_effective_time,
     parse_stored_message,
 )
 from .codex_converter import (
@@ -516,15 +517,10 @@ def _emit_chats(
         if not match.assistants:
             counts.skipped_open += 1
             continue
-        window_start = match.user.message.created_at
-        window_end = match.assistants[-1].message.created_at
-        if window_start is None or window_end is None:
-            counts.skipped_empty += 1
-            continue
         app_calls = store.app_calls_in_window(
             match.user.conversation.id,
-            start=window_start,
-            end=window_end,
+            start=message_effective_time(match.user),
+            end=message_effective_time(match.assistants[-1]),
         )
         payload = interaction_to_payload(
             match,

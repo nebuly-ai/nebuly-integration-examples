@@ -25,10 +25,6 @@ EVENT_APP_LOG = "APP_LOG"
 EVENT_CODEX_TURN = "CODEX_TURN"
 
 
-class SourceUnavailableError(Exception):
-    """Compliance API reports this source is disabled for the principal."""
-
-
 def _should_retry(exc: BaseException) -> bool:
     if isinstance(exc, httpx.TransportError):
         return True
@@ -167,14 +163,7 @@ class ComplianceClient:
             params.append(("after", after))
         if before is not None:
             params.append(("before", before))
-        try:
-            resp = self._request("GET", self._logs_collection_path(), params=params)
-        except HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                raise SourceUnavailableError(
-                    f"Event type {event_type!r} is not available."
-                ) from exc
-            raise
+        resp = self._request("GET", self._logs_collection_path(), params=params)
         data = resp.json()
         if not isinstance(data, dict):
             return LogFileList()
