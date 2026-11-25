@@ -72,6 +72,11 @@ def _records_from_payload(payload: Any) -> list[dict[str, Any]]:
             raw = payload.get(key)
             if isinstance(raw, list):
                 return [item for item in raw if isinstance(item, dict)]
+        logger.error(
+            "Unknown usage-records envelope, keys %s: no records read. "
+            "The API schema may have changed.",
+            sorted(payload),
+        )
     return []
 
 

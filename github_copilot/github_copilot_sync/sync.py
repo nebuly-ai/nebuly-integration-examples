@@ -27,6 +27,10 @@ class InteractionSink(Protocol):
     def send_interaction(self, payload: dict[str, Any]) -> None: ...
 
 
+class SinkError(Exception):
+    """The sink could not accept a turn; the turn stays stored for the next run."""
+
+
 @dataclass
 class SourceCounts:
     records_ingested: int = 0
@@ -36,6 +40,7 @@ class SourceCounts:
     skipped: int = 0
     non_usage_events: int = 0
     unpaired_requests: int = 0
+    unpaired_responses: int = 0
     unreadable_files: int = 0
     unreadable_lines: int = 0
 
@@ -46,6 +51,7 @@ class SyncSummary:
     pipeline_skipped_non_chat: int = 0
     pipeline_skipped_background: int = 0
     pipeline_unparseable_bodies: int = 0
+    failed: bool = False
 
 
 def _configure_logging(*, verbose: bool) -> None:
@@ -69,11 +75,6 @@ def _github_client(config: Config) -> httpx.Client:
     )
 
 
-def _is_transient_github(exc: HTTPStatusError) -> bool:
-    status = exc.response.status_code
-    return status in {408, 429} or status >= 500
-
-
 def _emit_closed_turns(
     closed: list[ClosedTurn],
     *,
@@ -85,27 +86,36 @@ def _emit_closed_turns(
 ) -> None:
     for turn in closed:
         if store.is_turn_emitted(turn.turn_key):
+            store.release_closed_turn(turn.turn_key)
             continue
-        end_user = resolver.end_user(turn.user_id)
-        email = resolver.email_for_end_user_resolution(turn.user_id)
+        user = resolver.resolve(turn.user_id)
         result = turn_to_payload(
             turn,
-            end_user=end_user,
-            email=email,
+            end_user=user.end_user,
+            email=user.email,
             anonymize=config.anonymize,
             directory=config.entra_directory,
         )
         if isinstance(result, SkipReason):
+            store.release_closed_turn(turn.turn_key)
             counts.skipped += 1
             continue
         try:
             sink.send_interaction(result)
         except PermanentRejectionError:
-            store.record_emitted_turn(turn.turn_key, "rejected")
+            _settle_turn(store, turn, "rejected")
             counts.rejected += 1
             continue
-        store.record_emitted_turn(turn.turn_key, "sent")
+        except (HTTPStatusError, httpx.TransportError) as exc:
+            raise SinkError(f"Could not send turn {turn.turn_key}") from exc
+        _settle_turn(store, turn, "sent")
         counts.sent += 1
+
+
+def _settle_turn(store: Store, turn: ClosedTurn, status: str) -> None:
+    with store.transaction():
+        store.record_emitted_turn(turn.turn_key, status)
+        store.release_closed_turn(turn.turn_key)
 
 
 def _process_record(
@@ -119,20 +129,24 @@ def _process_record(
     config: Config,
     counts: SourceCounts,
 ) -> int:
-    if not store.insert_usage_record(record):
-        counts.records_deduped += 1
-        return record.timestamp_ms
-    counts.records_ingested += 1
-    for call in pairing.ingest(record):
-        closed = conversations.add_call(call)
-        _emit_closed_turns(
-            closed,
-            store=store,
-            sink=sink,
-            resolver=resolver,
-            config=config,
-            counts=counts,
-        )
+    with store.transaction():
+        if not store.insert_usage_record(record):
+            counts.records_deduped += 1
+            return record.timestamp_ms
+        counts.records_ingested += 1
+        closed = [
+            turn
+            for call in pairing.ingest(record)
+            for turn in conversations.add_call(call)
+        ]
+    _emit_closed_turns(
+        closed,
+        store=store,
+        sink=sink,
+        resolver=resolver,
+        config=config,
+        counts=counts,
+    )
     return record.timestamp_ms
 
 
@@ -149,6 +163,7 @@ def _flush_idle(
 ) -> None:
     pairing.expire_unpaired(watermark_ms)
     counts.unpaired_requests = pairing.counters.unpaired_requests
+    counts.unpaired_responses = pairing.counters.unpaired_responses
     closed_idle = conversations.close_idle_turns(watermark_ms)
     _emit_closed_turns(
         closed_idle,
@@ -228,6 +243,14 @@ def run_sync(config: Config) -> SyncSummary:
                 new_cursor: str | None = None
                 watermark = 0
                 try:
+                    _emit_closed_turns(
+                        conversations.take_closed_unsent(),
+                        store=store,
+                        sink=sink,
+                        resolver=resolver,
+                        config=config,
+                        counts=counts,
+                    )
                     for record, cursor_value in source.iter_records(cursor):
                         watermark = max(
                             watermark,
@@ -254,21 +277,27 @@ def run_sync(config: Config) -> SyncSummary:
                             config=config,
                             counts=counts,
                         )
-                    _finalize_open(
-                        conversations=conversations,
-                        store=store,
-                        sink=sink,
-                        resolver=resolver,
-                        config=config,
-                        counts=counts,
-                    )
+                    if config.to_date is not None:
+                        _finalize_open(
+                            conversations=conversations,
+                            store=store,
+                            sink=sink,
+                            resolver=resolver,
+                            config=config,
+                            counts=counts,
+                        )
                     if new_cursor is not None:
                         store.set_source_cursor(name, new_cursor)
+                except SinkError:
+                    logger.exception(
+                        "Nebuly sink failure on source %s; unsent turns are kept "
+                        "and retried on the next run",
+                        name,
+                    )
+                    stopped = True
+                    break
                 except HTTPStatusError as exc:
-                    if _is_transient_github(exc):
-                        logger.exception("Transient GitHub failure on source %s", name)
-                    else:
-                        logger.exception("GitHub failure on source %s", name)
+                    logger.exception("GitHub failure on source %s", name)
                     stopped = True
                     break
                 except httpx.TransportError:
@@ -286,7 +315,7 @@ def run_sync(config: Config) -> SyncSummary:
                 summary.sources[name] = counts
                 logger.info(
                     "Source %s: ingested=%d deduped=%d sent=%d rejected=%d skipped=%d "
-                    "non_usage=%d unpaired=%d",
+                    "non_usage=%d unpaired_requests=%d unpaired_responses=%d",
                     name,
                     counts.records_ingested,
                     counts.records_deduped,
@@ -295,6 +324,7 @@ def run_sync(config: Config) -> SyncSummary:
                     counts.skipped,
                     counts.non_usage_events,
                     counts.unpaired_requests,
+                    counts.unpaired_responses,
                 )
 
         summary.pipeline_skipped_non_chat = conversations.counters.skipped_non_chat
@@ -304,5 +334,6 @@ def run_sync(config: Config) -> SyncSummary:
         store.close()
 
     if stopped:
-        logger.error("Stopping after transient failure")
+        logger.error("Sync stopped after a failure; unsent work is retried next run")
+        summary.failed = True
     return summary

@@ -8,7 +8,7 @@ from botocore.client import BaseClient
 from github_copilot_sync.models import UsageRecord
 
 from . import SourceStats
-from .decode import decode_ndjson
+from .objects import StoredObject, cursor_for, records_from_object, select_objects
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -34,57 +34,25 @@ class S3UsageSource:
         self._client = client or boto3.client("s3", **session_kwargs)
         self.stats = SourceStats()
 
-    def _list_keys(self, start_after: str) -> Iterator[str]:
-        kwargs: dict[str, Any] = {"Bucket": self._bucket, "Prefix": self._prefix}
-        if start_after:
-            kwargs["StartAfter"] = start_after
-        pending: list[str] = []
-        has_more = True
-        while has_more or pending:
-            if not pending:
-                response = self._client.list_objects_v2(**kwargs)
-                pending = [
-                    str(item.get("Key") or "")
-                    for item in (response.get("Contents") or [])
-                    if item.get("Key")
-                ]
-                has_more = bool(response.get("IsTruncated"))
-                if has_more:
-                    token = response.get("NextContinuationToken")
-                    if not token:
-                        has_more = False
-                    else:
-                        kwargs = {
-                            "Bucket": self._bucket,
-                            "Prefix": self._prefix,
-                            "ContinuationToken": token,
-                        }
-                continue
-            yield pending.pop(0)
+    def _list_objects(self) -> Iterator[StoredObject]:
+        pages = self._client.get_paginator("list_objects_v2").paginate(
+            Bucket=self._bucket, Prefix=self._prefix
+        )
+        for page in pages:
+            for item in page.get("Contents") or []:
+                if item.get("Key"):
+                    yield StoredObject(
+                        key=str(item["Key"]),
+                        modified_ms=int(item["LastModified"].timestamp() * 1000),
+                    )
 
     def iter_records(self, cursor: str | None) -> Iterator[tuple[UsageRecord, str]]:
-        start_after = cursor or ""
-        for key in self._list_keys(start_after):
-            if cursor and key <= cursor:
-                continue
-            raw = self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
-            lines, problems = decode_ndjson(raw, source=key)
-            self.stats.absorb_decode(
-                files=problems.unreadable_files, lines=problems.unreadable_lines
-            )
-            for item in lines:
-                record = UsageRecord.from_raw(item)
-                if record is None:
-                    self.stats.non_usage_events += 1
-                    continue
-                if self._config.to_date is not None:
-                    if record.timestamp_ms >= int(
-                        self._config.to_date.timestamp() * 1000
-                    ):
-                        return
-                if self._config.from_date is not None:
-                    if record.timestamp_ms < int(
-                        self._config.from_date.timestamp() * 1000
-                    ):
-                        continue
-                yield record, key
+        for obj in select_objects(self._list_objects(), cursor, self._config):
+            raw = self._client.get_object(Bucket=self._bucket, Key=obj.key)[
+                "Body"
+            ].read()
+            position = cursor_for(obj, self._config)
+            for record in records_from_object(
+                raw, obj.key, self._config, self.stats
+            ):
+                yield record, position

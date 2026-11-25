@@ -76,13 +76,19 @@ def digest(*parts: object) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def turn_start(messages: tuple[Message, ...]) -> Message | None:
-    """Latest user message that is not a tool result (opens the current turn)."""
+def turn_start_index(messages: tuple[Message, ...]) -> int | None:
+    """Index of the latest user message that is not a tool result."""
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
         if message.role == "user" and not message.tool_result_ids:
-            return message
+            return index
     return None
+
+
+def turn_start(messages: tuple[Message, ...]) -> Message | None:
+    """Latest user message that is not a tool result (opens the current turn)."""
+    index = turn_start_index(messages)
+    return None if index is None else messages[index]
 
 
 def join_text(blocks: tuple[Block, ...]) -> str:

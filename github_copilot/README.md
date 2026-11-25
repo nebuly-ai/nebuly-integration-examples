@@ -45,7 +45,7 @@ GitHub's preview docs do not specify how to join a request to its response, the 
 - A request and its response share `github_request_id`. Records are processed in source order, so the request has to be seen before the response.
 - `body` is an OpenAI Chat Completions request or response. The model name is read from that JSON. Streamed responses may be stored as SSE text (`data:` lines) and are reconstructed into one completion, including `tool_calls`.
 - S3 and Blob objects are gzip or plain NDJSON, one JSON object per line. Lines that are not usage records (audit events in the same stream, missing `github_request_id` / `body` / `type` / `event_id` / `@timestamp`) are skipped and counted as `non_usage`.
-- Object keys sort in the order they should be applied. The cursor is the last key, via S3 `StartAfter` or a blob-name comparison. Date-partitioned keys work when lexicographic order matches time order.
+- Objects are applied in write-time order (`LastModified`, key as tie-break), not key order, and records inside an object are not assumed to be sorted. Object keys can have any layout.
 
 Record shape can change while the API is in preview. Unparseable bodies are counted and skipped.
 
@@ -81,12 +81,13 @@ cp .env.example .env
 | `CSV_EXPORT` | no | `false` | Write interactions to a CSV file instead of POSTing to Nebuly |
 | `CSV_EXPORT_PATH` | no | `./interactions.csv` | CSV output file when `CSV_EXPORT=true` |
 | `S3_BUCKET` | if `s3` | none | Bucket that receives the usage-record stream |
-| `S3_PREFIX` | no | empty | Key prefix passed to `list_objects_v2` |
+| `S3_PREFIX` | no | empty | Key prefix passed to `list_objects_v2`. Narrow it (for example to one export folder) to cut listing cost |
+| `OBJECT_LAG_SECONDS` | no | `3600` | S3 and Blob: re-read objects written within this many seconds before the newest object already ingested, so late uploads are not missed. Re-read records are dropped by `event_id` dedupe |
 | `S3_ENDPOINT_URL` | no | none | Custom S3 endpoint. Credentials use the standard boto3 chain (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` or the instance role) |
 | `AZURE_STORAGE_CONNECTION_STRING` | if `azure_blob` and no account URL | none | Azure connection string |
 | `AZURE_BLOB_ACCOUNT_URL` | if `azure_blob` and no connection string | none | Account URL. `AZURE_BLOB_SAS_TOKEN` is appended when set |
 | `AZURE_BLOB_CONTAINER` | if `azure_blob` | none | Container name |
-| `AZURE_BLOB_PREFIX` | no | empty | `name_starts_with` on `list_blobs` |
+| `AZURE_BLOB_PREFIX` | no | empty | `name_starts_with` on `list_blobs`. Narrow it to cut listing cost |
 | `AZURE_BLOB_SAS_TOKEN` | no | none | SAS token, with or without a leading `?` |
 | `ENTRA_FETCH` | no | `false` | Live Microsoft Graph directory fetch at startup (`poetry install --with entra`). Mutually exclusive with `ENTRA_EXTRACT_PATH` |
 | `ENTRA_EXTRACT_PATH` | no | none | Pre-exported Entra JSON from [microsoft_entra](../microsoft_entra/README.md) |
@@ -99,8 +100,8 @@ cp .env.example .env
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
 | `--from-date` | REST: now minus 47 hours. S3/Blob: no lower bound | ISO lower bound. On REST this is the first `phrase=created:>=` when the source has no stored cursor |
-| `--to-date` | none | Exclusive upper bound on `@timestamp`. The source stops at the first record at or after this instant |
-| `--sources` | `rest,s3,azure_blob` | Comma-separated: `rest`, `s3`, `azure_blob`. Pass `--sources rest` unless the S3 or Blob settings are filled in; an enabled source with an empty bucket or container fails the process |
+| `--to-date` | none | Exclusive upper bound on `@timestamp`. REST stops at the first record at or after this instant. S3 and Blob skip such records and keep reading, because records in an object are not sorted |
+| `--sources` | `rest` | Comma-separated: `rest`, `s3`, `azure_blob`. Add `s3` or `azure_blob` only once their settings are filled in; an enabled source with an empty bucket or container fails the process. Changing `--sources` keeps the store: each source has its own cursor, so adding `s3` for a backfill does not resend what REST already read |
 | `--cache-dir` | `./.cache` | SQLite state directory |
 | `--dry-run` | off | Build payloads without POSTing, without writing the CSV, and without touching the on-disk cache. State is an in-memory SQLite database for that process |
 | `--verbose` | off | Debug logging, including HTTP traces |
@@ -110,8 +111,10 @@ cp .env.example .env
 | Source | What it reads | Cursor |
 | ------ | ------------- | ------ |
 | `rest` | `GET /enterprises/{enterprise}/copilot/usage-records` | Newest `@timestamp` minus `REST_OVERLAP_SECONDS`, stored as epoch ms |
-| `s3` | `list_objects_v2` on `S3_BUCKET` / `S3_PREFIX`, then `get_object` | Last object key (`StartAfter`) |
-| `azure_blob` | `list_blobs` on `AZURE_BLOB_CONTAINER` / `AZURE_BLOB_PREFIX`, then download | Last blob name (names at or before the cursor are skipped) |
+| `s3` | `list_objects_v2` on `S3_BUCKET` / `S3_PREFIX`, then `get_object` | Write time of the newest object read minus `OBJECT_LAG_SECONDS`, epoch ms |
+| `azure_blob` | `list_blobs` on `AZURE_BLOB_CONTAINER` / `AZURE_BLOB_PREFIX`, then download | Write time of the newest blob read minus `OBJECT_LAG_SECONDS`, epoch ms |
+
+S3 and Blob runs list every object under the prefix (metadata only, one request per 1000 objects on S3) and download only objects written at or after the cursor, oldest write first. Listing cost grows with the number of objects under the prefix and is paid on every run, so point `S3_PREFIX` / `AZURE_BLOB_PREFIX` at the export folder and archive or expire old objects. With `--from-date`, objects written more than `OBJECT_LAG_SECONDS` before it are listed but not downloaded. Objects that contain only non-usage lines never advance the cursor and are downloaded again until a newer usage record is read.
 
 REST logs a warning when the cursor is older than 48 hours: that window is all the REST API retains, and older history has to come from S3 or Blob. 429 responses and secondary rate limits (`403` with `X-RateLimit-Remaining: 0`) are retried using `Retry-After` when GitHub sends it, otherwise after 60 seconds, up to 10 attempts.
 
@@ -119,13 +122,13 @@ S3 and Blob objects are decoded as gzip, then as plain bytes. A corrupt gzip or 
 
 ## How a turn is built
 
-1. **Dedupe.** `event_id` is the primary key. A repeated record is counted and not processed again.
-2. **Pair.** A `request` is stored until a `response` with the same `github_request_id` arrives. A response with no stored request is ignored. At the end of a source, requests older than `PAIR_WAIT_MINUTES` before the newest timestamp in that source are dropped and counted as `unpaired`.
+1. **Dedupe.** `event_id` is the primary key of a small SQLite table that stores only the id and `@timestamp`, not the record. A repeated record is counted and not processed again. Ids older than 7 days behind the newest stored `@timestamp` are pruned when the store opens. That is longer than the 48 hour REST window plus the overlap and the default `OBJECT_LAG_SECONDS`, so a source cannot re-deliver a pruned record in a normal run. Re-reading history older than that (for example an old `--from-date` over objects already ingested) can resend turns.
+2. **Pair.** A `request` is stored until a `response` with the same `github_request_id` arrives, and a `response` that is read first is stored until its request arrives. At the end of a source, requests and responses older than `PAIR_WAIT_MINUTES` before the newest timestamp in that source are dropped and counted as `unpaired_requests` and `unpaired_responses`.
 3. **Keep chat calls.** The `endpoint` must contain `/chat/completions` or `chat_completion`. Completions, NES, and embeddings are counted as non-chat and skipped. Bodies that do not parse as chat completions are counted and skipped.
 4. **Drop helper calls.** `user_defined.is_background_call` and the default heuristic both run. The default drops a call with no `tools`, exactly one user message, and a system or developer message that starts with a prefix in `HELPER_SYSTEM_PREFIXES` (title generation). Extend that tuple or the hook for other helper prompts.
-5. **Turn.** The turn key is a hash of `user_id` and the messages up through the latest user message that is not a tool result. Agent tool-loop calls resend that prefix, so they join the same turn.
+5. **Turn.** The turn key is a hash of the conversation id, `user_id`, and the messages up through the latest user message that is not a tool result. Agent tool-loop calls resend that prefix, so they join the same turn. Scoping the key to the conversation keeps a new conversation with the same opening prompt from colliding with an already sent turn.
 6. **Conversation.** The conversation id is a hash of `user_id` and the first user message. It is stored in SQLite. The same opening message more than `CONVERSATION_GAP_HOURS` after the conversation's last activity gets a new id.
-7. **Close.** A turn closes when a later turn starts in the same conversation, when its last response is older than `INTERACTION_IDLE_MINUTES` behind the newest record timestamp read so far (the data watermark, so a backfill does not use the wall clock), or at the end of a source that finishes without error. Open turns are held in memory for that source.
+7. **Close.** A turn closes when a later turn starts in the same conversation, when its last response is older than `INTERACTION_IDLE_MINUTES` behind the newest record timestamp read so far (the data watermark, so a backfill does not use the wall clock), or, only when `--to-date` is set (a bounded backfill), at the end of a source that finishes without error. Without `--to-date`, a turn can span several runs: its calls are stored in SQLite as they are paired and reloaded at startup. The last turn of a quiet stream stays open until a record newer than `INTERACTION_IDLE_MINUTES` after its last response is read.
 
 ## Field mapping (Nebuly payload)
 
@@ -179,6 +182,8 @@ SQLite at `<cache-dir>/<cache-key>/copilot_store.db`. The cache key is a short h
 | ----- | ---- |
 | `usage_record` | Raw records, primary key `event_id` |
 | `pairing_pending` | Requests waiting for a response |
+| `pairing_pending_response` | Responses read before their request |
+| `turn_call` | Calls of open turns, and of closed turns not yet sent, so turns survive across runs |
 | `conversation_session` | Conversation id reuse and the gap split |
 | `source_cursor` | Per-source watermark (REST timestamp or object key) |
 | `user_login` | Cached `user_id` → login |
@@ -186,8 +191,9 @@ SQLite at `<cache-dir>/<cache-key>/copilot_store.db`. The cache key is a short h
 
 - **Reset:** delete the cache directory to reprocess history. Already-sent turns are not posted again while the row exists.
 - **Permanent Nebuly 4xx** (except 408/429): recorded as `rejected`, and the run continues.
-- **Transient GitHub or transport errors:** the source cursor is not advanced and the run stops. Records already inserted stay inserted. Open turns that had not closed yet are only in memory, so they are not rebuilt on the next run; give a backfill its own `--cache-dir` if you need to replay it.
-- A finished source closes every turn still open, then advances the cursor. A second run sends nothing for turn keys already marked `sent`.
+- **GitHub, Nebuly or transport errors:** the source cursor is not advanced, the run stops and the process exits with code 1. Each record is stored, paired, and added to its turn in one SQLite transaction, so the next run reloads the open turns and carries on; the re-read records are deduped.
+- **Nebuly errors after retries** (5xx, 408/429, transport) are logged as a sink failure, separately from GitHub errors. The turn is not marked `sent` and stays in `turn_call`, and the next run sends it first.
+- With `--to-date`, a finished source closes every turn still open, then advances the cursor. A second run sends nothing for turn keys already marked `sent`.
 
 ## Known limitations
 
@@ -201,7 +207,7 @@ SQLite at `<cache-dir>/<cache-key>/copilot_store.db`. The cache key is a short h
 - There is no conversation id on the record. Ids are rebuilt from the user and the first user message, plus `CONVERSATION_GAP_HOURS`. Two parallel conversations from the same user that open with the same text share an id until the gap splits them.
 - Helper calls that miss `is_background_call` and the prefix list are ingested as normal turns.
 - Input and output sent to Nebuly are capped at 8000 characters. GitHub's own 1 MB body cap is separate and sets the `truncated` tag.
-- Retrieval traces are taken from tool calls and `role: tool` results on the last call of the turn.
+- Retrieval traces and the `tools used` tag come from tool calls and `role: tool` results after the turn-start user message on the last call of the turn, so tools from earlier turns of the conversation are not repeated.
 
 ### Coverage
 
@@ -211,7 +217,7 @@ SQLite at `<cache-dir>/<cache-key>/copilot_store.db`. The cache key is a short h
 - No thumbs or other feedback is present. `user_feedback` is always empty.
 - Event Hubs is not a source. Streaming is S3 or Azure Blob.
 - Team, market, and tenure need the Entra join, and the email has to match `mail` or `userPrincipalName`.
-- Login → email needs an enterprise-owner token and SAML or SCIM external identities. Without them, `end_user` falls back to the login, then to `github-user-<id>`.
+- Login → email needs an enterprise-owner token and SAML or SCIM external identities. Without them, `end_user` falls back to the login, then to `github-user-<id>`. If the email or login lookup is rejected (for example a token that is not an enterprise owner), the sync logs one warning and uses the fallback for the rest of the run.
 - The record format is taken from GitHub's preview docs and can change.
 
 ## Running
@@ -223,7 +229,7 @@ poetry run python -m github_copilot_sync --sources s3 --from-date 2026-11-01
 poetry run python -m github_copilot_sync --sources azure_blob --from-date 2026-11-01
 ```
 
-Each finished source logs `ingested`, `deduped`, `sent`, `rejected`, `skipped`, `non_usage`, and `unpaired`.
+Each finished source logs `ingested`, `deduped`, `sent`, `rejected`, `skipped`, `non_usage`, `unpaired_requests`, and `unpaired_responses`.
 
 ## Tests
 

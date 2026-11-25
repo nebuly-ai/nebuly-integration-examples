@@ -37,14 +37,15 @@ def _parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-DEFAULT_SOURCES = ("rest", "s3", "azure_blob")
+ALL_SOURCES = ("rest", "s3", "azure_blob")
+DEFAULT_SOURCES = ("rest",)
 
 
 def _parse_sources(value: str) -> tuple[str, ...]:
     parts = tuple(part.strip() for part in value.split(",") if part.strip())
     if not parts:
         raise RuntimeError("At least one source is required")
-    unknown = [part for part in parts if part not in DEFAULT_SOURCES]
+    unknown = [part for part in parts if part not in ALL_SOURCES]
     if unknown:
         raise RuntimeError(
             "Unknown sources: " + ", ".join(unknown) + ". Expected rest, s3, azure_blob"
@@ -83,6 +84,7 @@ class Config:
     entra_directory: EntraDirectory | None = None
     csv_export: bool = False
     csv_export_path: Path = Path("./interactions.csv")
+    object_lag_seconds: int = 3600
 
     @property
     def cache_key(self) -> str:
@@ -91,10 +93,7 @@ class Config:
             if self.csv_export
             else f"nebuly|{self.nebuly_endpoint}|{self.nebuly_api_key}"
         )
-        raw = (
-            f"{self.github_api_url}|{self.github_enterprise}|"
-            f"{','.join(self.sources)}|{destination}"
-        )
+        raw = f"{self.github_api_url}|{self.github_enterprise}|{destination}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     @property
@@ -128,7 +127,7 @@ class Config:
         parser.add_argument(
             "--sources",
             default=",".join(DEFAULT_SOURCES),
-            help="Comma-separated sources: rest, s3, azure_blob",
+            help="Comma-separated sources: rest, s3, azure_blob (default: rest)",
         )
         args = parser.parse_args(argv)
 
@@ -204,4 +203,5 @@ class Config:
             csv_export_path=Path(
                 os.environ.get("CSV_EXPORT_PATH", "./interactions.csv")
             ),
+            object_lag_seconds=int(os.environ.get("OBJECT_LAG_SECONDS", "3600")),
         )

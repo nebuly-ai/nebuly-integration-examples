@@ -7,7 +7,7 @@ from azure.storage.blob import BlobServiceClient, ContainerClient
 from github_copilot_sync.models import UsageRecord
 
 from . import SourceStats
-from .decode import decode_ndjson
+from .objects import StoredObject, cursor_for, records_from_object, select_objects
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -49,31 +49,18 @@ class AzureBlobUsageSource:
         self._container = container or _container_client(config)
         self.stats = SourceStats()
 
-    def iter_records(self, cursor: str | None) -> Iterator[tuple[UsageRecord, str]]:
-        last_seen = cursor or ""
+    def _list_objects(self) -> Iterator[StoredObject]:
         for blob in self._container.list_blobs(name_starts_with=self._prefix):
-            name = blob.name
-            if last_seen and name <= last_seen:
-                continue
-            downloader = self._container.download_blob(name)
-            raw = downloader.readall()
-            lines, problems = decode_ndjson(raw, source=name)
-            self.stats.absorb_decode(
-                files=problems.unreadable_files, lines=problems.unreadable_lines
+            yield StoredObject(
+                key=blob.name,
+                modified_ms=int(blob.last_modified.timestamp() * 1000),
             )
-            for item in lines:
-                record = UsageRecord.from_raw(item)
-                if record is None:
-                    self.stats.non_usage_events += 1
-                    continue
-                if self._config.to_date is not None:
-                    if record.timestamp_ms >= int(
-                        self._config.to_date.timestamp() * 1000
-                    ):
-                        return
-                if self._config.from_date is not None:
-                    if record.timestamp_ms < int(
-                        self._config.from_date.timestamp() * 1000
-                    ):
-                        continue
-                yield record, name
+
+    def iter_records(self, cursor: str | None) -> Iterator[tuple[UsageRecord, str]]:
+        for obj in select_objects(self._list_objects(), cursor, self._config):
+            raw = self._container.download_blob(obj.key).readall()
+            position = cursor_for(obj, self._config)
+            for record in records_from_object(
+                raw, obj.key, self._config, self.stats
+            ):
+                yield record, position

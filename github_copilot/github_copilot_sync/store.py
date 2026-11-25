@@ -1,28 +1,21 @@
 from __future__ import annotations
 
-import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from .models import UsageRecord
+from .models import Call, UsageRecord
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS usage_record (
   event_id            TEXT PRIMARY KEY,
-  record_type         TEXT NOT NULL,
-  user_id             INTEGER NOT NULL,
-  enterprise_id       INTEGER NOT NULL,
-  github_request_id   TEXT NOT NULL,
-  endpoint            TEXT NOT NULL,
-  body                TEXT NOT NULL,
-  timestamp_ms        INTEGER NOT NULL,
-  truncated           INTEGER NOT NULL,
-  record_json         TEXT NOT NULL
+  timestamp_ms        INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_record_time
@@ -37,6 +30,36 @@ CREATE TABLE IF NOT EXISTS pairing_pending (
   timestamp_ms        INTEGER NOT NULL,
   truncated           INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS pairing_pending_response (
+  github_request_id   TEXT PRIMARY KEY,
+  event_id            TEXT NOT NULL,
+  user_id             INTEGER NOT NULL,
+  endpoint            TEXT NOT NULL,
+  body                TEXT NOT NULL,
+  timestamp_ms        INTEGER NOT NULL,
+  truncated           INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS turn_call (
+  github_request_id       TEXT PRIMARY KEY,
+  turn_key                TEXT NOT NULL,
+  conversation_id         TEXT NOT NULL,
+  closed                  INTEGER NOT NULL,
+  user_id                 INTEGER NOT NULL,
+  endpoint                TEXT NOT NULL,
+  request_body            TEXT NOT NULL,
+  response_body           TEXT NOT NULL,
+  request_timestamp_ms    INTEGER NOT NULL,
+  response_timestamp_ms   INTEGER NOT NULL,
+  request_event_id        TEXT NOT NULL,
+  response_event_id       TEXT NOT NULL,
+  request_truncated       INTEGER NOT NULL,
+  response_truncated      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_turn_call_turn
+  ON turn_call (turn_key);
 
 CREATE TABLE IF NOT EXISTS conversation_session (
   session_key         TEXT PRIMARY KEY,
@@ -63,15 +86,36 @@ CREATE TABLE IF NOT EXISTS emitted_turn (
 );
 """
 
+USAGE_RECORD_RETENTION_MS = 7 * 24 * 3_600_000
+
 
 @dataclass(frozen=True)
-class PendingRequest:
+class PendingRecord:
     event_id: str
     user_id: int
     endpoint: str
     body: str
     timestamp_ms: int
     truncated: bool
+
+    @classmethod
+    def from_usage_record(cls, record: UsageRecord) -> PendingRecord:
+        return cls(
+            event_id=record.event_id,
+            user_id=record.user_id,
+            endpoint=record.endpoint,
+            body=record.body,
+            timestamp_ms=record.timestamp_ms,
+            truncated=record.truncated,
+        )
+
+
+@dataclass(frozen=True)
+class StoredTurnCall:
+    turn_key: str
+    conversation_id: str
+    closed: bool
+    call: Call
 
 
 @dataclass(frozen=True)
@@ -90,46 +134,80 @@ class Store:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(path)
         self._conn.executescript(_SCHEMA)
+        self._in_transaction = False
+        self.prune_usage_records()
 
     def close(self) -> None:
         self._conn.close()
 
+    def _commit(self) -> None:
+        if not self._in_transaction:
+            self._conn.commit()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Defer commits until the block ends so its writes land atomically."""
+        self._in_transaction = True
+        try:
+            yield
+        except BaseException:
+            self._in_transaction = False
+            self._conn.rollback()
+            raise
+        self._in_transaction = False
+        self._conn.commit()
+
     def insert_usage_record(self, record: UsageRecord) -> bool:
         """Return False if event_id already exists (dedupe)."""
         cursor = self._conn.execute(
-            "SELECT 1 FROM usage_record WHERE event_id = ?",
-            (record.event_id,),
+            "INSERT OR IGNORE INTO usage_record (event_id, timestamp_ms) VALUES (?, ?)",
+            (record.event_id, record.timestamp_ms),
         )
-        if cursor.fetchone():
-            return False
-        self._conn.execute(
+        self._commit()
+        return cursor.rowcount == 1
+
+    def prune_usage_records(
+        self, retention_ms: int = USAGE_RECORD_RETENTION_MS
+    ) -> int:
+        """Forget event_ids older than `retention_ms` behind the newest one stored.
+
+        The horizon follows the data, not the wall clock, so a quiet stream or a
+        backfill of old records keeps its dedupe window. It has to outlast how
+        far back a source can re-deliver: the 48 h REST window, the REST overlap
+        and `OBJECT_LAG_SECONDS`.
+        """
+        cursor = self._conn.execute(
             """
-            INSERT INTO usage_record (
-              event_id, record_type, user_id, enterprise_id,
-              github_request_id, endpoint, body, timestamp_ms,
-              truncated, record_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            DELETE FROM usage_record
+            WHERE timestamp_ms < (SELECT MAX(timestamp_ms) FROM usage_record) - ?
             """,
-            (
-                record.event_id,
-                record.type,
-                record.user_id,
-                record.enterprise_id,
-                record.github_request_id,
-                record.endpoint,
-                record.body,
-                record.timestamp_ms,
-                int(record.truncated),
-                json.dumps(record.model_dump(by_alias=True)),
-            ),
+            (retention_ms,),
         )
-        self._conn.commit()
-        return True
+        self._commit()
+        return cursor.rowcount
 
     def save_pending_request(self, record: UsageRecord) -> None:
+        self._save_pending("pairing_pending", record)
+
+    def save_pending_response(self, record: UsageRecord) -> None:
+        self._save_pending("pairing_pending_response", record)
+
+    def take_pending_request(self, github_request_id: str) -> PendingRecord | None:
+        return self._take_pending("pairing_pending", github_request_id)
+
+    def take_pending_response(self, github_request_id: str) -> PendingRecord | None:
+        return self._take_pending("pairing_pending_response", github_request_id)
+
+    def expire_pending_requests_before(self, cutoff_ms: int) -> int:
+        return self._expire_pending("pairing_pending", cutoff_ms)
+
+    def expire_pending_responses_before(self, cutoff_ms: int) -> int:
+        return self._expire_pending("pairing_pending_response", cutoff_ms)
+
+    def _save_pending(self, table: str, record: UsageRecord) -> None:
         self._conn.execute(
-            """
-            INSERT INTO pairing_pending (
+            f"""
+            INSERT INTO {table} (
               github_request_id, event_id, user_id, endpoint,
               body, timestamp_ms, truncated
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -151,13 +229,13 @@ class Store:
                 int(record.truncated),
             ),
         )
-        self._conn.commit()
+        self._commit()
 
-    def take_pending_request(self, github_request_id: str) -> PendingRequest | None:
+    def _take_pending(self, table: str, github_request_id: str) -> PendingRecord | None:
         cursor = self._conn.execute(
-            """
+            f"""
             SELECT event_id, user_id, endpoint, body, timestamp_ms, truncated
-            FROM pairing_pending
+            FROM {table}
             WHERE github_request_id = ?
             """,
             (github_request_id,),
@@ -166,11 +244,11 @@ class Store:
         if row is None:
             return None
         self._conn.execute(
-            "DELETE FROM pairing_pending WHERE github_request_id = ?",
+            f"DELETE FROM {table} WHERE github_request_id = ?",
             (github_request_id,),
         )
-        self._conn.commit()
-        return PendingRequest(
+        self._commit()
+        return PendingRecord(
             event_id=row[0],
             user_id=row[1],
             endpoint=row[2],
@@ -179,24 +257,91 @@ class Store:
             truncated=bool(row[5]),
         )
 
-    def expire_pending_requests_before(self, cutoff_ms: int) -> int:
+    def _expire_pending(self, table: str, cutoff_ms: int) -> int:
         cursor = self._conn.execute(
-            """
-            SELECT github_request_id FROM pairing_pending
-            WHERE timestamp_ms <= ?
-            """,
+            f"DELETE FROM {table} WHERE timestamp_ms <= ?",
             (cutoff_ms,),
         )
-        ids = [row[0] for row in cursor.fetchall()]
-        if not ids:
-            return 0
-        placeholders = ",".join("?" for _ in ids)
+        self._commit()
+        return cursor.rowcount
+
+    def save_turn_call(self, turn_key: str, conversation_id: str, call: Call) -> None:
         self._conn.execute(
-            f"DELETE FROM pairing_pending WHERE github_request_id IN ({placeholders})",
-            ids,
+            """
+            INSERT INTO turn_call (
+              github_request_id, turn_key, conversation_id, closed, user_id,
+              endpoint, request_body, response_body, request_timestamp_ms,
+              response_timestamp_ms, request_event_id, response_event_id,
+              request_truncated, response_truncated
+            ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(github_request_id) DO UPDATE SET
+              turn_key = excluded.turn_key,
+              conversation_id = excluded.conversation_id
+            """,
+            (
+                call.github_request_id,
+                turn_key,
+                conversation_id,
+                call.user_id,
+                call.endpoint,
+                call.request_body,
+                call.response_body,
+                call.request_timestamp_ms,
+                call.response_timestamp_ms,
+                call.request_event_id,
+                call.response_event_id,
+                int(call.request_truncated),
+                int(call.response_truncated),
+            ),
         )
-        self._conn.commit()
-        return len(ids)
+        self._commit()
+
+    def mark_turn_closed(self, turn_key: str) -> None:
+        self._conn.execute(
+            "UPDATE turn_call SET closed = 1 WHERE turn_key = ? AND closed = 0",
+            (turn_key,),
+        )
+        self._commit()
+
+    def release_closed_turn(self, turn_key: str) -> None:
+        self._conn.execute(
+            "DELETE FROM turn_call WHERE turn_key = ? AND closed = 1",
+            (turn_key,),
+        )
+        self._commit()
+
+    def load_turn_calls(self) -> list[StoredTurnCall]:
+        cursor = self._conn.execute(
+            """
+            SELECT turn_key, conversation_id, closed, github_request_id, user_id,
+                   endpoint, request_body, response_body, request_timestamp_ms,
+                   response_timestamp_ms, request_event_id, response_event_id,
+                   request_truncated, response_truncated
+            FROM turn_call
+            ORDER BY rowid
+            """
+        )
+        return [
+            StoredTurnCall(
+                turn_key=row[0],
+                conversation_id=row[1],
+                closed=bool(row[2]),
+                call=Call(
+                    github_request_id=row[3],
+                    user_id=row[4],
+                    endpoint=row[5],
+                    request_body=row[6],
+                    response_body=row[7],
+                    request_timestamp_ms=row[8],
+                    response_timestamp_ms=row[9],
+                    request_event_id=row[10],
+                    response_event_id=row[11],
+                    request_truncated=bool(row[12]),
+                    response_truncated=bool(row[13]),
+                ),
+            )
+            for row in cursor.fetchall()
+        ]
 
     def get_conversation_session(self, session_key: str) -> ConversationSession | None:
         cursor = self._conn.execute(
@@ -230,7 +375,7 @@ class Store:
             """,
             (session_key, conversation_id, user_id, last_activity_ms),
         )
-        self._conn.commit()
+        self._commit()
 
     def set_source_cursor(self, source_name: str, cursor_value: str) -> None:
         now = datetime.now(UTC).isoformat()
@@ -244,7 +389,7 @@ class Store:
             """,
             (source_name, cursor_value, now),
         )
-        self._conn.commit()
+        self._commit()
 
     def get_source_cursor(self, source_name: str) -> str | None:
         cursor = self._conn.execute(
@@ -270,7 +415,7 @@ class Store:
             """,
             (user_id, login),
         )
-        self._conn.commit()
+        self._commit()
 
     def is_turn_emitted(self, turn_key: str) -> bool:
         cursor = self._conn.execute(
@@ -291,4 +436,4 @@ class Store:
             """,
             (turn_key, status, now),
         )
-        self._conn.commit()
+        self._commit()

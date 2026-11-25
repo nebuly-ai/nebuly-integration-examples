@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from github_copilot_sync.models import UsageRecord
 from github_copilot_sync.store import Store
@@ -58,3 +59,74 @@ def test_pending_request_round_trip(tmp_path) -> None:
     assert pending.event_id == "evt-2"
     assert store.take_pending_request(record.github_request_id) is None
     store.close()
+
+
+def test_usage_record_keeps_only_dedupe_columns(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    store.close()
+
+    with sqlite3.connect(tmp_path / "db.sqlite") as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(usage_record)")]
+
+    assert columns == ["event_id", "timestamp_ms"]
+
+
+def test_prune_drops_dedupe_rows_older_than_retention_behind_newest(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    store.insert_usage_record(_usage_record("old", 1_000))
+    store.insert_usage_record(_usage_record("edge", 5_000))
+    store.insert_usage_record(_usage_record("new", 10_000))
+
+    assert store.prune_usage_records(retention_ms=5_000) == 1
+
+    assert store.insert_usage_record(_usage_record("old", 1_000)) is True
+    assert store.insert_usage_record(_usage_record("edge", 5_000)) is False
+    assert store.insert_usage_record(_usage_record("new", 10_000)) is False
+    store.close()
+
+
+def test_prune_on_empty_table_is_a_noop(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    assert store.prune_usage_records(retention_ms=1) == 0
+    store.close()
+
+
+def test_store_prunes_on_open(tmp_path) -> None:
+    path = tmp_path / "db.sqlite"
+    store = Store(path)
+    store.insert_usage_record(_usage_record("ancient", 1_000))
+    store.insert_usage_record(_usage_record("recent", 10 * 24 * 3_600_000))
+    store.close()
+
+    reopened = Store(path)
+
+    assert reopened.insert_usage_record(_usage_record("ancient", 1_000)) is True
+    assert reopened.insert_usage_record(_usage_record("recent", 10 * 24 * 3_600_000)) is False
+    reopened.close()
+
+
+def test_no_commit_per_row_inside_transaction(tmp_path) -> None:
+    path = tmp_path / "db.sqlite"
+    store = Store(path)
+    try:
+        with store.transaction():
+            store.insert_usage_record(_usage_record("evt-tx", 1000))
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+
+    assert store.insert_usage_record(_usage_record("evt-tx", 1000)) is True
+    store.close()
+
+
+def test_source_cursors_are_independent_per_source(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    store.set_source_cursor("rest", "111")
+    store.set_source_cursor("s3", "222")
+    store.close()
+
+    reopened = Store(tmp_path / "db.sqlite")
+    assert reopened.get_source_cursor("rest") == "111"
+    assert reopened.get_source_cursor("s3") == "222"
+    assert reopened.get_source_cursor("azure_blob") is None
+    reopened.close()

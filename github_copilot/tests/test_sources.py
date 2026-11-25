@@ -14,7 +14,9 @@ import pytest
 from botocore.stub import Stubber
 from github_copilot_sync.config import Config
 from github_copilot_sync.sources.decode import decode_ndjson
+from github_copilot_sync.sources.azure_blob import AzureBlobUsageSource
 from github_copilot_sync.sources.rest import RestUsageSource, parse_link_header
+from github_copilot_sync.sources.s3 import S3UsageSource
 
 
 def _config(**kwargs: object) -> Config:
@@ -197,83 +199,230 @@ def test_decode_gzip_plain_and_corrupt() -> None:
     assert problems.unreadable_files == 1
 
 
-def test_s3_start_after_pagination_and_records() -> None:
-    from github_copilot_sync.sources.s3 import S3UsageSource
+def _ms(hour: int) -> int:
+    return int(datetime(2026, 1, 1, hour, tzinfo=UTC).timestamp() * 1000)
 
-    client = boto3.client(
+
+def _s3_client() -> Any:
+    return boto3.client(
         "s3",
         region_name="us-east-1",
         aws_access_key_id="test",
         aws_secret_access_key="test",
     )
+
+
+def _ndjson(*lines: dict[str, Any]) -> bytes:
+    return "\n".join(json.dumps(line) for line in lines).encode()
+
+
+def _stub_s3_object(stubber: Stubber, key: str, payload: bytes) -> None:
+    stubber.add_response(
+        "get_object",
+        {"Body": MagicMock(read=MagicMock(return_value=payload))},
+        {"Bucket": "copilot-logs", "Key": key},
+    )
+
+
+def _stub_s3_listing(stubber: Stubber, objects: list[tuple[str, int]]) -> None:
+    stubber.add_response(
+        "list_objects_v2",
+        {
+            "Contents": [
+                {
+                    "Key": key,
+                    "LastModified": datetime.fromtimestamp(ms / 1000, tz=UTC),
+                }
+                for key, ms in objects
+            ],
+            "IsTruncated": False,
+        },
+        {"Bucket": "copilot-logs", "Prefix": "exports/"},
+    )
+
+
+def test_s3_paginates_and_reports_non_usage_events() -> None:
+    client = _s3_client()
     key1 = "exports/part-001.ndjson"
     key2 = "exports/part-002.ndjson"
-    payload = (
-        json.dumps(_record_dict("s3-1"))
-        + "\n"
-        + json.dumps({"action": "ignored"})
-        + "\n"
-    ).encode()
+    payload = _ndjson(_record_dict("s3-1"), {"action": "ignored"})
     with Stubber(client) as stubber:
         stubber.add_response(
             "list_objects_v2",
             {
-                "Contents": [{"Key": key1}],
+                "Contents": [
+                    {"Key": key1, "LastModified": datetime(2026, 1, 1, 1, tzinfo=UTC)}
+                ],
                 "IsTruncated": True,
                 "NextContinuationToken": "token-1",
             },
-            {
-                "Bucket": "copilot-logs",
-                "Prefix": "exports/",
-                "StartAfter": "exports/part-000.ndjson",
-            },
-        )
-        stubber.add_response(
-            "get_object",
-            {"Body": MagicMock(read=MagicMock(return_value=payload))},
-            {"Bucket": "copilot-logs", "Key": key1},
+            {"Bucket": "copilot-logs", "Prefix": "exports/"},
         )
         stubber.add_response(
             "list_objects_v2",
-            {"Contents": [{"Key": key2}], "IsTruncated": False},
+            {
+                "Contents": [
+                    {"Key": key2, "LastModified": datetime(2026, 1, 1, 2, tzinfo=UTC)}
+                ],
+                "IsTruncated": False,
+            },
             {
                 "Bucket": "copilot-logs",
                 "Prefix": "exports/",
                 "ContinuationToken": "token-1",
             },
         )
-        stubber.add_response(
-            "get_object",
-            {"Body": MagicMock(read=MagicMock(return_value=payload))},
-            {"Bucket": "copilot-logs", "Key": key2},
-        )
+        _stub_s3_object(stubber, key1, payload)
+        _stub_s3_object(stubber, key2, payload)
 
         source = S3UsageSource(_config(sources=("s3",)), client=client)
-        rows = list(source.iter_records(cursor="exports/part-000.ndjson"))
+        rows = list(source.iter_records(cursor=None))
 
-    assert [record.event_id for record, cursor in rows] == ["s3-1", "s3-1"]
-    assert rows[-1][1] == key2
+    assert [record.event_id for record, _ in rows] == ["s3-1", "s3-1"]
     assert source.stats.non_usage_events == 2
 
 
-def test_azure_blob_skips_cursor_and_yields() -> None:
-    from github_copilot_sync.sources.azure_blob import AzureBlobUsageSource
+def test_s3_reads_late_object_whose_key_sorts_before_the_cursor() -> None:
+    client = _s3_client()
+    late_key = "exports/a-late.ndjson"
+    old_key = "exports/z-old.ndjson"
+    with Stubber(client) as stubber:
+        _stub_s3_listing(stubber, [(old_key, _ms(1)), (late_key, _ms(5))])
+        _stub_s3_object(stubber, late_key, _ndjson(_record_dict("late")))
 
+        source = S3UsageSource(
+            _config(sources=("s3",), object_lag_seconds=60), client=client
+        )
+        rows = list(source.iter_records(cursor=str(_ms(4))))
+
+    assert [record.event_id for record, _ in rows] == ["late"]
+
+
+def test_s3_orders_objects_by_modified_time_and_cursor_is_monotonic() -> None:
+    client = _s3_client()
+    with Stubber(client) as stubber:
+        _stub_s3_listing(
+            stubber, [("exports/a.ndjson", _ms(3)), ("exports/b.ndjson", _ms(2))]
+        )
+        _stub_s3_object(stubber, "exports/b.ndjson", _ndjson(_record_dict("b")))
+        _stub_s3_object(stubber, "exports/a.ndjson", _ndjson(_record_dict("a")))
+
+        source = S3UsageSource(
+            _config(sources=("s3",), object_lag_seconds=60), client=client
+        )
+        rows = list(source.iter_records(cursor=None))
+
+    assert [record.event_id for record, _ in rows] == ["b", "a"]
+    cursors = [int(cursor) for _, cursor in rows]
+    assert cursors == [_ms(2) - 60_000, _ms(3) - 60_000]
+
+
+def test_s3_to_date_skips_newer_records_without_stopping() -> None:
+    client = _s3_client()
+    to_date = datetime.fromtimestamp(1_700_000_100, tz=UTC)
+    newer = _record_dict("newer", timestamp_ms=1_700_000_200_000)
+    older = _record_dict("older", timestamp_ms=1_700_000_000_000)
+    with Stubber(client) as stubber:
+        _stub_s3_listing(
+            stubber, [("exports/a.ndjson", _ms(1)), ("exports/b.ndjson", _ms(2))]
+        )
+        _stub_s3_object(stubber, "exports/a.ndjson", _ndjson(newer, older))
+        _stub_s3_object(stubber, "exports/b.ndjson", _ndjson(_record_dict("b-old")))
+
+        source = S3UsageSource(
+            _config(sources=("s3",), to_date=to_date), client=client
+        )
+        rows = list(source.iter_records(cursor=None))
+
+    assert [record.event_id for record, _ in rows] == ["older", "b-old"]
+
+
+def test_s3_skips_objects_modified_before_from_date() -> None:
+    client = _s3_client()
+    from_date = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    with Stubber(client) as stubber:
+        _stub_s3_listing(
+            stubber, [("exports/old.ndjson", _ms(1)), ("exports/new.ndjson", _ms(13))]
+        )
+        _stub_s3_object(
+            stubber,
+            "exports/new.ndjson",
+            _ndjson(_record_dict("new", timestamp_ms=_ms(13))),
+        )
+
+        source = S3UsageSource(
+            _config(sources=("s3",), from_date=from_date, object_lag_seconds=60),
+            client=client,
+        )
+        rows = list(source.iter_records(cursor=None))
+
+    assert [record.event_id for record, _ in rows] == ["new"]
+
+
+def _blob(name: str, modified_ms: int) -> MagicMock:
+    blob = MagicMock()
+    blob.name = name
+    blob.last_modified = datetime.fromtimestamp(modified_ms / 1000, tz=UTC)
+    return blob
+
+
+def test_azure_blob_reads_late_blob_and_skips_processed_ones() -> None:
     container = MagicMock()
-    blob_old = MagicMock()
-    blob_old.name = "copilot/day1.ndjson"
-    blob_new = MagicMock()
-    blob_new.name = "copilot/day2.ndjson"
-    container.list_blobs.return_value = [blob_old, blob_new]
-    ndjson = json.dumps(_record_dict("az-1")).encode()
-    container.download_blob.return_value.readall.return_value = ndjson
+    container.list_blobs.return_value = [
+        _blob("copilot/z-old.ndjson", _ms(1)),
+        _blob("copilot/a-late.ndjson", _ms(5)),
+    ]
+    container.download_blob.return_value.readall.return_value = _ndjson(
+        _record_dict("az-1")
+    )
 
     source = AzureBlobUsageSource(
-        _config(sources=("azure_blob",)),
+        _config(sources=("azure_blob",), object_lag_seconds=60),
         container=container,
     )
-    rows = list(source.iter_records("copilot/day1.ndjson"))
+    rows = list(source.iter_records(str(_ms(4))))
 
-    container.download_blob.assert_called_once_with("copilot/day2.ndjson")
+    container.list_blobs.assert_called_once_with(name_starts_with="copilot/")
+    container.download_blob.assert_called_once_with("copilot/a-late.ndjson")
     assert rows[0][0].event_id == "az-1"
-    assert rows[0][1] == "copilot/day2.ndjson"
+    assert int(rows[0][1]) == _ms(5) - 60_000
+
+
+def test_azure_blob_to_date_skips_newer_records_without_stopping() -> None:
+    container = MagicMock()
+    container.list_blobs.return_value = [_blob("copilot/a.ndjson", _ms(1))]
+    container.download_blob.return_value.readall.return_value = _ndjson(
+        _record_dict("newer", timestamp_ms=1_700_000_200_000),
+        _record_dict("older", timestamp_ms=1_700_000_000_000),
+    )
+
+    source = AzureBlobUsageSource(
+        _config(
+            sources=("azure_blob",),
+            to_date=datetime.fromtimestamp(1_700_000_100, tz=UTC),
+        ),
+        container=container,
+    )
+    rows = list(source.iter_records(None))
+
+    assert [record.event_id for record, _ in rows] == ["older"]
+
+
+def test_rest_logs_error_on_unknown_envelope(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"items": [_record_dict("e1")]})
+
+    client = httpx.Client(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    )
+    source = RestUsageSource(_config(sources=("rest",)), client=client)
+    with caplog.at_level("ERROR"):
+        rows = list(source.iter_records(None))
+    source.close()
+
+    assert rows == []
+    assert "items" in caplog.text
+    assert "unknown" in caplog.text.lower()

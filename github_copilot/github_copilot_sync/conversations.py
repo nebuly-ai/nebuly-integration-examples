@@ -48,7 +48,36 @@ class ConversationBuilder:
         self._idle_ms = interaction_idle_minutes * 60_000
         self._open_by_turn: dict[str, _OpenTurn] = {}
         self._open_by_conversation: dict[str, set[str]] = {}
+        self._closed_unsent: list[ClosedTurn] = []
         self.counters = PipelineCounters()
+        self._load_persisted_turns()
+
+    def _load_persisted_turns(self) -> None:
+        """Rebuild turns from calls stored by earlier runs or an interrupted run."""
+        open_turns: dict[str, _OpenTurn] = {}
+        closed_turns: dict[str, _OpenTurn] = {}
+        for stored in self._store.load_turn_calls():
+            turns = closed_turns if stored.closed else open_turns
+            turn = turns.setdefault(
+                stored.turn_key,
+                _OpenTurn(
+                    turn_key=stored.turn_key,
+                    conversation_id=stored.conversation_id,
+                    user_id=stored.call.user_id,
+                ),
+            )
+            turn.calls.append(stored.call)
+        for turn_key, turn in open_turns.items():
+            self._open_by_turn[turn_key] = turn
+            self._open_by_conversation.setdefault(turn.conversation_id, set()).add(
+                turn_key
+            )
+        self._closed_unsent = [self._as_closed(turn) for turn in closed_turns.values()]
+
+    def take_closed_unsent(self) -> list[ClosedTurn]:
+        """Turns closed by an earlier run that were never confirmed as sent."""
+        turns, self._closed_unsent = self._closed_unsent, []
+        return turns
 
     def add_call(self, call: Call) -> list[ClosedTurn]:
         if not is_chat_completions_endpoint(call.endpoint):
@@ -62,21 +91,19 @@ class ConversationBuilder:
             self.counters.skipped_background += 1
             return []
 
-        turn_key = turn_key_for_call(call.request_body, call.user_id)
-        if turn_key is None:
+        prefix_key = turn_key_for_call(call.request_body, call.user_id)
+        if prefix_key is None:
             self.counters.unparseable_bodies += 1
             return []
 
         conversation_id = self._conversation_id(call)
+        turn_key = digest(conversation_id, prefix_key)
         closed: list[ClosedTurn] = []
         closed.extend(
             self._close_other_turns_in_conversation(conversation_id, turn_key)
         )
 
         existing = self._open_by_turn.get(turn_key)
-        if existing is not None and existing.conversation_id != conversation_id:
-            closed.append(self._close_turn(turn_key))
-            existing = None
         if existing is None:
             existing = _OpenTurn(
                 turn_key=turn_key,
@@ -86,6 +113,7 @@ class ConversationBuilder:
             self._open_by_turn[turn_key] = existing
             self._open_by_conversation.setdefault(conversation_id, set()).add(turn_key)
         existing.calls.append(call)
+        self._store.save_turn_call(turn_key, conversation_id, call)
         return closed
 
     def close_idle_turns(self, watermark_ms: int) -> list[ClosedTurn]:
@@ -113,6 +141,11 @@ class ConversationBuilder:
         open_turn = self._open_by_turn.pop(turn_key)
         conv_keys = self._open_by_conversation.get(open_turn.conversation_id, set())
         conv_keys.discard(turn_key)
+        self._store.mark_turn_closed(turn_key)
+        return self._as_closed(open_turn)
+
+    @staticmethod
+    def _as_closed(open_turn: _OpenTurn) -> ClosedTurn:
         return ClosedTurn(
             turn_key=open_turn.turn_key,
             conversation_id=open_turn.conversation_id,

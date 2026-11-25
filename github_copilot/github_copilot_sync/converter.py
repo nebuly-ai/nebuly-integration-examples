@@ -9,8 +9,16 @@ from typing import TYPE_CHECKING, Any
 
 from .config import datetime_to_timestamp_str
 from .entra import apply_directory_segments, apply_directory_tags
-from .models import BlockKind, Call, ClosedTurn, join_text, turn_start
-from .openai_body import BodyFormatError, parse_call_bodies
+from .models import (
+    BlockKind,
+    Call,
+    ClosedTurn,
+    Message,
+    join_text,
+    turn_start,
+    turn_start_index,
+)
+from .openai_body import BodyFormatError, ParsedBody, parse_call_bodies
 
 if TYPE_CHECKING:
     from .entra import EntraDirectory
@@ -31,24 +39,24 @@ def _ms_to_iso(ms: int) -> str:
     return datetime_to_timestamp_str(datetime.fromtimestamp(ms / 1000, tz=UTC))
 
 
-def _turn_input(calls: tuple[Call, ...]) -> str:
-    first = calls[0]
+def _parse_call(call: Call) -> ParsedBody | None:
     try:
-        parsed = parse_call_bodies(first.request_body, first.response_body)
+        return parse_call_bodies(call.request_body, call.response_body)
     except BodyFormatError:
+        return None
+
+
+def _turn_input(first: ParsedBody | None) -> str:
+    if first is None:
         return ""
-    start = turn_start(parsed.messages)
+    start = turn_start(first.messages)
     if start is None:
         return ""
     return _truncate(join_text(start.blocks))
 
 
-def _final_output(calls: tuple[Call, ...]) -> str:
-    for call in reversed(calls):
-        try:
-            parsed = parse_call_bodies(call.request_body, call.response_body)
-        except BodyFormatError:
-            continue
+def _final_output(parsed_calls: list[ParsedBody]) -> str:
+    for parsed in reversed(parsed_calls):
         if any(block.kind is BlockKind.TOOL_USE for block in parsed.output):
             continue
         text = join_text(
@@ -59,14 +67,16 @@ def _final_output(calls: tuple[Call, ...]) -> str:
     return ""
 
 
-def _tool_names(calls: tuple[Call, ...]) -> list[str]:
+def _turn_messages(parsed: ParsedBody) -> tuple[Message, ...]:
+    """Messages after the turn-start user message, dropping earlier turns."""
+    index = turn_start_index(parsed.messages)
+    return () if index is None else parsed.messages[index + 1 :]
+
+
+def _tool_names(parsed_calls: list[ParsedBody]) -> list[str]:
     names: set[str] = set()
-    for call in calls:
-        try:
-            parsed = parse_call_bodies(call.request_body, call.response_body)
-        except BodyFormatError:
-            continue
-        for message in parsed.messages:
+    for parsed in parsed_calls:
+        for message in _turn_messages(parsed):
             for block in message.blocks:
                 if block.kind is BlockKind.TOOL_USE and block.tool_name:
                     names.add(block.tool_name)
@@ -76,17 +86,12 @@ def _tool_names(calls: tuple[Call, ...]) -> list[str]:
     return sorted(names)
 
 
-def _llm_traces(calls: tuple[Call, ...], user_input: str) -> list[dict[str, Any]]:
-    from .openai_body import ParsedBody
-
+def _llm_traces(
+    parsed_calls: list[ParsedBody], user_input: str
+) -> list[dict[str, Any]]:
     by_model: dict[str, list[ParsedBody]] = defaultdict(list)
-    for call in calls:
-        try:
-            parsed = parse_call_bodies(call.request_body, call.response_body)
-        except BodyFormatError:
-            continue
-        model = parsed.model or "unknown"
-        by_model[model].append(parsed)
+    for parsed in parsed_calls:
+        by_model[parsed.model or "unknown"].append(parsed)
 
     traces: list[dict[str, Any]] = []
     for model, parsed_calls in sorted(by_model.items()):
@@ -124,18 +129,13 @@ def _llm_traces(calls: tuple[Call, ...], user_input: str) -> list[dict[str, Any]
     return traces
 
 
-def _retrieval_traces(calls: tuple[Call, ...]) -> list[dict[str, Any]]:
-    if not calls:
-        return []
-    last = calls[-1]
-    try:
-        parsed = parse_call_bodies(last.request_body, last.response_body)
-    except BodyFormatError:
+def _retrieval_traces(parsed: ParsedBody | None) -> list[dict[str, Any]]:
+    if parsed is None:
         return []
 
     pending: list[tuple[str, str, object]] = []
     traces: list[dict[str, Any]] = []
-    for message in parsed.messages:
+    for message in _turn_messages(parsed):
         if message.role == "assistant":
             for block in message.blocks:
                 if block.kind is BlockKind.TOOL_USE:
@@ -172,18 +172,13 @@ def _retrieval_traces(calls: tuple[Call, ...]) -> list[dict[str, Any]]:
     return traces
 
 
-def _build_tags(calls: tuple[Call, ...]) -> dict[str, str]:
+def _build_tags(
+    calls: tuple[Call, ...], parsed_calls: list[ParsedBody]
+) -> dict[str, str]:
     endpoints = sorted({call.endpoint for call in calls})
-    models: list[str] = []
-    for call in calls:
-        try:
-            parsed = parse_call_bodies(call.request_body, call.response_body)
-        except BodyFormatError:
-            continue
-        if parsed.model:
-            models.append(parsed.model)
+    models = [parsed.model for parsed in parsed_calls if parsed.model]
     unique_models = list(dict.fromkeys(models))
-    tools = _tool_names(calls)
+    tools = _tool_names(parsed_calls)
     tags: dict[str, str] = {
         "endpoint": endpoints[0] if len(endpoints) == 1 else ",".join(endpoints),
         "model": unique_models[-1] if unique_models else "unknown",
@@ -205,14 +200,16 @@ def turn_to_payload(
     anonymize: bool,
     directory: EntraDirectory | None,
 ) -> dict[str, Any] | SkipReason:
-    user_input = _turn_input(turn.calls)
+    parsed_by_call = [_parse_call(call) for call in turn.calls]
+    parsed_calls = [parsed for parsed in parsed_by_call if parsed is not None]
+    user_input = _turn_input(parsed_by_call[0])
     if not user_input.strip():
         return SkipReason.EMPTY_INPUT
-    output = _final_output(turn.calls)
+    output = _final_output(parsed_calls)
     if not output.strip():
         return SkipReason.EMPTY_OUTPUT
 
-    tags = apply_directory_tags(_build_tags(turn.calls), directory, email)
+    tags = apply_directory_tags(_build_tags(turn.calls, parsed_calls), directory, email)
     interaction: dict[str, Any] = {
         "conversation_id": turn.conversation_id,
         "input": user_input,
@@ -225,8 +222,8 @@ def turn_to_payload(
     }
     apply_directory_segments(interaction, directory, email)
 
-    traces = _llm_traces(turn.calls, user_input)
-    traces.extend(_retrieval_traces(turn.calls))
+    traces = _llm_traces(parsed_calls, user_input)
+    traces.extend(_retrieval_traces(parsed_by_call[-1]))
     return {
         "interaction": interaction,
         "traces": traces,

@@ -80,12 +80,35 @@ def test_store_path_under_cache_key(tmp_path: Path) -> None:
     "changes",
     [
         {"github_enterprise": "other"},
-        {"sources": ("s3",)},
         {"csv_export": True},
     ],
 )
-def test_cache_key_follows_source_and_destination(
+def test_cache_key_follows_enterprise_and_destination(
     tmp_path: Path, changes: dict[str, object]
 ) -> None:
     config = _keyed_config(tmp_path)
     assert replace(config, **cast(Any, changes)).cache_key != config.cache_key
+
+
+def test_cache_key_ignores_sources(tmp_path: Path) -> None:
+    config = _keyed_config(tmp_path)
+    widened = replace(config, sources=("rest", "s3", "azure_blob"))
+    assert widened.cache_key == config.cache_key
+    assert widened.store_path == config.store_path
+
+
+def test_sources_default_to_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required_env(monkeypatch)
+
+    assert Config.from_env_and_args([]).sources == ("rest",)
+    assert Config.from_env_and_args(["--sources", "rest,s3"]).sources == (
+        "rest",
+        "s3",
+    )
+
+
+def test_object_lag_seconds_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required_env(monkeypatch)
+    assert Config.from_env_and_args([]).object_lag_seconds == 3600
+    monkeypatch.setenv("OBJECT_LAG_SECONDS", "120")
+    assert Config.from_env_and_args([]).object_lag_seconds == 120

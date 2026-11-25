@@ -252,3 +252,80 @@ def test_user_defined_hook_can_drop_call(
 
     assert builder.counters.skipped_background == 1
     store.close()
+
+
+def test_open_turn_survives_builder_restart(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    first = _call(
+        github_request_id="r1", user_text="long task", request_ms=1_000, response_ms=1_100
+    )
+    second = _call(
+        github_request_id="r2", user_text="long task", request_ms=1_200, response_ms=1_300
+    )
+    before = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    before.add_call(first)
+
+    after = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    after.add_call(second)
+    closed = after.close_all_open()
+
+    assert len(closed) == 1
+    assert [c.github_request_id for c in closed[0].calls] == ["r1", "r2"]
+    store.close()
+
+
+def test_closed_unsent_turn_is_reloaded_until_released(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    builder = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    builder.add_call(
+        _call(github_request_id="r1", user_text="q", request_ms=1_000, response_ms=1_100)
+    )
+    closed = builder.close_all_open()
+
+    restarted = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    assert [t.turn_key for t in restarted.take_closed_unsent()] == [closed[0].turn_key]
+
+    store.release_closed_turn(closed[0].turn_key)
+    again = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    assert again.take_closed_unsent() == []
+    assert again.close_all_open() == []
+    store.close()
+
+
+def test_turn_key_is_scoped_to_conversation(tmp_path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    builder = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    ms_gap = 9 * 3_600_000
+    builder.add_call(
+        _call(
+            github_request_id="g1",
+            user_text="same opener",
+            request_ms=1_000,
+            response_ms=2_000,
+        )
+    )
+    builder.add_call(
+        _call(
+            github_request_id="g2",
+            user_text="same opener",
+            request_ms=1_000 + ms_gap,
+            response_ms=2_000 + ms_gap,
+        )
+    )
+    turns = builder.close_all_open()
+
+    assert len(turns) == 2
+    assert len({t.turn_key for t in turns}) == 2
+    store.close()
