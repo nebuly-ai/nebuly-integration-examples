@@ -19,6 +19,7 @@ jobs:
           - gemini_enterprise
           - langfuse
           - bedrock
+          - github_copilot
     steps:
       - uses: actions/checkout@v4
 

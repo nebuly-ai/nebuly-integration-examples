@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import httpx
+
+
+class EntraUser(BaseModel):
+    """One directory user, using the Microsoft Graph field names."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str | None = None
+    mail: str | None = None
+    user_principal_name: str | None = Field(None, alias="userPrincipalName")
+    department: str | None = None
+    job_title: str | None = Field(None, alias="jobTitle")
+    office_location: str | None = Field(None, alias="officeLocation")
+    city: str | None = None
+    country: str | None = None
+    usage_location: str | None = Field(None, alias="usageLocation")
+    company_name: str | None = Field(None, alias="companyName")
+    employee_hire_date: datetime | None = Field(None, alias="employeeHireDate")
+
+
+class EntraExtract(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    users: list[EntraUser]
+
+
+def _normalize_email(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().casefold()
+    return normalized or None
+
+
+def _non_empty(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _format_hire_date(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).date().isoformat()
+
+
+def directory_tags(user: EntraUser) -> dict[str, str]:
+    """Copilot-aligned directory tags. Empty values are left out."""
+    raw = {
+        "department": _non_empty(user.department),
+        "job_title": _non_empty(user.job_title),
+        "office_location": _non_empty(user.office_location),
+        "city": _non_empty(user.city),
+        "country": _non_empty(user.country) or _non_empty(user.usage_location),
+        "company_name": _non_empty(user.company_name),
+        "employee_hire_date": _format_hire_date(user.employee_hire_date),
+    }
+    return {key: value for key, value in raw.items() if value is not None}
+
+
+class EntraDirectory:
+    """Email index of an Entra extract. The first row for an email wins."""
+
+    def __init__(self, users: list[EntraUser]) -> None:
+        self.user_count = len(users)
+        self._by_email: dict[str, EntraUser] = {}
+        for user in users:
+            for email in (user.mail, user.user_principal_name):
+                key = _normalize_email(email)
+                if key is not None and key not in self._by_email:
+                    self._by_email[key] = user
+
+    def _user_for_email(self, email: str | None) -> EntraUser | None:
+        key = _normalize_email(email)
+        if key is None:
+            return None
+        return self._by_email.get(key)
+
+    def tags_for_email(self, email: str | None) -> dict[str, str]:
+        user = self._user_for_email(email)
+        if user is None:
+            return {}
+        return directory_tags(user)
+
+    def segments_for_email(self, email: str | None) -> dict[str, str]:
+        """Nebuly interaction fields. Tags stay separate."""
+        user = self._user_for_email(email)
+        if user is None:
+            return {}
+        segments: dict[str, str] = {}
+        team = _non_empty(user.department)
+        if team is not None:
+            segments["team"] = team
+        market = _non_empty(user.country) or _non_empty(user.usage_location)
+        if market is not None:
+            segments["market"] = market
+        tenure = _format_hire_date(user.employee_hire_date)
+        if tenure is not None:
+            segments["tenure"] = tenure
+        return segments
+
+
+def apply_directory_segments(
+    interaction: dict[str, Any],
+    directory: EntraDirectory | None,
+    email: str | None,
+) -> None:
+    if directory is None:
+        return
+    interaction.update(directory.segments_for_email(email))
+
+
+def apply_directory_tags(
+    tags: dict[str, str],
+    directory: EntraDirectory | None,
+    email: str | None,
+) -> dict[str, str]:
+    if directory is None:
+        return tags
+    merged = dict(tags)
+    merged.update(directory.tags_for_email(email))
+    return merged
+
+
+def fetch_entra_directory(client: httpx.Client | None = None) -> EntraDirectory:
+    """Pull users from Microsoft Graph with the
+    microsoft_entra exporter (entra group)."""
+    try:
+        from entra_export.config import Config as EntraConfig  # noqa: PLC0415
+        from entra_export.export import fetch_users  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            "ENTRA_FETCH=true needs the entra group: poetry install --with entra"
+        ) from exc
+    entra_config = EntraConfig.from_env_and_args([])
+    users = fetch_users(entra_config, client)
+    return EntraDirectory([EntraUser.model_validate(user) for user in users])
+
+
+def load_entra_extract(path: Path) -> EntraDirectory:
+    """Load `{ "users": [...] }` or a bare array of Graph user objects."""
+    if not path.is_file():
+        raise RuntimeError(f"Entra extract not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Entra extract is not valid JSON: {path}") from exc
+    if isinstance(raw, list):
+        users = [EntraUser.model_validate(item) for item in raw]
+    elif isinstance(raw, dict):
+        users = EntraExtract.model_validate(raw).users
+    else:
+        raise TypeError(
+            f"Entra extract must be an object with a users array, or an array: {path}"
+        )
+    return EntraDirectory(users)
