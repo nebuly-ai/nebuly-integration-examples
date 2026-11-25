@@ -8,8 +8,13 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import httpx
 import pytest
 from github_copilot_sync.__main__ import main
-from github_copilot_sync.sources.rest import RestUsageSource
-from github_copilot_sync.sync import SyncSummary, run_sync
+from github_copilot_sync.conversations import ConversationBuilder
+from github_copilot_sync.models import UsageRecord
+from github_copilot_sync.pairing import PairingEngine
+from github_copilot_sync.sources import SourceStats
+from github_copilot_sync.store import Store
+from github_copilot_sync.sync import SyncSummary, _sync_source, run_sync
+from github_copilot_sync.users import UserResolver
 
 from tests.test_sources import _config
 
@@ -127,8 +132,8 @@ def _patch_sync_handler(
     monkeypatch: pytest.MonkeyPatch,
     handler: Callable[[httpx.Request], httpx.Response],
 ) -> None:
-    def build_sources(config: Config) -> dict[str, RestUsageSource]:
-        client = httpx.Client(
+    def github_client(config: Config) -> httpx.Client:
+        return httpx.Client(
             base_url=config.github_api_url,
             transport=httpx.MockTransport(handler),
             headers={
@@ -137,10 +142,9 @@ def _patch_sync_handler(
                 "X-GitHub-Api-Version": config.github_api_version,
             },
         )
-        return {"rest": RestUsageSource(config, client=client)}
 
     monkeypatch.setattr("github_copilot_sync.sync.NebulyClient", RecordingNebuly)
-    monkeypatch.setattr("github_copilot_sync.sync.build_sources", build_sources)
+    monkeypatch.setattr("github_copilot_sync.sync._github_client", github_client)
 
 
 @pytest.fixture(autouse=True)
@@ -470,3 +474,97 @@ def test_main_exits_non_zero_when_sync_failed(
         lambda _config: SyncSummary(),
     )
     main()
+
+
+def test_csv_mode_creates_no_nebuly_http_client(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ts = int(datetime(2026, 1, 2, 12, 0, tzinfo=UTC).timestamp() * 1000)
+    records = _usage_pair(
+        "pair-csv",
+        event_req="ev-req-csv",
+        event_resp="ev-resp-csv",
+        user_text="hello",
+        assistant_text="hi",
+        timestamp_ms=ts,
+    )
+    _patch_sync(monkeypatch, records)
+    created: list[dict[str, Any]] = []
+    real_client: Callable[..., httpx.Client] = httpx.Client
+
+    def spy(*args: object, **kwargs: object) -> httpx.Client:
+        created.append(kwargs)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", spy)
+
+    config = replace(
+        _sync_config(tmp_path, to_date=_END),
+        csv_export=True,
+        csv_export_path=tmp_path / "out.csv",
+    )
+    summary = run_sync(config)
+
+    assert summary.sources["rest"].sent == 1
+    assert created
+    assert all("base_url" in kwargs for kwargs in created)
+
+
+class _FakeSource:
+    def __init__(self, records: list[dict[str, Any]]) -> None:
+        self._records = records
+        self.stats = SourceStats()
+
+    def iter_records(self, cursor: str | None) -> Iterator[tuple[UsageRecord, str]]:
+        for raw in self._records:
+            record = UsageRecord.from_raw(raw)
+            assert record is not None
+            yield record, str(record.timestamp_ms)
+
+
+def test_unpaired_counts_are_per_source(tmp_path: Path) -> None:
+    hour = 3_600_000
+    ts = int(datetime(2026, 1, 2, 12, 0, tzinfo=UTC).timestamp() * 1000)
+
+    def source_records(offset: int, name: str) -> list[dict[str, Any]]:
+        orphan = _record(
+            "request", f"orphan-{name}", f"orphan-{name}-req", "{}", ts + offset
+        )
+        pair = _usage_pair(
+            f"pair-{name}",
+            event_req=f"{name}-req",
+            event_resp=f"{name}-resp",
+            user_text=f"hello {name}",
+            assistant_text="hi",
+            timestamp_ms=ts + offset + hour,
+        )
+        return [orphan, *pair]
+
+    config = _sync_config(tmp_path, dry_run=True)
+    store = Store(config.store_path, dry_run=True)
+    pairing = PairingEngine(config.pair_wait_minutes, store)
+    conversations = ConversationBuilder(
+        store,
+        conversation_gap_hours=config.conversation_gap_hours,
+        interaction_idle_minutes=config.interaction_idle_minutes,
+    )
+    sink = RecordingNebuly(dry_run=True)
+    resolver = UserResolver(config, httpx.Client(), store)
+
+    counts = [
+        _sync_source(
+            name,
+            _FakeSource(source_records(offset, name)),
+            store=store,
+            pairing=pairing,
+            conversations=conversations,
+            sink=sink,
+            resolver=resolver,
+            config=config,
+        )
+        for name, offset in (("a", 0), ("b", 4 * hour))
+    ]
+    store.close()
+
+    assert [c.unpaired_requests for c in counts] == [1, 1]
+    assert pairing.counters.unpaired_requests == 2

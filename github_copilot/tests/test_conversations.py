@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from github_copilot_sync import user_defined
 from github_copilot_sync.conversations import ConversationBuilder
-from github_copilot_sync.models import Call
+from github_copilot_sync.models import Call, digest
 from github_copilot_sync.store import Store
 
 if TYPE_CHECKING:
@@ -341,4 +341,169 @@ def test_turn_key_is_scoped_to_conversation(tmp_path: Path) -> None:
 
     assert len(turns) == 2
     assert len({t.turn_key for t in turns}) == 2
+    store.close()
+
+
+def _tool_loop_messages(*, final_answer: bool) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "t1",
+                    "type": "function",
+                    "function": {"name": "grep", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "t1", "content": "hits"},
+    ]
+    if final_answer:
+        messages.append({"role": "assistant", "content": "done"})
+    return messages
+
+
+def _second_turn_messages() -> list[dict[str, object]]:
+    return [
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "second question"},
+    ]
+
+
+def test_late_call_of_emitted_turn_is_dropped_and_newer_turn_stays_whole(
+    tmp_path: Path,
+) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    builder = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    builder.add_call(
+        _call(
+            github_request_id="a1",
+            user_text="first question",
+            request_ms=1_000,
+            response_ms=1_100,
+        )
+    )
+    b1 = _call(
+        github_request_id="b1",
+        user_text="first question",
+        extra_messages=_second_turn_messages(),
+        request_ms=2_000,
+        response_ms=2_100,
+    )
+    closed_by_b1 = builder.add_call(b1)
+    assert [t.calls[0].github_request_id for t in closed_by_b1] == ["a1"]
+    store.record_emitted_turn(
+        closed_by_b1[0].turn_key, "sent", closed_by_b1[0].time_end_ms
+    )
+
+    late_a2 = _call(
+        github_request_id="a2",
+        user_text="first question",
+        extra_messages=_tool_loop_messages(final_answer=False),
+        request_ms=1_200,
+        response_ms=1_300,
+    )
+    assert builder.add_call(late_a2) == []
+    assert builder.counters.late_calls_dropped == 1
+
+    b2 = _call(
+        github_request_id="b2",
+        user_text="first question",
+        extra_messages=[
+            *_second_turn_messages(),
+            *_tool_loop_messages(final_answer=True),
+        ],
+        request_ms=2_200,
+        response_ms=2_300,
+    )
+    assert builder.add_call(b2) == []
+    remaining = builder.close_all_open()
+
+    assert len(remaining) == 1
+    assert [c.github_request_id for c in remaining[0].calls] == ["b1", "b2"]
+    store.close()
+
+
+def test_late_call_of_open_earlier_turn_joins_it_without_closing_newer_turn(
+    tmp_path: Path,
+) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    builder = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    builder.add_call(
+        _call(
+            github_request_id="b1",
+            user_text="first question",
+            extra_messages=_second_turn_messages(),
+            request_ms=2_000,
+            response_ms=2_100,
+        )
+    )
+    assert (
+        builder.add_call(
+            _call(
+                github_request_id="a1",
+                user_text="first question",
+                request_ms=1_000,
+                response_ms=1_100,
+            )
+        )
+        == []
+    )
+    assert (
+        builder.add_call(
+            _call(
+                github_request_id="a2",
+                user_text="first question",
+                extra_messages=_tool_loop_messages(final_answer=False),
+                request_ms=1_200,
+                response_ms=1_300,
+            )
+        )
+        == []
+    )
+    turns = builder.close_all_open()
+
+    by_first_call = {t.calls[0].github_request_id: t for t in turns}
+    assert len(turns) == 2
+    assert len({t.conversation_id for t in turns}) == 1
+    assert [c.github_request_id for c in by_first_call["a1"].calls] == ["a1", "a2"]
+    assert [c.github_request_id for c in by_first_call["b1"].calls] == ["b1"]
+    store.close()
+
+
+def test_late_call_does_not_split_conversation_or_rewind_last_activity(
+    tmp_path: Path,
+) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    builder = ConversationBuilder(
+        store, conversation_gap_hours=8, interaction_idle_minutes=30
+    )
+    late_by_more_than_gap = 9 * 3_600_000
+    builder.add_call(
+        _call(
+            github_request_id="n1",
+            user_text="opener",
+            request_ms=late_by_more_than_gap + 1_000,
+            response_ms=late_by_more_than_gap + 1_100,
+        )
+    )
+    builder.add_call(
+        _call(
+            github_request_id="o1",
+            user_text="opener",
+            request_ms=1_000,
+            response_ms=1_100,
+        )
+    )
+    turns = builder.close_all_open()
+
+    assert len({t.conversation_id for t in turns}) == 1
+    session = store.get_conversation_session(f"1|{digest('opener')}")
+    assert session is not None
+    assert session.last_activity_ms == late_by_more_than_gap + 1_100
     store.close()

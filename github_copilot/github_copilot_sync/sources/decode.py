@@ -27,13 +27,13 @@ def decode_ndjson(raw: bytes, *, source: str) -> tuple[list[JsonDict], DecodePro
     except gzip.BadGzipFile:
         payload = raw
     except (EOFError, zlib.error):
-        logger.exception("Corrupt log file %s skipped, its records are lost", source)
+        logger.warning("Corrupt log file %s skipped, its records are lost", source)
         problems.unreadable_files += 1
         return [], problems
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError:
-        logger.exception(
+        logger.warning(
             "Log file %s is not UTF-8 and was skipped, its records are lost",
             source,
         )
@@ -48,7 +48,7 @@ def decode_ndjson(raw: bytes, *, source: str) -> tuple[list[JsonDict], DecodePro
         try:
             value = json.loads(stripped)
         except json.JSONDecodeError:
-            logger.exception(
+            logger.warning(
                 "Line %s of %s is not JSON and was skipped",
                 line_no,
                 source,

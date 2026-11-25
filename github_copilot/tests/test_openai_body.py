@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from github_copilot_sync.models import BlockKind, StopReason
 from github_copilot_sync.openai_body import (
     BodyFormatError,
     decode_body_string,
+    first_user_message_text,
     parse_call_bodies,
     parse_response_body,
     turn_key_for_call,
@@ -15,6 +17,12 @@ from github_copilot_sync.openai_body import (
 
 def _wrap_body(payload: object) -> str:
     return json.dumps(json.dumps(payload))
+
+
+def _request_dict(body: str) -> dict[str, Any]:
+    decoded = decode_body_string(body)
+    assert isinstance(decoded, dict)
+    return decoded
 
 
 def _chat_request(
@@ -131,4 +139,32 @@ def test_turn_key_stable_for_tool_loop() -> None:
             {"role": "tool", "tool_call_id": "c1", "content": "file contents"},
         ],
     )
-    assert turn_key_for_call(user_only, 42) == turn_key_for_call(with_tools, 42)
+    assert turn_key_for_call(_request_dict(user_only)) == turn_key_for_call(
+        _request_dict(with_tools)
+    )
+
+
+def test_turn_key_differs_for_different_prefix() -> None:
+    first = _chat_request([{"role": "user", "content": "Find bugs"}])
+    second = _chat_request([{"role": "user", "content": "Write docs"}])
+    assert turn_key_for_call(_request_dict(first)) != turn_key_for_call(
+        _request_dict(second)
+    )
+
+
+def test_turn_key_is_none_without_user_message_or_messages() -> None:
+    assert turn_key_for_call({"messages": [{"role": "system", "content": "x"}]}) is None
+    assert turn_key_for_call({}) is None
+
+
+def test_first_user_message_text_returns_first_user_text() -> None:
+    request = _request_dict(
+        _chat_request(
+            [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "Find bugs"},
+                {"role": "user", "content": "Later"},
+            ]
+        )
+    )
+    assert first_user_message_text(request) == "Find bugs"

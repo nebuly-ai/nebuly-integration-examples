@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    import httpx
+
     from github_copilot_sync.config import Config
-    from github_copilot_sync.models import PipelineCounters, UsageRecord
+    from github_copilot_sync.models import UsageRecord
 
 
 @dataclass
@@ -20,9 +22,6 @@ class SourceStats:
         self.unreadable_files += files
         self.unreadable_lines += lines
 
-    def merge_counters(self, counters: PipelineCounters) -> None:
-        counters.non_usage_events += self.non_usage_events
-
 
 class RecordSource(Protocol):
     stats: SourceStats
@@ -30,14 +29,16 @@ class RecordSource(Protocol):
     def iter_records(self, cursor: str | None) -> Iterator[tuple[UsageRecord, str]]: ...
 
 
-def build_sources(config: Config) -> dict[str, RecordSource]:
+def build_sources(
+    config: Config, github_client: httpx.Client
+) -> dict[str, RecordSource]:
     from .azure_blob import AzureBlobUsageSource  # noqa: PLC0415 - avoids a cycle
     from .rest import RestUsageSource  # noqa: PLC0415 - avoids a cycle
     from .s3 import S3UsageSource  # noqa: PLC0415 - avoids a cycle
 
     sources: dict[str, RecordSource] = {}
     if "rest" in config.sources:
-        sources["rest"] = RestUsageSource(config)
+        sources["rest"] = RestUsageSource(config, github_client)
     if "s3" in config.sources:
         sources["s3"] = S3UsageSource(config)
     if "azure_blob" in config.sources:

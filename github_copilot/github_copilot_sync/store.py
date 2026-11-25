@@ -82,8 +82,15 @@ CREATE TABLE IF NOT EXISTS user_login (
 CREATE TABLE IF NOT EXISTS emitted_turn (
   turn_key            TEXT PRIMARY KEY,
   status              TEXT NOT NULL,
-  emitted_at          TEXT NOT NULL
+  emitted_at          TEXT NOT NULL,
+  time_end_ms         INTEGER NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_emitted_turn_time
+  ON emitted_turn (time_end_ms);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_session_activity
+  ON conversation_session (last_activity_ms);
 """
 
 USAGE_RECORD_RETENTION_MS = 7 * 24 * 3_600_000
@@ -136,6 +143,8 @@ class Store:
         self._conn.executescript(_SCHEMA)
         self._in_transaction = False
         self.prune_usage_records()
+        self.prune_conversation_sessions()
+        self.prune_emitted_turns()
 
     def close(self) -> None:
         self._conn.close()
@@ -178,6 +187,33 @@ class Store:
             """
             DELETE FROM usage_record
             WHERE timestamp_ms < (SELECT MAX(timestamp_ms) FROM usage_record) - ?
+            """,
+            (retention_ms,),
+        )
+        self._commit()
+        return cursor.rowcount
+
+    def prune_conversation_sessions(
+        self, retention_ms: int = USAGE_RECORD_RETENTION_MS
+    ) -> int:
+        """Forget sessions idle for `retention_ms` behind the newest activity stored."""
+        cursor = self._conn.execute(
+            """
+            DELETE FROM conversation_session
+            WHERE last_activity_ms
+              < (SELECT MAX(last_activity_ms) FROM conversation_session) - ?
+            """,
+            (retention_ms,),
+        )
+        self._commit()
+        return cursor.rowcount
+
+    def prune_emitted_turns(self, retention_ms: int = USAGE_RECORD_RETENTION_MS) -> int:
+        """Forget emitted turns that ended `retention_ms` behind the newest one."""
+        cursor = self._conn.execute(
+            """
+            DELETE FROM emitted_turn
+            WHERE time_end_ms < (SELECT MAX(time_end_ms) FROM emitted_turn) - ?
             """,
             (retention_ms,),
         )
@@ -415,16 +451,17 @@ class Store:
         )
         return cursor.fetchone() is not None
 
-    def record_emitted_turn(self, turn_key: str, status: str) -> None:
+    def record_emitted_turn(self, turn_key: str, status: str, time_end_ms: int) -> None:
         now = datetime.now(UTC).isoformat()
         self._conn.execute(
             """
-            INSERT INTO emitted_turn (turn_key, status, emitted_at)
-            VALUES (?, ?, ?)
+            INSERT INTO emitted_turn (turn_key, status, emitted_at, time_end_ms)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(turn_key) DO UPDATE SET
               status = excluded.status,
-              emitted_at = excluded.emitted_at
+              emitted_at = excluded.emitted_at,
+              time_end_ms = excluded.time_end_ms
             """,
-            (turn_key, status, now),
+            (turn_key, status, now, time_end_ms),
         )
         self._commit()

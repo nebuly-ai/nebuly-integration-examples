@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .models import join_text
+from .openai_body import _content_blocks
+
 if TYPE_CHECKING:
     from .models import Call
 
@@ -38,7 +41,7 @@ def default_is_background_call(
     if len(user_messages) != 1:
         return False
     system_text = " ".join(
-        str(message.get("content") or "")
+        join_text(tuple(_content_blocks(message.get("content"))))
         for message in messages
         if isinstance(message, dict) and message.get("role") in ("system", "developer")
     )

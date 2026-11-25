@@ -41,7 +41,7 @@ def test_dry_run_does_not_touch_the_cache_file(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "db.sqlite"
     store = Store(path, dry_run=True)
     store.insert_usage_record(_usage_record("evt-dry", 3000))
-    store.record_emitted_turn("turn-1", "sent")
+    store.record_emitted_turn("turn-1", "sent", 1000)
     store.set_source_cursor("rest", "123")
     store.close()
 
@@ -141,3 +141,49 @@ def test_source_cursors_are_independent_per_source(tmp_path: Path) -> None:
     assert reopened.get_source_cursor("s3") == "222"
     assert reopened.get_source_cursor("azure_blob") is None
     reopened.close()
+
+
+def test_prune_conversation_sessions_follows_newest_activity(tmp_path: Path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    store.upsert_conversation_session("old", "conv-old", 7, 1_000)
+    store.upsert_conversation_session("new", "conv-new", 7, 10_000)
+
+    assert store.prune_conversation_sessions(retention_ms=5_000) == 1
+    assert store.get_conversation_session("old") is None
+    assert store.get_conversation_session("new") is not None
+    store.close()
+
+
+def test_prune_emitted_turns_follows_newest_turn(tmp_path: Path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    store.record_emitted_turn("old", "sent", 1_000)
+    store.record_emitted_turn("new", "sent", 10_000)
+
+    assert store.prune_emitted_turns(retention_ms=5_000) == 1
+    assert store.is_turn_emitted("old") is False
+    assert store.is_turn_emitted("new") is True
+    store.close()
+
+
+def test_startup_prunes_sessions_and_emitted_turns(tmp_path: Path) -> None:
+    path = tmp_path / "db.sqlite"
+    store = Store(path)
+    store.upsert_conversation_session("old", "conv-old", 7, 1_000)
+    store.upsert_conversation_session("new", "conv-new", 7, 1_000 + 8 * 24 * 3_600_000)
+    store.record_emitted_turn("old", "sent", 1_000)
+    store.record_emitted_turn("new", "sent", 1_000 + 8 * 24 * 3_600_000)
+    store.close()
+
+    reopened = Store(path)
+    assert reopened.get_conversation_session("old") is None
+    assert reopened.get_conversation_session("new") is not None
+    assert reopened.is_turn_emitted("old") is False
+    assert reopened.is_turn_emitted("new") is True
+    reopened.close()
+
+
+def test_prune_is_a_noop_on_empty_tables(tmp_path: Path) -> None:
+    store = Store(tmp_path / "db.sqlite")
+    assert store.prune_conversation_sessions() == 0
+    assert store.prune_emitted_turns() == 0
+    store.close()

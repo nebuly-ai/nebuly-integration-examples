@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import user_defined
 from .models import (
@@ -87,24 +87,27 @@ class ConversationBuilder:
         if not is_chat_completions_endpoint(call.endpoint):
             self.counters.skipped_non_chat += 1
             return []
-        request_json = self._request_dict(call)
+        request = self._request_dict(call)
         if user_defined.is_background_call(call) or (
-            request_json is not None
-            and user_defined.default_is_background_call(call, request_json)
+            request is not None
+            and user_defined.default_is_background_call(call, request)
         ):
             self.counters.skipped_background += 1
             return []
 
-        prefix_key = turn_key_for_call(call.request_body, call.user_id)
-        if prefix_key is None:
+        prefix_key = None if request is None else turn_key_for_call(request)
+        if request is None or prefix_key is None:
             self.counters.unparseable_bodies += 1
             return []
 
-        conversation_id = self._conversation_id(call)
+        conversation_id = self._conversation_id(call, request)
+        # The prefix digest carries no user id: the conversation id scopes the key.
         turn_key = digest(conversation_id, prefix_key)
-        closed: list[ClosedTurn] = []
-        closed.extend(
-            self._close_other_turns_in_conversation(conversation_id, turn_key)
+        if self._store.is_turn_emitted(turn_key):
+            self.counters.late_calls_dropped += 1
+            return []
+        closed = self._close_other_turns_in_conversation(
+            conversation_id, turn_key, call.request_timestamp_ms
         )
 
         existing = self._open_by_turn.get(turn_key)
@@ -132,13 +135,16 @@ class ConversationBuilder:
         return [self._close_turn(key) for key in list(self._open_by_turn)]
 
     def _close_other_turns_in_conversation(
-        self, conversation_id: str, new_turn_key: str
+        self, conversation_id: str, new_turn_key: str, call_start_ms: int
     ) -> list[ClosedTurn]:
+        """Close turns older than the call, so a late call never closes newer turns."""
         turn_keys = self._open_by_conversation.get(conversation_id, set())
         return [
             self._close_turn(turn_key)
             for turn_key in list(turn_keys)
-            if turn_key != new_turn_key and turn_key in self._open_by_turn
+            if turn_key != new_turn_key
+            and turn_key in self._open_by_turn
+            and self._open_by_turn[turn_key].time_start_ms < call_start_ms
         ]
 
     def _close_turn(self, turn_key: str) -> ClosedTurn:
@@ -159,8 +165,8 @@ class ConversationBuilder:
             time_end_ms=open_turn.time_end_ms,
         )
 
-    def _conversation_id(self, call: Call) -> str:
-        first_user = first_user_message_text(call.request_body) or ""
+    def _conversation_id(self, call: Call, request: dict[str, Any]) -> str:
+        first_user = first_user_message_text(request) or ""
         session_key = f"{call.user_id}|{digest(first_user)}"
         session = self._store.get_conversation_session(session_key)
         if session is None:
@@ -192,7 +198,7 @@ class ConversationBuilder:
         )
         return session.conversation_id
 
-    def _request_dict(self, call: Call) -> dict[str, object] | None:
+    def _request_dict(self, call: Call) -> dict[str, Any] | None:
         try:
             decoded = decode_body_string(call.request_body)
         except BodyFormatError:

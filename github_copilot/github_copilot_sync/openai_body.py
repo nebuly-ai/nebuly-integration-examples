@@ -42,7 +42,6 @@ class ParsedBody:
     stop_reason: StopReason
     usage: TokenUsage | None
     model: str | None
-    latency_ms: int | None
 
 
 def as_int(value: object) -> int | None:
@@ -264,7 +263,6 @@ def _parse_bodies(input_body: dict[str, Any], output_body: object) -> ParsedBody
     model = str(input_body.get("model") or "") or None
     if isinstance(output_body, list):
         output, finish_reason, usage = _reconstruct_stream(output_body)
-        latency_ms = None
     elif isinstance(output_body, dict):
         choices = as_list(output_body.get("choices"))
         choice = as_dict(choices[0]) if choices else {}
@@ -275,7 +273,6 @@ def _parse_bodies(input_body: dict[str, Any], output_body: object) -> ParsedBody
         )
         finish_reason = choice.get("finish_reason")
         usage = _usage(as_dict(output_body.get("usage")))
-        latency_ms = None
         if not model:
             model = str(output_body.get("model") or "") or None
     else:
@@ -289,18 +286,14 @@ def _parse_bodies(input_body: dict[str, Any], output_body: object) -> ParsedBody
         stop_reason=_STOP_REASONS.get(str(finish_reason), StopReason.OTHER),
         usage=usage,
         model=model,
-        latency_ms=latency_ms,
     )
 
 
-def turn_key_for_call(request_body: str, user_id: int) -> str | None:
-    """Digest(user_id, raw messages through the turn-start user message)."""
-    try:
-        request = decode_body_string(request_body)
-    except BodyFormatError:
-        return None
-    if not isinstance(request, dict):
-        return None
+def turn_key_for_call(request: dict[str, Any]) -> str | None:
+    """Digest of the raw messages through the turn-start user message.
+
+    Not scoped to a user: the conversation id the key is combined with already is.
+    """
     raw_messages = request.get("messages")
     if not isinstance(raw_messages, list):
         return None
@@ -312,18 +305,10 @@ def turn_key_for_call(request_body: str, user_id: int) -> str | None:
             break
     if start_index is None:
         return None
-    prefix = raw_messages[: start_index + 1]
-
-    return digest(user_id, prefix)
+    return digest(raw_messages[: start_index + 1])
 
 
-def first_user_message_text(request_body: str) -> str | None:
-    try:
-        request = decode_body_string(request_body)
-    except BodyFormatError:
-        return None
-    if not isinstance(request, dict):
-        return None
+def first_user_message_text(request: dict[str, Any]) -> str | None:
     _system, messages = _parse_messages(request.get("messages"))
     for message in messages:
         if message.role == "user" and not message.tool_result_ids:

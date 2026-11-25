@@ -14,7 +14,11 @@ from botocore.stub import Stubber
 from github_copilot_sync.config import Config
 from github_copilot_sync.sources.azure_blob import AzureBlobUsageSource
 from github_copilot_sync.sources.decode import decode_ndjson
-from github_copilot_sync.sources.rest import RestUsageSource, parse_link_header
+from github_copilot_sync.sources.rest import (
+    RestUsageSource,
+    _ms_to_phrase,
+    parse_link_header,
+)
 from github_copilot_sync.sources.s3 import S3UsageSource
 
 if TYPE_CHECKING:
@@ -108,7 +112,6 @@ def test_rest_link_pagination() -> None:
 
     assert [record.event_id for record, _ in records] == ["e1", "e2"]
     assert len(calls) == 2
-    source.close()
 
 
 def test_rest_retries_429(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,7 +136,6 @@ def test_rest_retries_429(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert attempts == 2
     assert rows[0][0].event_id == "e1"
-    source.close()
 
 
 def test_rest_warns_when_cursor_older_than_48h(
@@ -151,7 +153,6 @@ def test_rest_warns_when_cursor_older_than_48h(
     with caplog.at_level("WARNING"):
         source = RestUsageSource(_config(sources=("rest",)), client=client)
         list(source.iter_records(str(old_ms)))
-        source.close()
 
     assert "REST only covers" in caplog.text
 
@@ -172,7 +173,35 @@ def test_rest_skips_non_usage_events() -> None:
 
     assert len(rows) == 1
     assert source.stats.non_usage_events == 1
-    source.close()
+
+
+def test_rest_counts_malformed_records_as_non_usage_events() -> None:
+    missing_enterprise = _record_dict("bad-1")
+    del missing_enterprise["enterprise_id"]
+    null_user = {**_record_dict("bad-2"), "user_id": None}
+    dict_body = {**_record_dict("bad-3"), "body": {"nested": "value"}}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                _record_dict("good-1"),
+                missing_enterprise,
+                null_user,
+                dict_body,
+                _record_dict("good-2"),
+            ],
+        )
+
+    client = httpx.Client(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    )
+    source = RestUsageSource(_config(sources=("rest",)), client=client)
+    rows = list(source.iter_records(None))
+
+    assert [record.event_id for record, _ in rows] == ["good-1", "good-2"]
+    assert source.stats.non_usage_events == 3
 
 
 def test_decode_gzip_plain_and_corrupt() -> None:
@@ -285,6 +314,32 @@ def test_s3_paginates_and_reports_non_usage_events() -> None:
 
     assert [record.event_id for record, _ in rows] == ["s3-1", "s3-1"]
     assert source.stats.non_usage_events == 2
+
+
+def test_s3_counts_malformed_record_and_keeps_valid_ones() -> None:
+    client = _s3_client()
+    key = "exports/part-001.ndjson"
+    malformed = _record_dict("bad")
+    del malformed["enterprise_id"]
+    payload = _ndjson(_record_dict("good-1"), malformed, _record_dict("good-2"))
+    with Stubber(client) as stubber:
+        stubber.add_response(
+            "list_objects_v2",
+            {
+                "Contents": [
+                    {"Key": key, "LastModified": datetime(2026, 1, 1, 1, tzinfo=UTC)}
+                ],
+                "IsTruncated": False,
+            },
+            {"Bucket": "copilot-logs", "Prefix": "exports/"},
+        )
+        _stub_s3_object(stubber, key, payload)
+
+        source = S3UsageSource(_config(sources=("s3",)), client=client)
+        rows = list(source.iter_records(cursor=None))
+
+    assert [record.event_id for record, _ in rows] == ["good-1", "good-2"]
+    assert source.stats.non_usage_events == 1
 
 
 def test_s3_reads_late_object_whose_key_sorts_before_the_cursor() -> None:
@@ -424,8 +479,40 @@ def test_rest_logs_error_on_unknown_envelope(
     source = RestUsageSource(_config(sources=("rest",)), client=client)
     with caplog.at_level("ERROR"):
         rows = list(source.iter_records(None))
-    source.close()
 
     assert rows == []
     assert "items" in caplog.text
     assert "unknown" in caplog.text.lower()
+
+
+def _first_phrase(config: Config, cursor: str | None) -> str:
+    phrases: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        phrases.append(request.url.params["phrase"])
+        return httpx.Response(200, json=[])
+
+    client = httpx.Client(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    )
+    list(RestUsageSource(config, client=client).iter_records(cursor))
+    return phrases[0]
+
+
+def test_rest_from_date_overrides_an_older_cursor() -> None:
+    from_date = datetime.now(UTC) - timedelta(hours=1)
+    old_cursor = int((from_date - timedelta(hours=5)).timestamp() * 1000)
+    config = _config(sources=("rest",), from_date=from_date)
+
+    assert _first_phrase(config, str(old_cursor)) == _ms_to_phrase(
+        int(from_date.timestamp() * 1000)
+    )
+
+
+def test_rest_newer_cursor_wins_over_from_date() -> None:
+    from_date = datetime.now(UTC) - timedelta(hours=5)
+    new_cursor = int((from_date + timedelta(hours=4)).timestamp() * 1000)
+    config = _config(sources=("rest",), from_date=from_date)
+
+    assert _first_phrase(config, str(new_cursor)) == _ms_to_phrase(new_cursor)

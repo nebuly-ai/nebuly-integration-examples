@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+logger = logging.getLogger(__name__)
 
 type JsonDict = dict[str, Any]
 type Role = Literal["user", "assistant"]
@@ -134,12 +137,15 @@ class UsageRecord(BaseModel):
         event_id = raw.get("event_id")
         if timestamp is None or not event_id:
             return None
-        return cls.model_validate(
-            {
-                **raw,
-                "@timestamp": timestamp,
-            }
-        )
+        try:
+            return cls.model_validate(raw)
+        except ValidationError as exc:
+            logger.warning(
+                "Skipping malformed usage record %s, invalid fields: %s",
+                event_id,
+                [".".join(str(part) for part in err["loc"]) for err in exc.errors()],
+            )
+            return None
 
 
 @dataclass(frozen=True)
@@ -173,8 +179,7 @@ class ClosedTurn:
 
 @dataclass
 class PipelineCounters:
-    non_usage_events: int = 0
-    unpaired_requests: int = 0
     skipped_non_chat: int = 0
     skipped_background: int = 0
     unparseable_bodies: int = 0
+    late_calls_dropped: int = 0

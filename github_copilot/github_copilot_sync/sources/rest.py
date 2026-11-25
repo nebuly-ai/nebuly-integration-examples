@@ -86,35 +86,22 @@ def _ms_to_phrase(ms: int) -> str:
 
 
 class RestUsageSource:
-    def __init__(
-        self,
-        config: Config,
-        *,
-        client: httpx.Client | None = None,
-    ) -> None:
+    def __init__(self, config: Config, client: httpx.Client) -> None:
         self._config = config
         self._overlap_ms = config.rest_overlap_seconds * 1000
-        self._client = client or httpx.Client(
-            base_url=config.github_api_url,
-            timeout=120.0,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {config.github_token}",
-                "X-GitHub-Api-Version": config.github_api_version,
-            },
-        )
-        self._owns_client = client is None
+        self._client = client
         self.stats = SourceStats()
 
-    def close(self) -> None:
-        if self._owns_client:
-            self._client.close()
-
     def _initial_cursor_ms(self, cursor: str | None) -> int:
+        from_ms = (
+            None
+            if self._config.from_date is None
+            else int(self._config.from_date.timestamp() * 1000)
+        )
         if cursor is not None:
-            return int(cursor)
-        if self._config.from_date is not None:
-            return int(self._config.from_date.timestamp() * 1000)
+            return int(cursor) if from_ms is None else max(int(cursor), from_ms)
+        if from_ms is not None:
+            return from_ms
         return int(
             (datetime.now(UTC) - timedelta(hours=REST_WINDOW_HOURS - 1)).timestamp()
             * 1000
@@ -140,8 +127,7 @@ class RestUsageSource:
         self, method: str, url: str, *, params: dict[str, str] | None = None
     ) -> httpx.Response:
         response = self._client.request(method, url, params=params)
-        if response.status_code >= 400:
-            response.raise_for_status()
+        response.raise_for_status()
         return response
 
     def _list_path(self) -> str:

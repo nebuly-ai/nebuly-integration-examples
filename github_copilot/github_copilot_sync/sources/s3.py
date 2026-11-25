@@ -10,7 +10,7 @@ from .objects import StoredObject, cursor_for, records_from_object, select_objec
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from mypy_boto3_s3 import S3Client
+    from botocore.client import BaseClient
 
     from github_copilot_sync.config import Config
     from github_copilot_sync.models import UsageRecord
@@ -21,7 +21,7 @@ class S3UsageSource:
         self,
         config: Config,
         *,
-        client: S3Client | None = None,
+        client: BaseClient | None = None,
     ) -> None:
         if not config.s3_bucket:
             raise RuntimeError("S3_BUCKET is required when source s3 is enabled")
@@ -31,7 +31,7 @@ class S3UsageSource:
         session_kwargs: dict[str, Any] = {}
         if config.s3_endpoint_url:
             session_kwargs["endpoint_url"] = config.s3_endpoint_url
-        self._client = client or boto3.client("s3", **session_kwargs)
+        self._client: Any = client or boto3.client("s3", **session_kwargs)
         self.stats = SourceStats()
 
     def _list_objects(self) -> Iterator[StoredObject]:

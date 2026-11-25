@@ -160,8 +160,7 @@ def _retrieval_traces(parsed: ParsedBody | None) -> list[dict[str, Any]]:
                 )
                 if match_index is None:
                     continue
-                tool_id, tool_name, tool_input = pending.pop(match_index)
-                del tool_id
+                _, tool_name, tool_input = pending.pop(match_index)
                 traces.append(
                     {
                         "source": tool_name,
@@ -200,7 +199,11 @@ def turn_to_payload(
     anonymize: bool,
     directory: EntraDirectory | None,
 ) -> dict[str, Any] | SkipReason:
-    parsed_by_call = [_parse_call(call) for call in turn.calls]
+    ordered_calls = sorted(
+        turn.calls,
+        key=lambda call: (call.request_timestamp_ms, call.response_timestamp_ms),
+    )
+    parsed_by_call = [_parse_call(call) for call in ordered_calls]
     parsed_calls = [parsed for parsed in parsed_by_call if parsed is not None]
     user_input = _turn_input(parsed_by_call[0])
     if not user_input.strip():

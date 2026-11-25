@@ -211,3 +211,77 @@ def test_unparseable_call_is_skipped_in_later_calls(tmp_path: Path) -> None:
     assert not isinstance(payload, SkipReason)
     assert payload["interaction"]["output"] == "world"
     assert len(payload["traces"]) == 1
+
+
+def _tool_turn_calls() -> tuple[Call, Call]:
+    first_messages = [{"role": "user", "content": "question"}]
+    last_messages = [
+        {"role": "user", "content": "question"},
+        _tool_call_message("t-1", "lookup"),
+        {"role": "tool", "tool_call_id": "t-1", "content": "lookup result"},
+    ]
+    first = replace(
+        _call(
+            user_text="question",
+            assistant_text="intermediate",
+            request_ms=1_000,
+            response_ms=2_000,
+        ),
+        request_body=_wrap({"model": "model-a", "messages": first_messages}),
+        response_body=_wrap(
+            {
+                "object": "chat.completion",
+                "model": "model-a",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "intermediate"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ),
+    )
+    last = replace(
+        _call(
+            user_text="question",
+            assistant_text="final answer",
+            request_ms=3_000,
+            response_ms=4_000,
+        ),
+        github_request_id="req-2",
+        request_body=_wrap({"model": "model-b", "messages": last_messages}),
+        response_body=_wrap(
+            {
+                "object": "chat.completion",
+                "model": "model-b",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "final answer"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ),
+    )
+    return first, last
+
+
+def test_out_of_order_calls_match_chronological_result(tmp_path: Path) -> None:
+    first, last = _tool_turn_calls()
+    turn = _closed_turn(tmp_path, first, last)
+    chronological = replace(turn, calls=(first, last))
+    reversed_turn = replace(turn, calls=(last, first))
+
+    expected = turn_to_payload(
+        chronological, end_user="u", email=None, anonymize=False, directory=None
+    )
+    payload = turn_to_payload(
+        reversed_turn, end_user="u", email=None, anonymize=False, directory=None
+    )
+
+    assert not isinstance(expected, SkipReason)
+    assert not isinstance(payload, SkipReason)
+    assert payload["interaction"]["output"] == "final answer"
+    assert payload["interaction"]["tags"]["model"] == "model-b"
+    assert [t["source"] for t in payload["traces"] if "source" in t] == ["lookup"]
+    assert payload == expected
