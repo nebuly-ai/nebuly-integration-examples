@@ -4,8 +4,6 @@ from typing import TYPE_CHECKING
 
 from azure.storage.blob import BlobServiceClient, ContainerClient
 
-from github_copilot_sync.models import UsageRecord
-
 from . import SourceStats
 from .objects import StoredObject, cursor_for, records_from_object, select_objects
 
@@ -13,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from github_copilot_sync.config import Config
+    from github_copilot_sync.models import UsageRecord
 
 
 def _container_client(config: Config) -> ContainerClient:
@@ -60,7 +59,5 @@ class AzureBlobUsageSource:
         for obj in select_objects(self._list_objects(), cursor, self._config):
             raw = self._container.download_blob(obj.key).readall()
             position = cursor_for(obj, self._config)
-            for record in records_from_object(
-                raw, obj.key, self._config, self.stats
-            ):
+            for record in records_from_object(raw, obj.key, self._config, self.stats):
                 yield record, position

@@ -16,6 +16,7 @@ from .models import (
     Message,
     StopReason,
     TokenUsage,
+    digest,
     join_text,
 )
 
@@ -83,12 +84,8 @@ def _content_blocks(content: object) -> list[Block]:
         if part_type in ("text", "input_text"):
             blocks.append(Block(BlockKind.TEXT, text=str(part.get("text") or "")))
         elif part_type == "image_url":
-            from .models import digest
-
             blocks.append(Block(BlockKind.IMAGE, text=digest(part.get("image_url"))))
         elif part_type == "file":
-            from .models import digest
-
             blocks.append(Block(BlockKind.DOCUMENT, text=digest(part.get("file"))))
         else:
             blocks.append(Block(BlockKind.OTHER))
@@ -221,7 +218,7 @@ def _decode_embedded_payload(text: str) -> object:
     stripped = text.strip()
     if not stripped:
         raise BodyFormatError("empty embedded body")
-    if stripped.startswith("{") or stripped.startswith("["):
+    if stripped.startswith(("{", "[")):
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:
@@ -233,8 +230,8 @@ def _decode_embedded_payload(text: str) -> object:
 
 def _parse_sse_text(text: str) -> list[Any]:
     chunks: list[Any] = []
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
         if not line.startswith("data:"):
             continue
         payload = line[5:].strip()
@@ -316,7 +313,6 @@ def turn_key_for_call(request_body: str, user_id: int) -> str | None:
     if start_index is None:
         return None
     prefix = raw_messages[: start_index + 1]
-    from .models import digest
 
     return digest(user_id, prefix)
 

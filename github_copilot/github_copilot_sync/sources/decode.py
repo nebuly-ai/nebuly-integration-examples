@@ -5,8 +5,10 @@ import json
 import logging
 import zlib
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from github_copilot_sync.models import JsonDict
+if TYPE_CHECKING:
+    from github_copilot_sync.models import JsonDict
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +26,16 @@ def decode_ndjson(raw: bytes, *, source: str) -> tuple[list[JsonDict], DecodePro
         payload = gzip.decompress(raw)
     except gzip.BadGzipFile:
         payload = raw
-    except (EOFError, zlib.error) as exc:
-        logger.error(
-            "Corrupt log file %s skipped, its records are lost: %s", source, exc
-        )
+    except (EOFError, zlib.error):
+        logger.exception("Corrupt log file %s skipped, its records are lost", source)
         problems.unreadable_files += 1
         return [], problems
     try:
         text = payload.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        logger.error(
-            "Log file %s is not UTF-8 and was skipped, its records are lost: %s",
+    except UnicodeDecodeError:
+        logger.exception(
+            "Log file %s is not UTF-8 and was skipped, its records are lost",
             source,
-            exc,
         )
         problems.unreadable_files += 1
         return [], problems
@@ -49,7 +48,7 @@ def decode_ndjson(raw: bytes, *, source: str) -> tuple[list[JsonDict], DecodePro
         try:
             value = json.loads(stripped)
         except json.JSONDecodeError:
-            logger.error(
+            logger.exception(
                 "Line %s of %s is not JSON and was skipped",
                 line_no,
                 source,

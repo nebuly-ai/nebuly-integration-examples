@@ -166,9 +166,7 @@ class Store:
         self._commit()
         return cursor.rowcount == 1
 
-    def prune_usage_records(
-        self, retention_ms: int = USAGE_RECORD_RETENTION_MS
-    ) -> int:
+    def prune_usage_records(self, retention_ms: int = USAGE_RECORD_RETENTION_MS) -> int:
         """Forget event_ids older than `retention_ms` behind the newest one stored.
 
         The horizon follows the data, not the wall clock, so a quiet stream or a
@@ -206,19 +204,14 @@ class Store:
 
     def _save_pending(self, table: str, record: UsageRecord) -> None:
         self._conn.execute(
-            f"""
-            INSERT INTO {table} (
-              github_request_id, event_id, user_id, endpoint,
-              body, timestamp_ms, truncated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(github_request_id) DO UPDATE SET
-              event_id = excluded.event_id,
-              user_id = excluded.user_id,
-              endpoint = excluded.endpoint,
-              body = excluded.body,
-              timestamp_ms = excluded.timestamp_ms,
-              truncated = excluded.truncated
-            """,
+            f"INSERT INTO {table} ("  # noqa: S608 - fixed table name from caller
+            " github_request_id, event_id, user_id, endpoint, body,"
+            " timestamp_ms, truncated) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(github_request_id) DO UPDATE SET"
+            " event_id = excluded.event_id, user_id = excluded.user_id,"
+            " endpoint = excluded.endpoint, body = excluded.body,"
+            " timestamp_ms = excluded.timestamp_ms,"
+            " truncated = excluded.truncated",
             (
                 record.github_request_id,
                 record.event_id,
@@ -233,18 +226,16 @@ class Store:
 
     def _take_pending(self, table: str, github_request_id: str) -> PendingRecord | None:
         cursor = self._conn.execute(
-            f"""
-            SELECT event_id, user_id, endpoint, body, timestamp_ms, truncated
-            FROM {table}
-            WHERE github_request_id = ?
-            """,
+            f"SELECT event_id, user_id, endpoint, body, timestamp_ms, truncated"  # noqa: S608 - fixed table name
+            f" FROM {table}"
+            " WHERE github_request_id = ?",
             (github_request_id,),
         )
         row = cursor.fetchone()
         if row is None:
             return None
         self._conn.execute(
-            f"DELETE FROM {table} WHERE github_request_id = ?",
+            f"DELETE FROM {table} WHERE github_request_id = ?",  # noqa: S608
             (github_request_id,),
         )
         self._commit()
@@ -259,7 +250,7 @@ class Store:
 
     def _expire_pending(self, table: str, cutoff_ms: int) -> int:
         cursor = self._conn.execute(
-            f"DELETE FROM {table} WHERE timestamp_ms <= ?",
+            f"DELETE FROM {table} WHERE timestamp_ms <= ?",  # noqa: S608 - fixed table name
             (cutoff_ms,),
         )
         self._commit()

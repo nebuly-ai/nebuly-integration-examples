@@ -94,16 +94,16 @@ def _llm_traces(
         by_model[parsed.model or "unknown"].append(parsed)
 
     traces: list[dict[str, Any]] = []
-    for model, parsed_calls in sorted(by_model.items()):
+    for model, model_calls in sorted(by_model.items()):
         output = ""
-        for parsed in reversed(parsed_calls):
+        for parsed in reversed(model_calls):
             text = join_text(
                 tuple(block for block in parsed.output if block.kind is BlockKind.TEXT)
             ).strip()
             if text:
                 output = _truncate(text)
                 break
-        usage_calls = [parsed for parsed in parsed_calls if parsed.usage is not None]
+        usage_calls = [parsed for parsed in model_calls if parsed.usage is not None]
         trace: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": user_input}],
@@ -137,15 +137,15 @@ def _retrieval_traces(parsed: ParsedBody | None) -> list[dict[str, Any]]:
     traces: list[dict[str, Any]] = []
     for message in _turn_messages(parsed):
         if message.role == "assistant":
-            for block in message.blocks:
-                if block.kind is BlockKind.TOOL_USE:
-                    pending.append(
-                        (
-                            block.tool_use_id or "",
-                            block.tool_name or "tool",
-                            block.tool_input,
-                        )
-                    )
+            pending.extend(
+                (
+                    block.tool_use_id or "",
+                    block.tool_name or "tool",
+                    block.tool_input,
+                )
+                for block in message.blocks
+                if block.kind is BlockKind.TOOL_USE
+            )
         else:
             for block in message.blocks:
                 if block.kind is not BlockKind.TOOL_RESULT:

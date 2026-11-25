@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from bedrock_sync.shared.config import CommonConfig, add_common_arguments, load_env
 from bedrock_sync.shared.errors import ConfigError
 

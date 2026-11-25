@@ -8,8 +8,6 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
-from botocore.exceptions import ClientError
-
 from bedrock_sync.agentcore.cloudwatch_client import (
     CloudWatchLogReader,
     InvalidLogResponseError,
@@ -18,6 +16,7 @@ from bedrock_sync.agentcore.cloudwatch_client import (
     create_logs_client,
 )
 from bedrock_sync.agentcore.config import AgentCoreConfig
+from botocore.exceptions import ClientError
 
 
 class FakeLogs:

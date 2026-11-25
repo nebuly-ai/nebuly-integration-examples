@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
 from github_copilot_sync import converter
 from github_copilot_sync.conversations import ConversationBuilder
 from github_copilot_sync.converter import SkipReason, turn_to_payload
 from github_copilot_sync.models import Call, ClosedTurn
-from github_copilot_sync.openai_body import ParsedBody
+from github_copilot_sync.openai_body import parse_call_bodies
 from github_copilot_sync.store import Store
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
+    from github_copilot_sync.openai_body import ParsedBody
 
 
 def _wrap(payload: object) -> str:
@@ -173,7 +178,7 @@ def test_each_call_is_parsed_once(
         replace(_call(request_ms=3_000, response_ms=4_000), github_request_id="req-2"),
     )
     parse_count = {"n": 0}
-    real_parse = converter.parse_call_bodies
+    real_parse = parse_call_bodies
 
     def counting_parse(request_body: str, response_body: str) -> ParsedBody:
         parse_count["n"] += 1

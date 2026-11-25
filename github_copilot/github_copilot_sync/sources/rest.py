@@ -64,7 +64,7 @@ def _retry_after_seconds(retry_state: RetryCallState) -> float:
     return 60.0
 
 
-def _records_from_payload(payload: Any) -> list[dict[str, Any]]:
+def _records_from_payload(payload: object) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
@@ -164,7 +164,7 @@ class RestUsageSource:
     def iter_records(self, cursor: str | None) -> Iterator[tuple[UsageRecord, str]]:
         start_ms = self._initial_cursor_ms(cursor)
         self._warn_if_outside_rest_window(start_ms)
-        params = {
+        params: dict[str, str] | None = {
             "per_page": "25",
             "order": "asc",
             "phrase": _ms_to_phrase(start_ms),
@@ -185,11 +185,10 @@ class RestUsageSource:
                 if record is None:
                     self.stats.non_usage_events += 1
                     continue
-                if self._config.to_date is not None:
-                    if record.timestamp_ms >= int(
-                        self._config.to_date.timestamp() * 1000
-                    ):
-                        return
+                if self._config.to_date is not None and record.timestamp_ms >= int(
+                    self._config.to_date.timestamp() * 1000
+                ):
+                    return
                 latest_ms = max(latest_ms, record.timestamp_ms)
                 new_cursor = str(max(0, latest_ms - self._overlap_ms))
                 yield record, new_cursor

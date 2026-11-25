@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from github_copilot_sync.models import UsageRecord
 from github_copilot_sync.pairing import PairingEngine
 from github_copilot_sync.store import Store
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _record(
@@ -29,7 +33,7 @@ def _record(
     )
 
 
-def test_pairs_request_then_response(tmp_path) -> None:
+def test_pairs_request_then_response(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     engine = PairingEngine(pair_wait_minutes=15, store=store)
     req = _record("request", "rid-1", 1_000, "evt-req")
@@ -43,7 +47,7 @@ def test_pairs_request_then_response(tmp_path) -> None:
     store.close()
 
 
-def test_expire_unpaired_counts_dropped(tmp_path) -> None:
+def test_expire_unpaired_counts_dropped(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     engine = PairingEngine(pair_wait_minutes=10, store=store)
     req = _record("request", "rid-late", 1_000, "evt-req")
@@ -56,7 +60,7 @@ def test_expire_unpaired_counts_dropped(tmp_path) -> None:
     store.close()
 
 
-def test_pairs_response_then_request(tmp_path) -> None:
+def test_pairs_response_then_request(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     engine = PairingEngine(pair_wait_minutes=15, store=store)
     resp = _record("response", "rid-early", 2_000, "evt-resp")
@@ -74,7 +78,7 @@ def test_pairs_response_then_request(tmp_path) -> None:
     store.close()
 
 
-def test_expire_unpaired_counts_orphan_responses(tmp_path) -> None:
+def test_expire_unpaired_counts_orphan_responses(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     engine = PairingEngine(pair_wait_minutes=10, store=store)
 

@@ -14,12 +14,15 @@ HELPER_SYSTEM_PREFIXES: tuple[str, ...] = (
 )
 
 
-def is_background_call(call: Call) -> bool:
+def is_background_call(call: Call) -> bool:  # noqa: ARG001 - customer override hook
     """Return True to drop a paired call before turn grouping."""
     return False
 
 
-def default_is_background_call(call: Call, request_json: dict[str, object]) -> bool:
+def default_is_background_call(
+    call: Call,  # noqa: ARG001 - customer override hook
+    request_json: dict[str, object],
+) -> bool:
     """Default heuristic: no tools, single short user message, helper system text."""
     messages = request_json.get("messages")
     if not isinstance(messages, list):

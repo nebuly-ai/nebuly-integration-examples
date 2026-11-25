@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from bedrock_sync.agentcore.config import AgentCoreConfig
 from bedrock_sync.agentcore.identity import DEFAULT_ACTOR_NAMESPACES
 from bedrock_sync.shared.errors import ConfigError

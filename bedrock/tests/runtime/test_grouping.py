@@ -14,6 +14,7 @@ from bedrock_sync.runtime.grouping import (
 )
 from bedrock_sync.runtime.models import Invocation
 from bedrock_sync.runtime.parser import parse_record
+
 from tests.runtime.records import converse_record, user
 
 if TYPE_CHECKING:

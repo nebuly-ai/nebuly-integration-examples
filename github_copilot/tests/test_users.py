@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
-import pytest
 from github_copilot_sync.store import Store
 from github_copilot_sync.users import ResolvedUser, UserResolver
 
 from tests.test_sources import _config
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    import pytest
 
 
 def test_user_resolver_login_and_email(tmp_path: Path) -> None:

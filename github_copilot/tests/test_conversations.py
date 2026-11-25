@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
-import pytest
 from github_copilot_sync import user_defined
 from github_copilot_sync.conversations import ConversationBuilder
 from github_copilot_sync.models import Call
 from github_copilot_sync.store import Store
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _wrap(payload: object) -> str:
@@ -23,7 +28,7 @@ def _call(
     request_ms: int,
     response_ms: int,
     system: str | None = None,
-    tools: list | None = None,
+    tools: list[dict[str, object]] | None = None,
 ) -> Call:
     messages: list[dict[str, object]] = []
     if system:
@@ -58,7 +63,7 @@ def _call(
     )
 
 
-def test_tool_loop_stays_in_same_turn(tmp_path) -> None:
+def test_tool_loop_stays_in_same_turn(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
@@ -114,7 +119,7 @@ def test_tool_loop_stays_in_same_turn(tmp_path) -> None:
     store.close()
 
 
-def test_new_turn_closes_previous(tmp_path) -> None:
+def test_new_turn_closes_previous(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
@@ -145,7 +150,7 @@ def test_new_turn_closes_previous(tmp_path) -> None:
     store.close()
 
 
-def test_gap_splits_conversation(tmp_path) -> None:
+def test_gap_splits_conversation(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     gap_hours = 8
     builder = ConversationBuilder(
@@ -174,7 +179,7 @@ def test_gap_splits_conversation(tmp_path) -> None:
     store.close()
 
 
-def test_idle_close_on_watermark(tmp_path) -> None:
+def test_idle_close_on_watermark(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
@@ -193,7 +198,7 @@ def test_idle_close_on_watermark(tmp_path) -> None:
     store.close()
 
 
-def test_skips_non_chat_endpoint(tmp_path) -> None:
+def test_skips_non_chat_endpoint(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
@@ -212,7 +217,7 @@ def test_skips_non_chat_endpoint(tmp_path) -> None:
     store.close()
 
 
-def test_skips_helper_call(tmp_path) -> None:
+def test_skips_helper_call(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
@@ -231,7 +236,7 @@ def test_skips_helper_call(tmp_path) -> None:
 
 
 def test_user_defined_hook_can_drop_call(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
@@ -254,13 +259,19 @@ def test_user_defined_hook_can_drop_call(
     store.close()
 
 
-def test_open_turn_survives_builder_restart(tmp_path) -> None:
+def test_open_turn_survives_builder_restart(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     first = _call(
-        github_request_id="r1", user_text="long task", request_ms=1_000, response_ms=1_100
+        github_request_id="r1",
+        user_text="long task",
+        request_ms=1_000,
+        response_ms=1_100,
     )
     second = _call(
-        github_request_id="r2", user_text="long task", request_ms=1_200, response_ms=1_300
+        github_request_id="r2",
+        user_text="long task",
+        request_ms=1_200,
+        response_ms=1_300,
     )
     before = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
@@ -278,13 +289,15 @@ def test_open_turn_survives_builder_restart(tmp_path) -> None:
     store.close()
 
 
-def test_closed_unsent_turn_is_reloaded_until_released(tmp_path) -> None:
+def test_closed_unsent_turn_is_reloaded_until_released(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30
     )
     builder.add_call(
-        _call(github_request_id="r1", user_text="q", request_ms=1_000, response_ms=1_100)
+        _call(
+            github_request_id="r1", user_text="q", request_ms=1_000, response_ms=1_100
+        )
     )
     closed = builder.close_all_open()
 
@@ -302,7 +315,7 @@ def test_closed_unsent_turn_is_reloaded_until_released(tmp_path) -> None:
     store.close()
 
 
-def test_turn_key_is_scoped_to_conversation(tmp_path) -> None:
+def test_turn_key_is_scoped_to_conversation(tmp_path: Path) -> None:
     store = Store(tmp_path / "db.sqlite")
     builder = ConversationBuilder(
         store, conversation_gap_hours=8, interaction_idle_minutes=30

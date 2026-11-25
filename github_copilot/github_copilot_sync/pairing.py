@@ -37,10 +37,11 @@ class PairingEngine:
                 return []
             request = PendingRecord.from_usage_record(record)
         else:
-            request = self._store.take_pending_request(record.github_request_id)
-            if request is None:
+            pending_request = self._store.take_pending_request(record.github_request_id)
+            if pending_request is None:
                 self._store.save_pending_response(record)
                 return []
+            request = pending_request
             response = PendingRecord.from_usage_record(record)
         return [
             Call(

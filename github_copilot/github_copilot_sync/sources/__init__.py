@@ -3,12 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from github_copilot_sync.models import PipelineCounters, UsageRecord
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from github_copilot_sync.config import Config
+    from github_copilot_sync.models import PipelineCounters, UsageRecord
 
 
 @dataclass
@@ -32,9 +31,9 @@ class RecordSource(Protocol):
 
 
 def build_sources(config: Config) -> dict[str, RecordSource]:
-    from .azure_blob import AzureBlobUsageSource
-    from .rest import RestUsageSource
-    from .s3 import S3UsageSource
+    from .azure_blob import AzureBlobUsageSource  # noqa: PLC0415 - avoids a cycle
+    from .rest import RestUsageSource  # noqa: PLC0415 - avoids a cycle
+    from .s3 import S3UsageSource  # noqa: PLC0415 - avoids a cycle
 
     sources: dict[str, RecordSource] = {}
     if "rest" in config.sources:

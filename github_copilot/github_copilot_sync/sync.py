@@ -10,7 +10,6 @@ from httpx import HTTPStatusError
 from .conversations import ConversationBuilder
 from .converter import SkipReason, turn_to_payload
 from .csv_writer import CsvInteractionWriter
-from .models import ClosedTurn, UsageRecord
 from .nebuly_client import NebulyClient, PermanentRejectionError
 from .pairing import PairingEngine
 from .sources import build_sources
@@ -19,6 +18,7 @@ from .users import UserResolver
 
 if TYPE_CHECKING:
     from .config import Config
+    from .models import ClosedTurn, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ def _finalize_open(
     )
 
 
-def run_sync(config: Config) -> SyncSummary:
+def run_sync(config: Config) -> SyncSummary:  # noqa: C901, PLR0912, PLR0915
     _configure_logging(verbose=config.verbose)
     summary = SyncSummary()
     store = Store(config.store_path, dry_run=config.dry_run)
@@ -296,7 +296,7 @@ def run_sync(config: Config) -> SyncSummary:
                     )
                     stopped = True
                     break
-                except HTTPStatusError as exc:
+                except HTTPStatusError:
                     logger.exception("GitHub failure on source %s", name)
                     stopped = True
                     break

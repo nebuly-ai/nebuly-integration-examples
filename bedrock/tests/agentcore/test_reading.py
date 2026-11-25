@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from bedrock_sync.agentcore.reading import (
     datetime_to_epoch_ms,
     plan_reads,

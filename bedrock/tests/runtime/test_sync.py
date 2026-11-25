@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-
 from bedrock_sync.runtime import user_defined
 from bedrock_sync.runtime.config import Config
 from bedrock_sync.runtime.grouping import Triplet
@@ -23,6 +22,7 @@ from bedrock_sync.runtime.sync import (
     sync,
 )
 from bedrock_sync.shared.delivery import AuthenticationError, SafeNebulyClient
+
 from tests.runtime.records import ACCOUNT, converse_record, user
 
 if TYPE_CHECKING:

@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 import pytest
-
 from bedrock_sync.runtime.formats import converse
 from bedrock_sync.runtime.models import (
     BlockKind,
@@ -16,6 +15,7 @@ from bedrock_sync.runtime.models import (
     join_text,
 )
 from bedrock_sync.runtime.parser import normalize_model_id, parse_record
+
 from tests.runtime.records import (
     PROFILE_ARN,
     assistant,

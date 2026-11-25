@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from bedrock_sync.runtime import user_defined
 from bedrock_sync.runtime.converter import (
     END_USER_NAMESPACE,
@@ -14,6 +13,7 @@ from bedrock_sync.runtime.grouping import Interaction, triplet_of
 from bedrock_sync.runtime.models import Invocation
 from bedrock_sync.runtime.parser import parse_record
 from bedrock_sync.shared.keys import pseudonymize
+
 from tests.runtime.records import assistant, converse_record, user
 
 SUB = {"agent_role": "subagent"}

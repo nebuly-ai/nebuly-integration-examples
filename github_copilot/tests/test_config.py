@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from github_copilot_sync.config import Config
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture(autouse=True)

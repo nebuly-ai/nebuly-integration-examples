@@ -47,32 +47,60 @@ def _should_retry(exc: BaseException) -> bool:
     return status in {408, 429} or status >= 500
 
 
+def _valid_email(value: object) -> str | None:
+    if isinstance(value, str) and "@" in value:
+        return value.strip()
+    return None
+
+
+def _email_from_emails(emails: list[Any], *, primary_only: bool) -> str | None:
+    for item in emails:
+        if not isinstance(item, dict):
+            continue
+        if primary_only and not item.get("primary"):
+            continue
+        email = _valid_email(item.get("value"))
+        if email is not None:
+            return email
+    return None
+
+
 def _email_from_node(node: dict[str, Any]) -> str | None:
     scim = node.get("scimIdentity")
     if isinstance(scim, dict):
         emails = scim.get("emails")
         if isinstance(emails, list):
-            for item in emails:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("primary"):
-                    value = item.get("value")
-                    if isinstance(value, str) and "@" in value:
-                        return value.strip()
-            for item in emails:
-                if isinstance(item, dict):
-                    value = item.get("value")
-                    if isinstance(value, str) and "@" in value:
-                        return value.strip()
-        username = scim.get("username")
-        if isinstance(username, str) and "@" in username:
-            return username.strip()
+            email = _email_from_emails(emails, primary_only=True) or _email_from_emails(
+                emails, primary_only=False
+            )
+            if email is not None:
+                return email
+        username = _valid_email(scim.get("username"))
+        if username is not None:
+            return username
     saml = node.get("samlIdentity")
     if isinstance(saml, dict):
-        name_id = saml.get("nameId")
-        if isinstance(name_id, str) and "@" in name_id:
-            return name_id.strip()
+        return _valid_email(saml.get("nameId"))
     return None
+
+
+def _external_identities(payload: object) -> dict[str, Any] | None:
+    enterprise = payload.get("enterprise") if isinstance(payload, dict) else None
+    owner_info = enterprise.get("ownerInfo") if isinstance(enterprise, dict) else None
+    provider = (
+        owner_info.get("samlIdentityProvider") if isinstance(owner_info, dict) else None
+    )
+    identities = (
+        provider.get("externalIdentities") if isinstance(provider, dict) else None
+    )
+    return identities if isinstance(identities, dict) else None
+
+
+def _next_cursor(page: object) -> str | None:
+    if not isinstance(page, dict) or not page.get("hasNextPage"):
+        return None
+    end_cursor = page.get("endCursor")
+    return end_cursor if isinstance(end_cursor, str) else None
 
 
 class ResolvedUser(NamedTuple):
@@ -169,45 +197,29 @@ class UserResolver:
                     exc.response.status_code,
                 )
                 return
-            enterprise = (
-                payload.get("enterprise") if isinstance(payload, dict) else None
-            )
-            owner_info = (
-                enterprise.get("ownerInfo") if isinstance(enterprise, dict) else None
-            )
-            provider = (
-                owner_info.get("samlIdentityProvider")
-                if isinstance(owner_info, dict)
-                else None
-            )
-            identities = (
-                provider.get("externalIdentities")
-                if isinstance(provider, dict)
-                else None
-            )
+            identities = _external_identities(payload)
             if not isinstance(identities, dict):
                 logger.warning(
                     "Enterprise %s returned no externalIdentities; emails unavailable",
                     slug,
                 )
                 return
-            nodes = identities.get("nodes")
-            if isinstance(nodes, list):
-                for node in nodes:
-                    if not isinstance(node, dict):
-                        continue
-                    user = node.get("user")
-                    login = user.get("login") if isinstance(user, dict) else None
-                    email = _email_from_node(node)
-                    if isinstance(login, str) and email:
-                        self._email_by_login.setdefault(login.casefold(), email)
-            page = identities.get("pageInfo")
-            if not isinstance(page, dict) or not page.get("hasNextPage"):
-                return
-            next_cursor = page.get("endCursor")
-            cursor = next_cursor if isinstance(next_cursor, str) else None
+            self._absorb_identity_nodes(identities.get("nodes"))
+            cursor = _next_cursor(identities.get("pageInfo"))
             if cursor is None:
                 return
+
+    def _absorb_identity_nodes(self, nodes: object) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            user = node.get("user")
+            login = user.get("login") if isinstance(user, dict) else None
+            email = _email_from_node(node)
+            if isinstance(login, str) and email:
+                self._email_by_login.setdefault(login.casefold(), email)
 
     @retry(
         retry=retry_if_exception(_should_retry),

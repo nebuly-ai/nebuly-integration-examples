@@ -7,12 +7,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-
 from bedrock_sync.agentcore import user_defined
 from bedrock_sync.agentcore.converter import pseudonymize_actor, snapshot_to_payload
 from bedrock_sync.agentcore.models import ToolCall
 from bedrock_sync.agentcore.records import SourceScope
 from bedrock_sync.shared.model_names import observed_model_name
+
 from tests.agentcore.cases import config, load, snapshot
 
 

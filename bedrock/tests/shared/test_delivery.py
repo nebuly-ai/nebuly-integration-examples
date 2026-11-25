@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-
 from bedrock_sync.shared.delivery import (
     AuthenticationError,
     DeliveryError,
@@ -18,6 +17,7 @@ from bedrock_sync.shared.delivery import (
     SafeNebulyClient,
     deliver,
 )
+
 from tests.shared.stores import OutboxStore
 
 if TYPE_CHECKING:

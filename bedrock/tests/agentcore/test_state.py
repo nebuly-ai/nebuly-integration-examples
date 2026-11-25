@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from bedrock_sync.shared.delivery import Delivery
 
 import pytest
-
 from bedrock_sync.agentcore.records import LogPage, RawLogRecord, SourceScope
 from bedrock_sync.agentcore.state import AgentCoreState, StateError
 

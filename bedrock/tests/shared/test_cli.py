@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
-
 from bedrock_sync.agentcore import __main__ as agentcore_main
 from bedrock_sync.agentcore.sync import SyncReport
 from bedrock_sync.runtime import __main__ as runtime_main

@@ -17,7 +17,9 @@ def _wrap_body(payload: object) -> str:
     return json.dumps(json.dumps(payload))
 
 
-def _chat_request(messages: list[dict[str, object]], tools: list | None = None) -> str:
+def _chat_request(
+    messages: list[dict[str, object]], tools: list[dict[str, object]] | None = None
+) -> str:
     body: dict[str, object] = {"model": "gpt-4o", "messages": messages}
     if tools is not None:
         body["tools"] = tools

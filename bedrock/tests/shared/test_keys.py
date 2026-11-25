@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from bedrock_sync.agentcore.converter import pseudonymize_actor
 from bedrock_sync.shared.keys import canonical_key, digest, pseudonymize
 

@@ -5,18 +5,20 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import boto3
 import httpx
-import pytest
 from botocore.stub import Stubber
 from github_copilot_sync.config import Config
-from github_copilot_sync.sources.decode import decode_ndjson
 from github_copilot_sync.sources.azure_blob import AzureBlobUsageSource
+from github_copilot_sync.sources.decode import decode_ndjson
 from github_copilot_sync.sources.rest import RestUsageSource, parse_link_header
 from github_copilot_sync.sources.s3 import S3UsageSource
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _config(**kwargs: object) -> Config:
@@ -44,7 +46,7 @@ def _config(**kwargs: object) -> Config:
         anonymize=False,
         from_date=None,
         to_date=None,
-        cache_dir=Path("/tmp"),
+        cache_dir=Path(),
         dry_run=True,
         verbose=False,
     )
@@ -90,7 +92,10 @@ def test_rest_link_pagination() -> None:
             200,
             json=[_record_dict("e1")],
             headers={
-                "Link": '<https://api.github.com/enterprises/acme/copilot/usage-records?page=2>; rel="next"'
+                "Link": (
+                    "<https://api.github.com/enterprises/acme/copilot/"
+                    'usage-records?page=2>; rel="next"'
+                )
             },
         )
 
@@ -203,7 +208,7 @@ def _ms(hour: int) -> int:
     return int(datetime(2026, 1, 1, hour, tzinfo=UTC).timestamp() * 1000)
 
 
-def _s3_client() -> Any:
+def _s3_client() -> Any:  # noqa: ANN401 - boto3 client has no precise public type
     return boto3.client(
         "s3",
         region_name="us-east-1",
@@ -329,9 +334,7 @@ def test_s3_to_date_skips_newer_records_without_stopping() -> None:
         _stub_s3_object(stubber, "exports/a.ndjson", _ndjson(newer, older))
         _stub_s3_object(stubber, "exports/b.ndjson", _ndjson(_record_dict("b-old")))
 
-        source = S3UsageSource(
-            _config(sources=("s3",), to_date=to_date), client=client
-        )
+        source = S3UsageSource(_config(sources=("s3",), to_date=to_date), client=client)
         rows = list(source.iter_records(cursor=None))
 
     assert [record.event_id for record, _ in rows] == ["older", "b-old"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from . import user_defined
 from .models import (
@@ -14,10 +15,13 @@ from .models import (
 )
 from .openai_body import (
     BodyFormatError,
+    decode_body_string,
     first_user_message_text,
     turn_key_for_call,
 )
-from .store import Store
+
+if TYPE_CHECKING:
+    from .store import Store
 
 
 @dataclass
@@ -131,11 +135,11 @@ class ConversationBuilder:
         self, conversation_id: str, new_turn_key: str
     ) -> list[ClosedTurn]:
         turn_keys = self._open_by_conversation.get(conversation_id, set())
-        closed: list[ClosedTurn] = []
-        for turn_key in list(turn_keys):
-            if turn_key != new_turn_key and turn_key in self._open_by_turn:
-                closed.append(self._close_turn(turn_key))
-        return closed
+        return [
+            self._close_turn(turn_key)
+            for turn_key in list(turn_keys)
+            if turn_key != new_turn_key and turn_key in self._open_by_turn
+        ]
 
     def _close_turn(self, turn_key: str) -> ClosedTurn:
         open_turn = self._open_by_turn.pop(turn_key)
@@ -189,8 +193,6 @@ class ConversationBuilder:
         return session.conversation_id
 
     def _request_dict(self, call: Call) -> dict[str, object] | None:
-        from .openai_body import decode_body_string
-
         try:
             decoded = decode_body_string(call.request_body)
         except BodyFormatError:

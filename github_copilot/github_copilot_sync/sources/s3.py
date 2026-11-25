@@ -3,9 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import boto3
-from botocore.client import BaseClient
-
-from github_copilot_sync.models import UsageRecord
 
 from . import SourceStats
 from .objects import StoredObject, cursor_for, records_from_object, select_objects
@@ -13,7 +10,10 @@ from .objects import StoredObject, cursor_for, records_from_object, select_objec
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from mypy_boto3_s3 import S3Client
+
     from github_copilot_sync.config import Config
+    from github_copilot_sync.models import UsageRecord
 
 
 class S3UsageSource:
@@ -21,7 +21,7 @@ class S3UsageSource:
         self,
         config: Config,
         *,
-        client: BaseClient | None = None,
+        client: S3Client | None = None,
     ) -> None:
         if not config.s3_bucket:
             raise RuntimeError("S3_BUCKET is required when source s3 is enabled")
@@ -52,7 +52,5 @@ class S3UsageSource:
                 "Body"
             ].read()
             position = cursor_for(obj, self._config)
-            for record in records_from_object(
-                raw, obj.key, self._config, self.stats
-            ):
+            for record in records_from_object(raw, obj.key, self._config, self.stats):
                 yield record, position

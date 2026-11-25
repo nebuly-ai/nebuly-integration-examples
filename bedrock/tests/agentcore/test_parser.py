@@ -6,9 +6,9 @@ import json
 from dataclasses import replace
 
 import pytest
-
 from bedrock_sync.agentcore.parser import parse_record
 from bedrock_sync.agentcore.records import RawLogRecord, SourceScope
+
 from tests.agentcore.cases import load, raw_record
 
 

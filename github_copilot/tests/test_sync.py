@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 import pytest
-from github_copilot_sync.config import Config
-from github_copilot_sync.sources.rest import RestUsageSource
 from github_copilot_sync.__main__ import main
+from github_copilot_sync.sources.rest import RestUsageSource
 from github_copilot_sync.sync import SyncSummary, run_sync
 
 from tests.test_sources import _config
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from pathlib import Path
+
+    from github_copilot_sync.config import Config
 
 
 def _wrap(payload: object) -> str:
@@ -141,7 +144,7 @@ def _patch_sync_handler(
 
 
 @pytest.fixture(autouse=True)
-def _reset_recording() -> None:
+def _reset_recording() -> Iterator[None]:
     RecordingNebuly.all_sent.clear()
     yield
     RecordingNebuly.all_sent.clear()
@@ -262,7 +265,9 @@ def _tool_loop_second_call(ts: int) -> list[dict[str, Any]]:
             ],
         }
     )
-    response = _completion({"role": "assistant", "content": "final answer"}, "stop", 5, 4)
+    response = _completion(
+        {"role": "assistant", "content": "final answer"}, "stop", 5, 4
+    )
     return [
         _record("request", "loop-2", "loop-2-req", request, ts),
         _record("response", "loop-2", "loop-2-resp", response, ts + 100),
@@ -318,7 +323,7 @@ def test_failure_mid_source_then_rerun_emits_turn(
     page_two = _later_unrelated_pair(_TURN_START_MS + 3_600_000)
     failing = {"on": True}
     next_link = (
-        '<https://api.github.com/enterprises/acme/copilot/usage-records?page=2>;'
+        "<https://api.github.com/enterprises/acme/copilot/usage-records?page=2>;"
         ' rel="next"'
     )
 
@@ -408,8 +413,14 @@ def test_same_first_prompt_after_gap_split_is_emitted_twice(
     run_sync(_sync_config(tmp_path, to_date=_END))
 
     sent = RecordingNebuly.all_sent
-    assert [p["interaction"]["output"] for p in sent] == ["first answer", "second answer"]
-    assert sent[0]["interaction"]["conversation_id"] != sent[1]["interaction"]["conversation_id"]
+    assert [p["interaction"]["output"] for p in sent] == [
+        "first answer",
+        "second answer",
+    ]
+    assert (
+        sent[0]["interaction"]["conversation_id"]
+        != sent[1]["interaction"]["conversation_id"]
+    )
 
 
 def test_failed_run_is_reported_in_summary(

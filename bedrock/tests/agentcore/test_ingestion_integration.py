@@ -9,7 +9,6 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 import pytest
-
 from bedrock_sync.agentcore.assembler import assemble
 from bedrock_sync.agentcore.cloudwatch_client import CloudWatchLogReader
 from bedrock_sync.agentcore.config import AgentCoreConfig
@@ -17,6 +16,7 @@ from bedrock_sync.agentcore.parser import parse_record
 from bedrock_sync.agentcore.reading import plan_trace_recovery
 from bedrock_sync.agentcore.records import SourceScope
 from bedrock_sync.agentcore.state import AgentCoreState, StateError
+
 from tests.agentcore.cases import REAL_CASES, Logs, load, records_of
 
 if TYPE_CHECKING:
