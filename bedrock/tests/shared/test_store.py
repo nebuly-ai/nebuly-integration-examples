@@ -9,9 +9,9 @@ import stat
 from pathlib import Path
 
 import pytest
-
 from bedrock_sync.shared.errors import StateError
 from bedrock_sync.shared.outbox import GIVE_UP_SECONDS, OutboxError
+
 from tests.shared.stores import PAYLOAD, OutboxStore
 
 

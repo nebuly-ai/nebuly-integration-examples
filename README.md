@@ -10,6 +10,7 @@ Integration examples for syncing AI/LLM interactions to and from the [Nebuly](ht
 | [openai_compliance/](openai_compliance/) | Syncs ChatGPT Compliance Logs (`CONVERSATION_MESSAGE`, `APP_LOG`, `CODEX_LOG`) to Nebuly. See its [README](openai_compliance/README.md) for setup and configuration. |
 | [microsoft_entra/](microsoft_entra/) | Exports Microsoft Entra users to the JSON file Claude Compliance uses for directory tags. See its [README](microsoft_entra/README.md). |
 | [microsoft_copilot/](microsoft_copilot/) | Syncs Microsoft Copilot Enterprise interactions from the Microsoft Graph API to Nebuly. See its [README](microsoft_copilot/README.md) for setup and configuration. |
+| [github_copilot/](github_copilot/) | Syncs GitHub Copilot enterprise usage records (REST, S3, or Azure Blob) to Nebuly. See its [README](github_copilot/README.md) for setup and configuration. |
 | [gemini_enterprise/](gemini_enterprise/) | Syncs Gemini Enterprise assistant sessions to Nebuly. See its [README](gemini_enterprise/README.md) for setup and configuration. |
 | [bedrock/](bedrock/) | Two connectors for Amazon Bedrock: model invocation logs from S3 (`bedrock-runtime`, grouped by the ids your application sends) and AgentCore observability from CloudWatch. See its [README](bedrock/README.md) for setup and configuration. |
 | [langfuse/](langfuse/) | Pulls Langfuse traces via the public API for a date range and POSTs them to Nebuly. See its [README](langfuse/README.md) for setup and configuration. |

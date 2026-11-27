@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-
 from bedrock_sync.shared.time_utils import (
     datetime_to_timestamp_str,
     timestamp_str_to_datetime,

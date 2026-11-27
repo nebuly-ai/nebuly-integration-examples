@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from bedrock_sync.shared.model_names import observed_model_name
 
 

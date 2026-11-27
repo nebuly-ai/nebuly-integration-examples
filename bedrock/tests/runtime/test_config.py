@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from bedrock_sync.runtime.config import Config
 from bedrock_sync.shared.errors import ConfigError
 

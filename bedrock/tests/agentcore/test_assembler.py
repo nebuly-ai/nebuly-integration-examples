@@ -9,10 +9,10 @@ from dataclasses import asdict, replace
 from typing import Any
 
 import pytest
-
 from bedrock_sync.agentcore.assembler import assemble
 from bedrock_sync.agentcore.models import Diagnostic, Span
 from bedrock_sync.agentcore.records import SourceScope
+
 from tests.agentcore.cases import load, parse_case
 
 

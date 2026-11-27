@@ -8,9 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 import boto3
 import pytest
-from botocore.exceptions import ClientError
-from botocore.stub import Stubber
-
 from bedrock_sync.runtime.grouping import CallRef
 from bedrock_sync.runtime.s3_client import (
     LocalObjectStore,
@@ -21,6 +18,8 @@ from bedrock_sync.runtime.s3_client import (
     _is_missing,
     parse_delivered_at,
 )
+from botocore.exceptions import ClientError
+from botocore.stub import Stubber
 
 if TYPE_CHECKING:
     from pathlib import Path

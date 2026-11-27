@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
-
 from bedrock_sync.runtime.grouping import CallRef
 from bedrock_sync.runtime.state import (
     QUEUED,

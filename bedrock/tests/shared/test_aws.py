@@ -7,10 +7,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import boto3
+from bedrock_sync.shared import aws
 from botocore.config import Config as BotoConfig
 from botocore.stub import Stubber
-
-from bedrock_sync.shared import aws
 
 if TYPE_CHECKING:
     import pytest

@@ -11,12 +11,12 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-
 from bedrock_sync.agentcore import sync, user_defined
 from bedrock_sync.agentcore.config import AgentCoreConfig
 from bedrock_sync.agentcore.records import SourceScope
 from bedrock_sync.agentcore.state import AgentCoreState
 from bedrock_sync.shared.errors import ConfigError
+
 from tests.agentcore.cases import REAL_CASES, Logs, load, snapshot
 
 if TYPE_CHECKING:
